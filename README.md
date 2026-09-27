@@ -14,6 +14,29 @@
 - **Ledger** — double-entry, inbox/outbox, Kafka events, on-chain reconciliation.
 - **RAG + evals** — hybrid retrieval over public KAP disclosures and news, with an eval harness that reports quality *and* USD per task.
 
+## Quickstart (local)
+
+Prerequisites are in [docs/SETUP.md](docs/SETUP.md): JDK 25, Node 22 + pnpm, Docker.
+
+```bash
+make help                      # list targets
+make up                        # build images, start infra + services, wait for health
+make test && make lint         # Gradle check (incl. Testcontainers) + web tests/lint
+make web-dev                   # Vite on http://localhost:5173, proxies /api and /otlp
+```
+
+Open http://localhost:5173, press **Check again** on the System check card, then verify the
+trace (browser → orchestrator → Postgres) in Jaeger:
+
+```bash
+make verify-trace TRACE_ID=<traceId shown on the card>   # or open the card's Jaeger link
+make verify-trace                                       # no browser: orchestrator → Postgres only
+```
+
+Jaeger UI: http://localhost:16686. If port 6379 is taken on your host (e.g. a native Redis on
+Windows), run `export VALKEY_HOST_PORT=16379` before `make up`. `make down` stops everything;
+`make clean` also drops volumes.
+
 ## Stack
 
 Java 25 · Spring Boot 4.1 · Spring AI 2.0 · PostgreSQL + pgvector · Kafka (Redpanda) · Valkey · React + Vite · OpenTelemetry · Terraform (AWS ECS Fargate)
