@@ -35,8 +35,14 @@ bad_ports=$(jq -r '
   | to_entries[]
   | .key as $svc
   | (.value.ports // [])[]
-  | select(.host_ip != "127.0.0.1")
-  | "\($svc): port \(.published // "?")->\(.target) has host_ip \"\(.host_ip // "<unset>")\" (must be 127.0.0.1)"
+  # Without interpolation a mapping that contains a variable stays a short-syntax string.
+  | if type == "string" then
+      select(startswith("127.0.0.1:") | not)
+      | "\($svc): port \"\(.)\" is not bound to 127.0.0.1"
+    else
+      select(.host_ip != "127.0.0.1")
+      | "\($svc): port \(.published // "?")->\(.target) has host_ip \"\(.host_ip // "<unset>")\" (must be 127.0.0.1)"
+    end
 ' <<<"${config_json}")
 if [[ -n "${bad_ports}" ]]; then
   fail_check "port(s) not bound to 127.0.0.1:"
