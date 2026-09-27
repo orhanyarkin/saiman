@@ -9,7 +9,8 @@ import org.jspecify.annotations.Nullable;
  *
  * @param service the {@code spring.application.name} of the responding service
  * @param dbTime the database server time, read through {@code JdbcClient} (produces a JDBC span)
- * @param traceId the current trace id, or {@code null} if the request was not sampled
+ * @param traceId the current trace id, or {@code null} when no span is in scope (tracing disabled);
+ *     an unsampled request still has a trace id
  */
 public record PingResponse(
         String service, Instant dbTime, @Nullable String traceId) {}
