@@ -6,3 +6,18 @@ spring:
   threads:
     virtual:
       enabled: true
+
+saiman:
+  evals:
+    # Tests set this to false so loading a context never runs (and, from M6, pays for) an eval.
+    run-on-startup: true
+
+management:
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    sampling:
+      probability: 1.0
+# evals is a CLI and not a compose service; export is enabled by the environment that runs it.

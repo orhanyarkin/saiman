@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
 import org.springframework.context.annotation.Bean;
 
 /**
@@ -21,7 +22,9 @@ public class EvalsApplication {
         SpringApplication.run(EvalsApplication.class, args);
     }
 
+    // Gated so that loading the context in a test never runs an eval (which will cost money from M6).
     @Bean
+    @ConditionalOnBooleanProperty(name = "saiman.evals.run-on-startup", matchIfMissing = true)
     CommandLineRunner logArrival() {
         return args -> log.info("Eval harness arrives in M6 — nothing to run yet.");
     }
