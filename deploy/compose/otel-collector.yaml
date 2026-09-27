@@ -1,0 +1,60 @@
+# OpenTelemetry Collector (core distribution, pinned to 0.161.0).
+# Locally: traces -> Jaeger v2 (OTLP), metrics -> debug exporter (log lines only).
+# During AWS demo sessions the same pipeline gains an otlp_http exporter to Grafana
+# Cloud (see ADR-0004, ADR-0006); services and the browser SDK do not change. The
+# Grafana Cloud API key is a collector-only secret: it goes on this container via
+# compose `secrets:` / an env var scoped to otel-collector, never on the app
+# containers (see docker-compose.yml's app-common comment on M1 per-service secrets).
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        # cors:
+        #   allowed_origins:
+        #     - "https://demo.saiman.example"   # cross-origin browser tracing, deferred to M5/M6 (ADR-0006)
+        #   allowed_headers:
+        #     - traceparent
+        #     - tracestate
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 150
+    spike_limit_mib: 30
+  batch: {}
+
+exporters:
+  otlp_grpc/jaeger: # NOTE: the "otlp" exporter alias is deprecated in 0.161.0; use otlp_grpc.
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+  debug:
+    verbosity: basic
+  # otlp_http/grafana-cloud:                              # M6: enable during AWS demo sessions (ADR-0004)
+  #   endpoint: https://otlp-gateway-<region>.grafana.net/otlp
+  #   auth:
+  #     authenticator: basicauth/grafana-cloud
+
+# extensions:
+#   basicauth/grafana-cloud:                                # M6: paired with otlp_http/grafana-cloud above
+#     client_auth:
+#       username: <grafana-cloud-instance-id>
+#       password: ${env:GRAFANA_CLOUD_API_KEY}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_grpc/jaeger]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+  telemetry:
+    logs:
+      level: info

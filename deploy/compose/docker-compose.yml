@@ -1,0 +1,163 @@
+# Local stack for Saiman (ADR-0001, ADR-0004, ADR-0006, ADR-0007).
+# Infra containers (postgres, redpanda, valkey, otel-collector, jaeger) run by default.
+# App containers (orchestrator, seller-api, ledger, ingest) run under `--profile apps`;
+# they are built with Spring Boot Buildpacks (`./gradlew bootBuildImage`), not Dockerfiles.
+# All host ports are bound to 127.0.0.1 only. `evals` is a CLI, not a compose service.
+
+name: saiman
+
+x-app-common: &app-common
+  profiles: ["apps"]
+  mem_limit: 768m
+  pull_policy: never
+  restart: on-failure
+  # No per-service secrets in M0 (no M0 service calls an LLM or x402 provider), so app
+  # containers get no env_file: giving every container the full .env would hand every
+  # container the LLM API keys and the x402 buyer wallet key for no reason. Per-service
+  # secrets (compose `secrets:` / Spring config tree) arrive in M1 when a service
+  # actually needs one.
+  environment: &app-common-env
+    SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/saiman
+    SPRING_DATASOURCE_USERNAME: saiman
+    SPRING_DATASOURCE_PASSWORD: saiman
+    SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    SPRING_DATA_REDIS_URL: redis://valkey:6379
+    # Boot 4.1's spring-boot-starter-opentelemetry reads the standard OTEL_* env vars
+    # and appends /v1/traces, /v1/metrics, /v1/logs itself (confirmed by T0).
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+    # Boot 4.1 services default management.otlp.metrics.export.enabled=false; turn it
+    # on for the local stack so the collector's debug exporter has something to show.
+    MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: "true"
+    # Paketo tiny run images size the JVM's thread pool from container memory by
+    # default; cap it explicitly to keep four ~768 MB app containers predictable.
+    BPL_JVM_THREAD_COUNT: "50"
+  depends_on:
+    otel-collector:
+      condition: service_started
+  # Paketo "tiny" buildpack images have no shell, so compose cannot exec a healthcheck
+  # here; the host polls /actuator/health instead (see scripts/wait-for-health.sh, ADR-0007).
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg17-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: saiman
+      POSTGRES_USER: saiman
+      POSTGRES_PASSWORD: saiman
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U saiman -d saiman"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  redpanda:
+    image: redpandadata/redpanda:v26.1.18
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:9092
+    ports:
+      # Only the external listener (container port 19092) is published, as
+      # 127.0.0.1:9092, so both host tools and the container's own advertised
+      # address agree on "localhost:9092". The internal listener (container port
+      # 9092, advertised as redpanda:9092) is reachable only from other containers
+      # on the compose network.
+      - "127.0.0.1:9092:19092"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:\\s+true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  valkey:
+    image: valkey/valkey:9.0.6-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.161.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    depends_on:
+      jaeger:
+        condition: service_started
+    # No healthcheck: the core distribution image has no shell to exec a probe command
+    # (ADR-0007 R8 applies to the collector too). `make infra-up` waits for it as "running".
+
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:16686:16686"
+    # OTLP receiver ports (4317/4318) are enabled by default but intentionally not
+    # published to the host: only otel-collector talks to Jaeger, over the compose
+    # network, avoiding a port clash with the collector's own host-mapped 4317/4318.
+    # No healthcheck: distroless image, no shell (see otel-collector above).
+
+  orchestrator:
+    <<: *app-common
+    image: ghcr.io/orhanyarkin/saiman-orchestrator:dev
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      otel-collector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  seller-api:
+    <<: *app-common
+    image: ghcr.io/orhanyarkin/saiman-seller-api:dev
+    ports:
+      - "127.0.0.1:8081:8081"
+
+  ledger:
+    <<: *app-common
+    image: ghcr.io/orhanyarkin/saiman-ledger:dev
+    ports:
+      - "127.0.0.1:8082:8082"
+
+  ingest:
+    <<: *app-common
+    image: ghcr.io/orhanyarkin/saiman-ingest:dev
+    ports:
+      - "127.0.0.1:8083:8083"
+
+volumes:
+  postgres_data:
+  redpanda_data:
+  valkey_data:
