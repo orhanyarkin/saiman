@@ -1,7 +1,7 @@
 # Progress
 
 ## Current milestone
-M0 — Skeleton: implemented on branch `m0-skeleton`. Remaining acceptance items: CI green (needs the branch pushed and a PR opened) and the manual browser click for the web → orchestrator → Postgres trace.
+M0 — Skeleton: **done** (branch `m0-skeleton`, PR to main awaiting the human's review and merge). Next: M1 — x402 Spring Boot starter + first paid endpoint.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
@@ -22,17 +22,17 @@ M0 — Skeleton: implemented on branch `m0-skeleton`. Remaining acceptance items
 - Fresh clone of `m0-skeleton`: `make test && make lint` green; `./gradlew check --no-build-cache --rerun-tasks` green — 46 JVM tests (7 classes) + 7 web tests.
 - `make up`: all four services UP in ~11 s after start (run with `VALKEY_HOST_PORT=16380`, see open questions).
 - `make verify-trace` (no browser): orchestrator + JDBC spans found in Jaeger for a generated `traceparent` — this also proves the `OTEL_EXPORTER_OTLP_ENDPOINT` mapping end to end.
-- Through the Vite dev server: `/api` and `/otlp` proxies work; a web-shaped span posted via `/otlp` plus a proxied ping produced a trace that `make verify-trace TRACE_ID=…` accepted with `saiman-web`, `orchestrator` and JDBC spans. The real browser click has not been done yet (human step).
+- Through the Vite dev server: `/api` and `/otlp` proxies work, and `make verify-trace TRACE_ID=…` accepts a trace with `saiman-web`, `orchestrator` and JDBC spans.
+- Browser check (human, 2026-09-28): a real click on the System check card produced a trace that `make verify-trace TRACE_ID=<id>` accepted (web → orchestrator → Postgres).
 - `bootBuildImage` succeeds for all five services on amd64 with Java 25 (Liberica 25.0.4). arm64 is built by the CI `images` job only.
 - `check-compose-policy.sh` passes on the real file and fails on a deliberately bad one.
 - Every task went through test-runner and reviewer; T1 and T3 also through security-auditor.
 
 **What's next**
-- Human: push `m0-skeleton`, open a PR to main, confirm CI green (the arm64 image job runs on push to main only, so it proves itself after merge).
-- Human: `make up && make web-dev`, click **Check again**, run `make verify-trace TRACE_ID=<id>`.
-- M1: x402 starter + first paid endpoint (architect design pass first).
+- Human reviews and merges the M0 PR. The arm64 image job runs on push to main only, so it proves itself after the merge.
+- M1: x402 starter + first paid endpoint, starting with an architect design pass.
 
-**Open questions / carried risks**
+**M1 open items / carried risks**
 - A native `redis-server` on the Windows host holds 127.0.0.1:6379, so Valkey cannot publish its default port. Either stop that service or `export VALKEY_HOST_PORT=16379`.
 - Before M1 (security-auditor): the core collector cannot redact attributes; decide between source-side redaction (Micrometer `ObservationFilter`) and a collector build with the `redaction` processor, so `X-PAYMENT` payloads never reach Jaeger or Grafana Cloud. Record it in ADR-0006.
 - Before M1: per-service secrets (compose `secrets:` / configtree), and only the orchestrator container gets the buyer key.
