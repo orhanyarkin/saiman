@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: orchestrator
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/saiman}
+    username: ${SPRING_DATASOURCE_USERNAME:saiman}
+    password: ${SPRING_DATASOURCE_PASSWORD:saiman}
+    hikari:
+      schema: orchestrator
+  flyway:
+    schemas: orchestrator
+    default-schema: orchestrator
+    create-schemas: true
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  tracing:
+    sampling:
+      probability: 1.0
+# No OTLP endpoint here on purpose: unset means no exporter, so tests and `./gradlew check`
+# stay quiet. The runtime supplies MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT via env.
