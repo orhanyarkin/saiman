@@ -24,7 +24,7 @@ public class EvalsApplication {
 
     // Gated so that loading the context in a test never runs an eval (which will cost money from M6).
     @Bean
-    @ConditionalOnBooleanProperty(name = "saiman.evals.run-on-startup", matchIfMissing = true)
+    @ConditionalOnBooleanProperty("saiman.evals.run-on-startup")
     CommandLineRunner logArrival() {
         return args -> log.info("Eval harness arrives in M6 — nothing to run yet.");
     }

@@ -1,0 +1,9 @@
+# Test-wide defaults, layered over src/main/resources/application.yaml.
+management:
+  opentelemetry:
+    # Keep a developer's exported OTEL_* variables from sending test telemetry to a collector.
+    map-environment-variables: false
+saiman:
+  evals:
+    # Loading a context in a test must never run (and, from M6, pay for) an eval.
+    run-on-startup: false

@@ -34,10 +34,7 @@ import org.springframework.test.web.servlet.client.RestTestClient;
  * continued by the orchestrator's HTTP server span, and the JDBC {@code query} span for
  * {@code select now()} sits under that server span in the same trace.
  */
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        // Keep a developer's exported OTEL_* variables from sending test spans to a real collector.
-        properties = "management.opentelemetry.map-environment-variables=false")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTracing
 @AutoConfigureRestTestClient
 @Import(TestcontainersConfiguration.class)

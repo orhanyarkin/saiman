@@ -18,7 +18,7 @@ import org.springframework.context.ConfigurableApplicationContext;
  * in-context, and the app is started through the real {@code SpringApplication} path to prove it
  * runs without a web server.
  */
-@SpringBootTest(properties = "saiman.evals.run-on-startup=false")
+@SpringBootTest
 class EvalsApplicationTests {
 
     @Autowired
@@ -33,14 +33,14 @@ class EvalsApplicationTests {
     }
 
     @Test
-    void runnerIsOffWhenDisabled() {
+    void runnerIsOffInTests() {
         assertThat(context.getBeansOfType(CommandLineRunner.class)).isEmpty();
     }
 
     @Test
     void startsAsNonWebApplication() {
         SpringApplication application = new SpringApplication(EvalsApplication.class);
-        try (ConfigurableApplicationContext started = application.run("--saiman.evals.run-on-startup=false")) {
+        try (ConfigurableApplicationContext started = application.run()) {
             assertThat(application.getWebApplicationType()).isEqualTo(WebApplicationType.NONE);
             assertThat(started.getEnvironment().getProperty("local.server.port"))
                     .isNull();

@@ -9,7 +9,7 @@ spring:
 
 saiman:
   evals:
-    # Tests set this to false so loading a context never runs (and, from M6, pays for) an eval.
+    # src/test/resources/config/application.yaml turns this off for every test.
     run-on-startup: true
 
 management:

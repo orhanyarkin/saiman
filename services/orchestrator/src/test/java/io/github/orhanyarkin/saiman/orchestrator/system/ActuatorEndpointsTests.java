@@ -1,14 +1,19 @@
 package io.github.orhanyarkin.saiman.orchestrator.system;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import io.github.orhanyarkin.saiman.orchestrator.TestcontainersConfiguration;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.test.web.servlet.client.RestTestClient;
 
 /**
@@ -23,6 +28,9 @@ class ActuatorEndpointsTests {
 
     @Autowired
     private RestTestClient client;
+
+    @Value("${spring.application.name}")
+    private String serviceName;
 
     @Test
     void healthIsUpWithoutComponentDetails() {
@@ -60,15 +68,14 @@ class ActuatorEndpointsTests {
                 .exchange()
                 .expectStatus()
                 .isOk()
+                .expectBody(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .value(info -> assertThat(info).containsOnlyKeys("build"));
+        client.get()
+                .uri("/actuator/info")
+                .exchange()
                 .expectBody()
                 .jsonPath("$.build.name")
-                .isEqualTo("orchestrator")
-                .jsonPath("$.env")
-                .doesNotExist()
-                .jsonPath("$.java")
-                .doesNotExist()
-                .jsonPath("$.os")
-                .doesNotExist();
+                .isEqualTo(serviceName);
     }
 
     @ParameterizedTest
