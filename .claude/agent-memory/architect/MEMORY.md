@@ -1,0 +1,3 @@
+- [Toolchain gotchas](toolchain-gotchas.md) — palantir>=2.71 on JDK25, TS 5.9 pin, jqwik excluded, no Spring AI starters early
+- [Boot 4 observability](boot4-observability.md) — OTLP property names, @AutoConfigureTracing, datasource-micrometer for JDBC spans
+- [Build conventions](build-conventions.md) — build-logic included build, platform() BOM, bootBuildImage, native arm64 runners
