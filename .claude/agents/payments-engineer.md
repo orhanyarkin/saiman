@@ -24,6 +24,6 @@ Follow `CLAUDE.md`, including the "Spring notes" section in every report.
 
 **ledger**: `accounts`, `journal_entries`, `postings` (postings per entry sum to zero per asset), append-only; corrections are reversing entries. Consumes `payments.*.v1` idempotently (inbox table in the same transaction), emits `ledger.entry-posted.v1`. Scheduled reconciliation reads Base Sepolia transfer logs via JSON-RPC (web3j), matches tx hash + amount, moves mismatches to a `suspense` account and emits `ledger.reconciliation-mismatch.v1`. Optimistic locking on balances (`@Version`) with bounded retry.
 
-**Tests you must write**: replayed payment payload; amount/asset/network/payTo mismatch; facilitator timeout; budget denial before signing (client); balanced-postings property test (jqwik); duplicate and out-of-order events; reconciliation match/mismatch/missing tx.
+**Tests you must write**: replayed payment payload; amount/asset/network/payTo mismatch; facilitator timeout; budget denial before signing (client); balanced-postings property test (approach set by the M4 ADR; do not use jqwik); duplicate and out-of-order events; reconciliation match/mismatch/missing tx.
 
 Workflow: read relevant ADRs and code → tests first → implement → `./gradlew :<module>:check` → report changes, verification, Spring notes and open issues. Save SDK quirks and spec gotchas to your memory.

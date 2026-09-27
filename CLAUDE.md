@@ -52,7 +52,7 @@ docs/                             ARCHITECTURE, PLAN, PROGRESS, SETUP, KICKOFF, 
 - Messaging: Spring Kafka against Redpanda. Topics `<domain>.<event>.v1`; schemas in `docs/events/`. Spring Modulith's event publication registry may back the outbox (ADR if used).
 - Resilience: Resilience4j (retry with jitter, circuit breaker, timeout) on every outbound client.
 - Observability: Micrometer + OpenTelemetry (traces + metrics) on every endpoint, consumer and LLM/payment call; LLM and payment paths record tokens and USD.
-- Tests: JUnit Jupiter, AssertJ, Testcontainers (Postgres, Redpanda, Valkey), `@SpringBootTest` slices, jqwik for property tests. Spotless (palantir-java-format) + Error Prone.
+- Tests: JUnit Jupiter, AssertJ, Testcontainers (Postgres, Redpanda, Valkey), `@SpringBootTest` slices; the property-testing approach is decided by an ADR at the start of M4 (not jqwik: its maintainers ask AI agents not to use it). Spotless (palantir-java-format) + Error Prone.
 - Web app: strict TypeScript, TanStack Query, typed client from OpenAPI (`openapi-typescript`), Vitest + Playwright.
 - Commits: Conventional Commits, one logical change each.
 
