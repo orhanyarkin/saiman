@@ -1,0 +1,5 @@
+# Test-wide defaults, layered over src/main/resources/application.yaml.
+management:
+  opentelemetry:
+    # Keep a developer's exported OTEL_* variables from sending test telemetry to a collector.
+    map-environment-variables: false

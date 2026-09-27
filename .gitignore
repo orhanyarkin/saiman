@@ -27,7 +27,6 @@ web/dist/
 *.tfstate
 *.tfstate.*
 *.tfvars
-!*.tfvars.example
 .terraform/
 
 # Keystores
@@ -40,4 +39,5 @@ web/dist/
 .project
 .classpath
 .settings/
-bin/
+services/*/bin/
+libs/*/bin/
