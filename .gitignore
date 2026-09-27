@@ -5,3 +5,18 @@ secrets/
 *.key
 .claude/settings.local.json
 .claude/agent-memory-local/
+
+# Build outputs
+build/
+.gradle/
+.kotlin/
+node_modules/
+web/dist/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Agent worktrees (Claude Code)
+.claude/worktrees/
