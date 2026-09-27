@@ -4,4 +4,6 @@ plugins {
 
 dependencies {
     implementation(libs.spring.boot.starter.webmvc)
+
+    testImplementation(libs.spring.boot.starter.webmvc.test)
 }
