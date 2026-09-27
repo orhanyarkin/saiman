@@ -29,7 +29,7 @@ that `saiman.java-conventions` already wires in.
 **Why**: saved after burning a cycle on `ClassNotFoundException` for `RestTemplateBuilder` in a
 `@SpringBootTest(RANDOM_PORT)` health-check test in `services/seller-api` and `services/ledger`
 during M0 T3. Re-check if a future Boot 4.1.x patch changes `spring-boot-resttestclient`'s
-dependency graph — the module split is very fresh (2026-08-20 GA) and may still be shaking out.
+dependency graph. Superseded: see boot4-test-standard.md (RestTestClient).
 
 **How to apply**: for any new `@SpringBootTest(webEnvironment = RANDOM_PORT)` test in this repo
 that needs to call the running server, default to `@LocalServerPort` + `RestClient`, not

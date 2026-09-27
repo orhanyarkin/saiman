@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-Spring Boot 4 (GA 2026-08-20, this repo pins 4.1.1) split most of the old monolithic starters
+Spring Boot 4 (4.0 GA Nov 2025; this repo pins 4.1.1) split most of the old monolithic starters
 (`spring-boot-starter-web`, `spring-boot-starter-test`, etc.) into many focused modules:
 `spring-boot-starter-webmvc` (not `-web`), `spring-boot-webmvc`, `spring-boot-webmvc-test`,
 `spring-boot-resttestclient`, `spring-boot-restclient`, `spring-boot-http-converter`, and more.
