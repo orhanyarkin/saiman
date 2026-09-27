@@ -2,6 +2,7 @@
 name: architect
 description: Read-only design pass before a milestone or a non-trivial feature. Produces a task breakdown with file ownership, interfaces and risks. Use proactively at the start of every milestone.
 tools: Read, Grep, Glob, WebFetch, WebSearch
+disallowedTools: Write, Edit, NotebookEdit
 model: opus
 effort: high
 memory: project

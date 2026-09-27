@@ -1,12 +1,12 @@
 # ADR-0003: Own model router with tiers, fallbacks and data-classification policy
 
-Status: Accepted
+Status: Accepted (revised 2026-09-27: `IModelRouter` renamed to `ModelRouter` to follow Java naming; no change in substance)
 
 ## Context
 Prices differ by 100× across models; cheap open-weight models (DeepSeek, Qwen, GLM) are attractive but their first-party APIs process data in China, which matters for fintech data-residency expectations (KVKK). We also want provider independence and per-call cost telemetry.
 
 ## Decision
-All LLM calls go through `IModelRouter` in the orchestrator:
+All LLM calls go through `ModelRouter` in the orchestrator:
 - **Tiers**: tier0 (routing/extraction), tier1 (tool-use agent), tier1-premium (hard runs, eval comparison), tier2 (synthesis/judge, batch where possible), embed. Defaults and the benchmark evidence behind them are in `docs/ARCHITECTURE.md`; small models that score poorly on agentic finance tasks (e.g. Claude Haiku 4.5) are excluded.
 - **Judge independence**: the eval judge must come from a different model family than the generator under test.
 - **Adapters**: OpenAI-compatible (covers OpenAI, OpenRouter and most open-weight hosts), Anthropic, Gemini.
