@@ -10,16 +10,28 @@ server:
 
 management:
   endpoints:
+    access:
+      default: none
     web:
       exposure:
         include: health,info
   endpoint:
     health:
+      access: read-only
       probes:
         enabled: true
+      show-details: never
+      show-components: never
+    info:
+      access: read-only
+  otlp:
+    metrics:
+      export:
+        enabled: false
   tracing:
     sampling:
       probability: 1.0
-# The OTLP exporter endpoint is intentionally not set here: unset means no exporter, which
-# keeps tests and a plain `bootRun` quiet. Compose supplies it via
-# MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT.
+# Actuator: only health and info exist at all (access), not just over HTTP (exposure).
+# Telemetry export is off unless the runtime turns it on, so tests and a plain `bootRun` never
+# reach for a collector. Compose sets OTEL_EXPORTER_OTLP_ENDPOINT (Boot 4.1 maps it to the
+# trace exporter) and MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED=true (ADR-0006).
