@@ -1,0 +1,2 @@
+- [Boot 4.1 modularization gotchas](boot41-modularization-gotchas.md) — HealthEndpoint/TestRestTemplate/RestTemplateBuilder moved packages; use @LocalServerPort + JDK HttpClient for health tests
+- [Repo conventions for ai-engineer](repo-conventions.md) — never hardcode a coordinate to dodge a missing catalog entry; stray Eclipse metadata files appear on any gradle run, don't `git add -A`
