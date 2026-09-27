@@ -1,0 +1,7 @@
+.env
+.env.local
+secrets/
+*.pem
+*.key
+.claude/settings.local.json
+.claude/agent-memory-local/
