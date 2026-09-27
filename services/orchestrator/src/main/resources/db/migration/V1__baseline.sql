@@ -1,0 +1,5 @@
+-- V1: baseline migration.
+--
+-- The "orchestrator" schema itself is created by Flyway (spring.flyway.create-schemas=true),
+-- not by this script. No tables exist yet in M0; each feature adds its own migration under
+-- this schema as it lands.
