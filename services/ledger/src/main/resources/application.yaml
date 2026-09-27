@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: ledger
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  tracing:
+    sampling:
+      probability: 1.0
+# The OTLP exporter endpoint is intentionally not set here: unset means no exporter, which
+# keeps tests and a plain `bootRun` quiet. Compose supplies it via
+# MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT.
