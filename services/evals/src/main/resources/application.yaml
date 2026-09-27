@@ -1,0 +1,8 @@
+spring:
+  application:
+    name: evals
+  main:
+    web-application-type: none
+  threads:
+    virtual:
+      enabled: true
