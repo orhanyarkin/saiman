@@ -18,7 +18,8 @@ dependencies {
 }
 
 // One architecture per invocation (ADR-0007): `./gradlew bootBuildImage -PimagePlatform=linux/arm64`.
+// Images live in a namespace we own; a bare `saiman/<name>` would resolve to someone else's Docker Hub account.
 tasks.named<BootBuildImage>("bootBuildImage") {
-    imageName = "saiman/${project.name}:dev"
+    imageName = "ghcr.io/orhanyarkin/saiman-${project.name}:dev"
     providers.gradleProperty("imagePlatform").orNull?.let { imagePlatform = it }
 }
