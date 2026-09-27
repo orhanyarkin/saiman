@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.orchestrator.system;
 import io.micrometer.tracing.Tracer;
 import java.time.OffsetDateTime;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -14,14 +15,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 class PingController {
 
-    private static final String SERVICE_NAME = "orchestrator";
-
     private final JdbcClient jdbcClient;
     private final Tracer tracer;
+    private final String serviceName;
 
-    PingController(JdbcClient jdbcClient, Tracer tracer) {
+    PingController(JdbcClient jdbcClient, Tracer tracer, @Value("${spring.application.name}") String serviceName) {
         this.jdbcClient = jdbcClient;
         this.tracer = tracer;
+        this.serviceName = serviceName;
     }
 
     @GetMapping("/api/v1/ping")
@@ -29,7 +30,7 @@ class PingController {
         // select now() produces the JDBC child span (datasource-micrometer).
         OffsetDateTime dbTime =
                 jdbcClient.sql("select now()").query(OffsetDateTime.class).single();
-        return new PingResponse(SERVICE_NAME, dbTime.toInstant(), currentTraceId());
+        return new PingResponse(serviceName, dbTime.toInstant(), currentTraceId());
     }
 
     private @Nullable String currentTraceId() {
