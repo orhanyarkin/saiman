@@ -2,6 +2,7 @@
 name: security-auditor
 description: Threat-focused review of anything touching payments, x402 signing/verification, wallets, budgets, spend limits, auth, LLM tool use or prompt injection surfaces. Read-only. Use after changes in those areas.
 tools: Read, Grep, Glob, Bash, WebFetch
+disallowedTools: Write, Edit, NotebookEdit
 model: opus
 effort: high
 memory: project
