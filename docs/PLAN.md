@@ -4,9 +4,9 @@ Each milestone ends with something demo-able and a short write-up in `docs/PROGR
 
 ## M0 — Skeleton (2–3 days)
 - Monorepo layout from `CLAUDE.md`, `Makefile`, `deploy/compose` with Postgres+pgvector, Redpanda, Valkey, OTel collector.
-- Gradle multi-project skeleton (version catalog, Spotless, Error Prone) + web app; every service with an Actuator health endpoint, OTel traces visible locally, CI running build+test+lint per service.
+- Gradle multi-project skeleton (version catalog, Spotless, Error Prone) + web app; every service with an Actuator health endpoint (`evals` is a CLI app: no HTTP endpoint, its in-context health is asserted by a test), OTel traces visible locally, CI running build+test+lint per service.
 
-**Accept:** `make up && make test && make lint` pass on a clean clone; CI green; one trace spans web → orchestrator → Postgres.
+**Accept:** `make up && make test && make lint` pass on a clean clone; CI green; one trace spans web → orchestrator → Postgres (in M0 verified by a manual click in the UI plus `make verify-trace` against Jaeger; browser automation arrives in M5).
 
 ## M1 — x402 Spring Boot starter + first paid endpoint (1 week)
 - `libs/x402-spring-boot-starter`: built on the official x402 Java SDK — server filter + `@RequiresPayment` (`exact` scheme), `RestClient` interceptor, `SpendGuard` hook, auto-configuration, fake facilitator for tests, real facilitator client for Base Sepolia.
