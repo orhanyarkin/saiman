@@ -1,1 +1,3 @@
-io.github.orhanyarkin.x402.X402AutoConfiguration
+io.github.orhanyarkin.x402.autoconfigure.X402ServerAutoConfiguration
+io.github.orhanyarkin.x402.autoconfigure.X402ClientAutoConfiguration
+io.github.orhanyarkin.x402.autoconfigure.X402ObservationAutoConfiguration
