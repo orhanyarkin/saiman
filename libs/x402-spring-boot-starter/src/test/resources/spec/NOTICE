@@ -1,0 +1,33 @@
+This directory vendors example payloads copied verbatim from external specifications, for use as
+test fixtures. No source code from these projects is included.
+
+x402 v2 protocol examples
+  Source: https://github.com/x402-foundation/x402
+  Commit: c84154b5d6a31d77fd5b9dbb01213053fd9cb9eb (main, fetched 2026-09-28)
+  License: Apache License 2.0
+  Files:
+    payment-required.json           specs/x402-specification-v2.md, section 5.1.1
+    payment-payload.json            specs/transports-v2/http.md, "Payment Payload Transmission"
+                                     (identical to the exact-scheme/eip3009 example in
+                                     specs/schemes/exact/scheme_exact_evm.md)
+    settlement-response-success.json  specs/x402-specification-v2.md, section 5.3.1
+    settlement-response-failure.json  specs/transports-v2/http.md, "Settlement Response Delivery"
+    verify-response-success.json      specs/x402-specification-v2.md, section 7.1 ("Successful Response")
+    verify-response-error.json        specs/x402-specification-v2.md, section 7.1 ("Error Response")
+
+  See also Eip3009TypedDataTest#matchesTheX402SpecPaymentPayloadKnownAnswer, which decodes
+  payment-payload.json above and asserts the recovered signer, the EIP-712 domain separator and
+  the TransferWithAuthorization typehash all match values independently confirmed against the
+  live USDC contract on Base Sepolia (see Eip3009DomainSeparatorLiveTest, @Tag("testnet")).
+
+EIP-712 "Mail" example vector
+  Source: https://eips.ethereum.org/EIPS/eip-712
+  License: CC0 1.0 Universal
+  File: eip712-mail-example.json
+    The `TypedData` request parameter from the "Specification of the eth_signTypedData JSON RPC"
+    example. The expected result in that example,
+    0x4355c47d63924e8a72e509b65029052eb6c299d53a04e167c5775fd466751c9d07299936d304c153f6443dfa05f40ff007d72911b6f72307f996231605b915621c,
+    is the signature produced by the well-known "cow" test private key (keccak256("cow")); see
+    Eip712MailVectorTest, which recomputes and asserts it via the same web3j StructuredDataEncoder
+    machinery Eip3009TypedData itself is built on (not the "Mail" struct type itself, which this
+    starter never encodes -- only the fixed TransferWithAuthorization struct).

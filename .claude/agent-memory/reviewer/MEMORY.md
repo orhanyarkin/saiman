@@ -2,3 +2,4 @@
 - [Spring test pitfalls](spring-test-pitfalls.md) — tautological MOCK-env asserts; runners in tests; actuator 404 access-vs-exposure; vacuous $.env info assert
 - [Infra/CI gotchas](review-gotchas-infra-ci.md) — JDBC span names, SHA pins, pnpm setup, compose env_file/merge, Make goals, secret echo, standalone sample builds
 - [Web review checklist](web-review-checklist.md) — pnpm release-age excludes (non-strict default), Vitest 5 + jest-dom TS2428, routeTree.gen/.tanstack
+- [x402 starter checklist](x402-starter-review-checklist.md) — spec KAT sig is real, TS ref extra fields, Jackson 3 null/coercion/cause leaks, web3j EIP-712 leniency

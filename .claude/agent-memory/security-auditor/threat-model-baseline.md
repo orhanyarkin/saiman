@@ -1,6 +1,6 @@
 ---
 name: threat-model-baseline
-description: Running Saiman threat model - mitigations so far and deferred checks for x402/ledger/spend code (M0 T3 2026-09-27, M1 T5 2026-09-28)
+description: Running Saiman threat model - mitigations and deferred checks for x402/ledger/spend code (M0 T3, M1 T5, M1 T1 web3j encoder laxness + dep CVEs, 2026-09-28)
 metadata:
   type: project
 ---
@@ -28,3 +28,12 @@ M1 T5 audit (2026-09-28, infra: Makefile/compose/CI/check scripts, uncommitted o
 
 **Why:** skeleton decisions become defaults later payment code inherits.
 **How to apply:** re-run these checks on every payments/ledger/spend-control audit; update this file as items close.
+
+M1 T1 audit (2026-09-28, starter core/ + evm/, uncommitted on m1-x402). Verified empirically with a javac/java probe in the scratchpad against web3j 6.0.0:
+- web3j StructuredDataEncoder is lax: uint accepts "0x2710"/"010000"/"+10000"; address/bytes32 accept any case, missing 0x, odd length, and NON-HEX chars (Numeric.hexStringToByteArray maps digit -1, so "zz" == 0xEF, "1z" == 0x0F); short addresses left-padded; null fields are SKIPPED from the encoding (validAfter=null/validBefore=B collides with validAfter=B/validBefore=null). => raw-string nonce-store keys are bypassable; canonicalise before keying.
+- Sign.recoverFromSignature: no low-s, no r/s<n, s=0 recovers an arbitrary address; r=0 -> IAE "Invalid point compression". web3j signing IS low-s (toCanonicalised) + RFC6979.
+- Private key: ctor accepted d>=n and >32 bytes (address of d mod n); failure only at sign time (BC "Scalar is not in the interval").
+- Jackson 3.1.x defaults: FAIL_ON_NULL_FOR_PRIMITIVES on (missing int fails), nesting 500, number len 1000, trailing tokens fail; duplicate keys last-wins; scalar coercion on (1.5->1, "2"->2, 1e4->"1e4"); cause messages echo input values.
+- KAT: spec example payload signature (x402 commit c84154b) recovers to 0x857b06519E91e3A54538791bDbb0E22373e36b66 under domain USDC/2/84532/0x036C...; domain separator 0x71f17a3b2ff373b803d70a5a07c046c1a2bc8e89c09ef722fcb047abe94c9818.
+- Deps: plain POM lists only direct deps -> non-Boot-BOM consumers get web3j's jackson-databind 3.1.0 (9 GHSAs, fixed 3.1.4/3.1.5) and bcprov 1.80 (4 CVEs, fixed 1.85; 1.86 clean). vertx/connid arrive via jc-kzg-4844 (only BlobUtils); tuweni(+kotlin-stdlib) only Blob/RawTransaction/TransactionDecoder paths - probe runs without them.
+Deferred to T2/T3: key nonce on canonical lowercase (from,nonce) + recovered signer; forward re-serialized payload (not raw header) to facilitator; x402Version==2 and scheme checks; front-running of settle (seller paid, buyer 402'd) -> reconcile via authorizationState in M4; /actuator/heapdump,/env never exposed (key String is un-zeroizable).
