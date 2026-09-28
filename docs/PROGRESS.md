@@ -6,6 +6,23 @@ M0 — Skeleton: **done** (branch `m0-skeleton`, PR to main awaiting the human's
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-09-28 — Housekeeping: Valkey port, Dependabot cooldown
+
+**What changed**
+- Compose publishes Valkey on host port 16380 by default (6379 and 16379 clash with a native Redis on Windows); `.env.example` and README follow.
+- Dependabot: `cooldown.default-days: 3` for all four ecosystems; semver-major TypeScript updates ignored until typescript-eslint and openapi-typescript support 6.x.
+- Dependabot PRs: redpanda v26.2.3 (#2), valkey 9.1.2 (#3) and actions/checkout 7.0.1 (#4) merged on green CI; TypeScript 6 (#5) closed.
+
+**How it was verified**
+- `docker compose config` shows Valkey published on 16380; the running stack already used 16380.
+- `./gradlew spotlessCheck check` green, including `--rerun-tasks`; `make lint && make test` green.
+
+**What's next**
+- **Follow-up PR after 2026-09-29 07:00Z:** raise pnpm `minimumReleaseAge` to 4320 (3 days, matching the Dependabot cooldown) and update the reviewer and frontend agent-memory notes that still describe 1440. Not done now because 12 lockfile entries (vitest 5.0.2, @tanstack/react-query 5.104.0, @types/node 26.6.3, csstools) are younger than 3 days until 2026-09-26 06:37Z + 3 days, so a frozen install fails.
+
+**Open questions / watch**
+- Possible flake: one local `./gradlew spotlessCheck check -q` run exited 1 with no output; it did not reproduce in two further runs (one with `--rerun-tasks`). Watch CI for an unexplained backend failure.
+
 ### 2026-09-28 — M0 Skeleton (T0–T6)
 
 **What changed**
