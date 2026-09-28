@@ -33,7 +33,7 @@ M0 — Skeleton: **done** (branch `m0-skeleton`, PR to main awaiting the human's
 - M1: x402 starter + first paid endpoint, starting with an architect design pass.
 
 **M1 open items / carried risks**
-- A native `redis-server` on the Windows host holds 127.0.0.1:6379, so Valkey cannot publish its default port. Either stop that service or `export VALKEY_HOST_PORT=16379`.
+- Resolved: a native Redis on the Windows host holds 6379 and 16379, so compose now publishes Valkey on 16380 by default (`VALKEY_HOST_PORT` still overrides it).
 - Before M1 (security-auditor): the core collector cannot redact attributes; decide between source-side redaction (Micrometer `ObservationFilter`) and a collector build with the `redaction` processor, so `X-PAYMENT` payloads never reach Jaeger or Grafana Cloud. Record it in ADR-0006.
 - Before M1: per-service secrets (compose `secrets:` / configtree), and only the orchestrator container gets the buyer key.
 - M1 starter contract (security-auditor): fail closed — missing or invalid payment config stops startup, no `enabled` flag, network allowlist `eip155:84532` enforced in code.

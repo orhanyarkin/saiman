@@ -33,9 +33,10 @@ make verify-trace TRACE_ID=<traceId shown on the card>   # or open the card's Ja
 make verify-trace                                       # no browser: orchestrator → Postgres only
 ```
 
-Jaeger UI: http://localhost:16686. If port 6379 is taken on your host (e.g. a native Redis on
-Windows), run `export VALKEY_HOST_PORT=16379` before `make up`. `make down` stops everything;
-`make clean` also drops volumes.
+Jaeger UI: http://localhost:16686. Valkey is published on host port **16380** (not 6379), because
+6379 and 16379 clash with a native Redis on Windows; if 16380 is taken too, run
+`export VALKEY_HOST_PORT=<port>` before `make up`. `make down` stops everything; `make clean` also
+drops volumes.
 
 ## Stack
 
