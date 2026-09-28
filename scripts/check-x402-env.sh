@@ -5,7 +5,8 @@
 # `./gradlew bootBuildImage`. `make infra-up` does not call this script: it starts only
 # postgres/redpanda/valkey/otel-collector/jaeger, none of which need it.
 #
-# The value must be exported in the calling shell: docker compose does not read the
+# `make` exports the value from the shell or, failing that, from the repo-root .env
+# (scripts/read-public-env.sh). Run directly, the script needs it exported: docker compose does not read the
 # repo-root .env (only `.env` files next to a compose file are auto-loaded, and this
 # repo intentionally has none there — see docker-compose.yml and ADR-0009).
 #
@@ -30,9 +31,10 @@ ADR-0009); `make up` refuses to build images without one.
 
 Create a throwaway testnet address, e.g. with Foundry's `cast wallet new`, or any wallet
 tool of your choice. Keep only the printed "Address" (0x followed by 40 hex characters)
-— never the private key, and never commit either. Then export it in this shell (compose
-does not read the repo-root .env):
-  export X402_SELLER_PAYTO_ADDRESS=0x...
+— never the private key, and never commit either. Then either put it in the repo-root
+.env (`make` reads only this one variable from there) or export it in this shell:
+  X402_SELLER_PAYTO_ADDRESS=0x...        # in .env
+  export X402_SELLER_PAYTO_ADDRESS=0x... # or in the shell (wins over .env)
 
 `make infra-up` does not need this: it starts only postgres/redpanda/valkey/otel-collector/jaeger.
 EOF

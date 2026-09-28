@@ -7,6 +7,15 @@ COMPOSE := docker compose -f deploy/compose/docker-compose.yml
 # seller-api's paid disclosure summary endpoint (M1).
 X402_URL ?= http://localhost:8081/v1/disclosures/THYAO/summary
 
+# The seller's payout address is public, so `make` reads it from the repo-root .env when it
+# isn't exported (compose itself doesn't read that file). Only this one variable is read, via
+# an allowlist in scripts/read-public-env.sh; secrets in .env never reach make (ADR-0009).
+ENV_FILE ?= .env
+ifeq ($(origin X402_SELLER_PAYTO_ADDRESS),undefined)
+X402_SELLER_PAYTO_ADDRESS := $(shell scripts/read-public-env.sh X402_SELLER_PAYTO_ADDRESS $(ENV_FILE))
+endif
+export X402_SELLER_PAYTO_ADDRESS
+
 .DEFAULT_GOAL := help
 
 .PHONY: help images check-x402-env infra-up up down clean ps logs test lint format web-dev verify-trace \

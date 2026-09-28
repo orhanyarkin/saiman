@@ -70,6 +70,25 @@ else
   echo "PASS: check-x402-env: 64-hex value (rejected, value not printed)"
 fi
 
+# read-public-env.sh (used by the Makefile to take the payTo address from .env): reads only
+# allowlisted public keys, handles export/quotes/comments, last assignment wins.
+env_fixture="scripts/testdata/read-public-env/sample.env.txt"
+payto="$(scripts/read-public-env.sh X402_SELLER_PAYTO_ADDRESS "${env_fixture}")"
+if [[ "${payto}" == "0x1111111111111111111111111111111111111111" ]]; then
+  echo "PASS: read-public-env: reads the last payTo assignment"
+else
+  echo "FAIL: read-public-env: unexpected payTo value" >&2
+  failures=$((failures + 1))
+fi
+expect_exit "read-public-env: refuses a non-allowlisted key" 2 scripts/read-public-env.sh X402_BUYER_PRIVATE_KEY "${env_fixture}"
+expect_exit "read-public-env: missing file prints nothing" 0 scripts/read-public-env.sh X402_SELLER_PAYTO_ADDRESS scripts/testdata/read-public-env/absent.env.txt
+if env -u X402_SELLER_PAYTO_ADDRESS make -s -p -n help ENV_FILE="${env_fixture}" 2>/dev/null | grep -q "placeholder-not-a-key"; then
+  echo "FAIL: Makefile: a non-allowlisted .env value reached make's database" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: Makefile: only the payTo address is read from the env file"
+fi
+
 if [[ "${failures}" -ne 0 ]]; then
   echo "test-check-compose-policy: ${failures} check(s) FAILED" >&2
   exit 1
