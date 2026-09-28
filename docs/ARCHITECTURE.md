@@ -14,7 +14,7 @@ A user (or a scheduled job) asks a research question about a BIST company or a c
 | `ingest` | Spring Boot 4.1 + Spring AI 2.0 | ETL: fetch → normalise → chunk → embed → `PgVectorStore`; emits index events |
 | `evals` | Spring Boot CLI | Golden-set evals, LLM-as-judge (batch), cost/quality reports |
 | `web` | React 19 + Vite | Static SPA on Cloudflare Pages |
-| `x402-spring-boot-starter` | Java library | Open-source Spring Boot starter on top of the official x402 Java SDK: filter, `@RequiresPayment`, `RestClient` interceptor, auto-config |
+| `x402-spring-boot-starter` | Java library | Open-source Spring Boot starter implementing x402 v2 (`exact` scheme on EVM, Base Sepolia only; ADR-0008): filter, `@RequiresPayment`, `RestClient` interceptor, auto-config |
 
 ## Data and messaging
 
@@ -30,7 +30,7 @@ Topics (schemas in `docs/events/`): `payments.challenge-issued.v1`, `payments.au
 2. Seller returns **402** with payment requirements (price, asset, network, payTo, scheme).
 3. **Spend guard** (code, not LLM): payee on allowlist? run budget and daily cap sufficient? idempotency key unused? above approval threshold → park for human approval.
 4. Client signs (testnet wallet from env), retries with the payment header.
-5. Seller verifies/settles via facilitator, serves the resource, emits events via outbox.
+5. Seller claims the payment nonce (replay guard), verifies via the facilitator, runs the handler with the response buffered, settles, then releases the body with `PAYMENT-RESPONSE` (no settlement → no body, no charge). Emits events via outbox from M4.
 6. Ledger posts entries; reconciliation later matches the tx hash on-chain.
 
 ## Model routing and cost (ADR-0003)

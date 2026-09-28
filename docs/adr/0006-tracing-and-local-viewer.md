@@ -26,3 +26,11 @@ M0 must show one trace spanning web → orchestrator → Postgres locally, and l
 − Local traces are lost on restart (acceptable for development).
 − Browser tracing adds a few dependencies to live builds; replay builds disable it.
 Revisit if: local metric dashboards become necessary, or Jaeger's in-memory store becomes a bottleneck.
+
+## Amendment (2026-09-28): payment data is redacted at the source
+The core collector distribution cannot redact span attributes. Instead of building a custom collector with the contrib `redaction` processor, payment data never leaves the service:
+- Boot's HTTP server and client observations do not record request or response headers, so `PAYMENT-SIGNATURE`, `PAYMENT-REQUIRED` and `PAYMENT-RESPONSE` are not captured by default. No service may add header capture.
+- The x402 starter emits only allowlisted key-values: low cardinality `x402.network`, `x402.scheme`, `x402.asset`, `x402.outcome`; high cardinality `x402.payer` and `x402.tx_hash` (both public on chain). It also registers an `ObservationFilter` that drops any key whose name matches a payment header or contains `signature`, `payload` or `authorization`.
+- Exception messages and Problem Details never include payloads or signatures.
+- Tests in the starter and seller-api export spans in memory and assert that no attribute contains the encoded payload or the signature.
+Revisit when Grafana Cloud egress starts (M6): the contrib `redaction` processor may be added as a second layer.
