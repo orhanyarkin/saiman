@@ -269,4 +269,19 @@ class X402CodecTest {
     private static String base64(String json) {
         return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
     }
+
+    @Test
+    void unknownPropertyNamesCannotInjectIntoTheMessage() {
+        String marker = "FORGED_LOG_LINE";
+        String hostileName = "X\r\n2026-09-28 ERROR " + marker + "\u001b[31m" + "A".repeat(10_000);
+        String json =
+                "{\"" + hostileName.replace("\r", "\\r").replace("\n", "\\n").replace("\u001b", "\\u001b")
+                        + "\":1,\"x402Version\":2}";
+
+        X402CodecException e = org.junit.jupiter.api.Assertions.assertThrows(
+                X402CodecException.class, () -> codec.decodePaymentPayload(base64(json)));
+
+        assertThat(e.getMessage()).matches("[\\x20-\\x7E]{0,200}").doesNotContain(marker);
+        assertThat(e.getCause()).isNull();
+    }
 }

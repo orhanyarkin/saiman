@@ -37,3 +37,8 @@ M1 T1 audit (2026-09-28, starter core/ + evm/, uncommitted on m1-x402). Verified
 - KAT: spec example payload signature (x402 commit c84154b) recovers to 0x857b06519E91e3A54538791bDbb0E22373e36b66 under domain USDC/2/84532/0x036C...; domain separator 0x71f17a3b2ff373b803d70a5a07c046c1a2bc8e89c09ef722fcb047abe94c9818.
 - Deps: plain POM lists only direct deps -> non-Boot-BOM consumers get web3j's jackson-databind 3.1.0 (9 GHSAs, fixed 3.1.4/3.1.5) and bcprov 1.80 (4 CVEs, fixed 1.85; 1.86 clean). vertx/connid arrive via jc-kzg-4844 (only BlobUtils); tuweni(+kotlin-stdlib) only Blob/RawTransaction/TransactionDecoder paths - probe runs without them.
 Deferred to T2/T3: key nonce on canonical lowercase (from,nonce) + recovered signer; forward re-serialized payload (not raw header) to facilitator; x402Version==2 and scheme checks; front-running of settle (seller paid, buyer 402'd) -> reconcile via authorizationState in M4; /actuator/heapdump,/env never exposed (key String is un-zeroizable).
+
+M1 T1 re-check (2026-09-28, aaa0c35+8ed1e28): canonical auth/canonicalNonceKey, sig policy (v/r/s/130-hex), pk range, dup keys, coercion, length pre-check, KAT, POM (databind 3.1.5, bcprov 1.86, 4 exclusions, no fixtures/compileOnly/BOM) all verified by probe. Still open:
+- X402Codec.pathSuffix echoes attacker-controlled property names (UnrecognizedPropertyException path) verbatim: CR/LF/ESC and ~16 KB reach the "safe to log / Problem Details" message. Fix = drop/sanitise unknown segment ([A-Za-z0-9_] + length cap).
+- toSignatureHex takes last byte of multi-byte v and skips low-s; not reachable from web3j signMessage (low).
+- Base64 basic decoder accepts unpadded input -> never key anything on the raw header text (T2).
