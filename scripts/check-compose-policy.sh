@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # Static policy checks on deploy/compose/docker-compose.yml, run in CI so a change to
 # the compose file can't silently reintroduce an exposed port, an accidental registry
-# pull of a dev image, or a reference to the third-party "saiman/" Docker Hub
-# namespace (our images are ghcr.io/orhanyarkin/saiman-<svc>:dev).
+# pull of a dev image, a reference to the third-party "saiman/" Docker Hub namespace
+# (our images are ghcr.io/orhanyarkin/saiman-<svc>:dev), or a path for wallet key
+# material to reach a service other than the orchestrator (ADR-0009: no service gets an
+# env_file, only the orchestrator may hold a compose `secrets:` mount, and nothing
+# anywhere — including the orchestrator, before its M3 secrets: mount lands — may set an
+# environment entry, a config or a bind-mounted volume that looks like a private key).
 #
 # Resolves the config with `--no-interpolate --no-env-resolution` so it never reads a
-# local .env (app services carry no env_file in M0 anyway; see docker-compose.yml).
+# local .env (app services carry no env_file; see docker-compose.yml), and with
+# `--profile '*'` so every service is scanned regardless of profile, not only "apps".
 set -euo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-deploy/compose/docker-compose.yml}"
@@ -24,7 +29,7 @@ require_command() {
 require_command docker
 require_command jq
 
-config_json=$(docker compose -f "${COMPOSE_FILE}" --profile apps config --no-interpolate --no-env-resolution --format json)
+config_json=$(docker compose -f "${COMPOSE_FILE}" --profile '*' config --no-interpolate --no-env-resolution --format json)
 
 violations=0
 
@@ -81,8 +86,45 @@ if [[ -n "${bad_images}" ]]; then
   violations=1
 fi
 
+# 4. Wallet key material must only ever reach the orchestrator, and only through
+#    compose `secrets:` (ADR-0009: the buyer key reaches only the orchestrator, from M3,
+#    via `secrets:` mounted at /run/secrets/, read with
+#    `spring.config.import=optional:configtree:/run/secrets/`). This scans every
+#    service, regardless of profile, for five patterns:
+#      - an env_file (per-service secrets are explicit env vars only, never a whole file)
+#      - a `secrets:` mount on anything other than orchestrator
+#      - a `configs:` entry sourced from a key- or path-looking value
+#      - a bind-mounted volume whose source looks like a secrets path (/secrets/, *.key,
+#        *.pem)
+#      - any environment key or value that looks like a private key (name matching
+#        PRIVATE_?KEY case-insensitively, a path under secrets/, a *.key/*.pem file, or a
+#        bare 0x-prefixed 32-byte hex literal) -- including on orchestrator itself, since
+#        before its M3 secrets: mount lands it has no business holding one either.
+bad_key_material=$(jq -r '
+  . as $root
+  | def keyish: test("(?i)(PRIVATE_?KEY|/secrets(/|$)|\\.key$|\\.pem$)|0x[0-9a-fA-F]{64}");
+    $root.services | to_entries[] | .key as $svc | .value as $s
+  | ( if ($s.env_file // []) | length > 0
+      then "\($svc): env_file is not allowed (per-service env vars only, ADR-0009)"
+      else empty end ),
+    ( ($s.environment // {}) | to_entries[] | "\(.key)=\(.value // "")" | select(keyish)
+      | "\($svc): environment entry looks like a private key (ADR-0009: the buyer key reaches only the orchestrator, via secrets:, from M3)" ),
+    ( ($s.secrets // [])[]? | .source as $src | select($svc != "orchestrator")
+      | "\($svc): mounts secret \"\($src)\" (only orchestrator may mount a secret)" ),
+    ( ($s.configs // [])[]? | .source as $src | (($root.configs // {})[$src] // {})
+      | select((.environment // "") + (.file // "") | keyish)
+      | "\($svc): config \"\($src)\" is sourced from what looks like a key" ),
+    ( ($s.volumes // [])[]? | select(.type == "bind") | select((.source // "") | keyish)
+      | "\($svc): bind-mounts \(.source) (key material must come through secrets:, not a bind mount)" )
+' <<<"${config_json}")
+if [[ -n "${bad_key_material}" ]]; then
+  fail_check "service(s) with a path for key material outside ADR-0009's orchestrator-only secrets mount:"
+  echo "${bad_key_material}" >&2
+  violations=1
+fi
+
 if [[ ${violations} -ne 0 ]]; then
   exit 1
 fi
 
-echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images)"
+echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, no key material outside orchestrator's secrets:)"

@@ -1,0 +1,13 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# A `configs:` entry sourced from what looks like a key (an env var literally named
+# X402_BUYER_PRIVATE_KEY).
+name: cptest-config-from-key
+services:
+  orchestrator:
+    image: busybox:1
+  seller-api:
+    image: busybox:1
+    configs: [c]
+configs:
+  c:
+    environment: X402_BUYER_PRIVATE_KEY

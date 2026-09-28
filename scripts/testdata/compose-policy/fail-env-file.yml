@@ -1,0 +1,7 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# A service using env_file (ADR-0009: per-service env vars only, no whole file).
+name: cptest-env-file
+services:
+  seller-api:
+    image: busybox:1
+    env_file: ./fixtures/placeholder-vars.txt

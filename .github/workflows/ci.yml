@@ -89,6 +89,8 @@ jobs:
         run: docker compose -f deploy/compose/docker-compose.yml --profile apps config --quiet
       - name: Check compose policy
         run: scripts/check-compose-policy.sh
+      - name: Self-test compose/x402-env policy scripts
+        run: scripts/test-check-compose-policy.sh
 
   images:
     name: images (bootBuildImage, ${{ matrix.runs-on }})

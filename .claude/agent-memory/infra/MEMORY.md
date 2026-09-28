@@ -3,3 +3,6 @@
 - [CI action SHAs](ci_action_shas.md) — how to resolve action commit SHAs via git ls-remote (peel annotated tags with ^{}), last known-good set for M0 ci.yml
 - [bash subshell error propagation](bash_subshell_error_propagation.md) — don't report function errors via a shared variable when the function's stdout is captured with $(...); use a file instead
 - [worktree write boundary](worktree_write_boundary.md) — Write/Edit tools refuse paths outside a worktree-isolated agent's own worktree even on explicit coordinator instruction; edit the worktree copy and report paths for the coordinator to merge
+- [worktree stale relative to task branch](worktree_stale_relative_to_task_branch.md) — worktree HEAD can lag the named task branch; Read (not Write/Edit) can still read the main checkout's absolute path for missing required-reading files
+- [compose per-service override of x-app-common](compose_per_service_override_of_x_app_common.md) — double-anchor merge-key pattern to extend (not replace) x-app-common's environment/depends_on for one service
+- [compose config path existence and profile wildcard](compose_config_path_existence_and_profile_wildcard.md) — env_file needs a real file for `docker compose config`, secrets:/configs:/bind-mount sources don't; `--profile '*'` scans every service regardless of profile

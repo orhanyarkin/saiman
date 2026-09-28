@@ -1,0 +1,4 @@
+# Fixture data for scripts/test-check-compose-policy.sh (fail-env-file.yml).
+# Deliberately NOT named *.env: it's a stand-in for "some file passed as env_file", not
+# a real .env. Contains no secret of any kind, real or fake.
+GREETING=hello
