@@ -2,7 +2,7 @@
 
 ## Current milestone
 M1 — x402 starter + first paid endpoint: **in progress** on branch `m1-x402`. Plan: architect design pass approved 2026-09-28 (ADR-0008 native x402 v2, ADR-0009 secrets). Tasks: T0 orchestrator (catalog, publishing convention, ADRs) · T1 payments-engineer starter core/evm · T2 server + facilitator + FakeFacilitator · T3 client + SpendGuard + console buyer · T4 seller-api endpoint · T5 infra (compose payTo check, make x402-*, CI) · T6 README quickstart + live Base Sepolia payment.
-Status: T0 done; T1 and T5 in progress. M0 merged to main.
+Status: T0, T1, T5 done (committed on `m1-x402`); T2 and T3 in progress; T1 security re-check running. M0 merged to main.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
@@ -15,9 +15,12 @@ Status: T0 done; T1 and T5 in progress. M0 merged to main.
 **How it was verified**
 - `./gradlew build spotlessCheck` green; `publishToMavenLocal` POM inspected (concrete versions, no `dependencyManagement`).
 
-**In flight** (agents work in `.claude/worktrees/agent-*`; nothing from them is committed yet)
-- T1 payments-engineer: starter `core/` + `evm/`.
-- T5 infra: review round 1 fixes (blocking: payTo check echoed the rejected value; compose-policy only scanned `environment`).
+**Done since**
+- T5 (infra): `make up` requires a valid `X402_SELLER_PAYTO_ADDRESS` (never echoes it); compose-policy scans every profile for key material (env_file, secrets, configs, mounts, env) with 17 fixture tests in CI; seller-api gets payTo + healthy Valkey; `make x402-*` targets. Reviewed by reviewer + security-auditor; blocking findings fixed and verified by the fixture tests.
+- T1 (payments-engineer): x402 v2 records + codec, canonical EIP-3009 authorization, low-s signature policy, EIP-712 digest over a fixed Base Sepolia USDC domain. Known-answer tests: EIP-712 Mail vector; the x402 spec payment payload recovers to its payer; domain separator and typehash pinned; `@Tag("testnet")` check of `DOMAIN_SEPARATOR()` on chain (passed locally). 93 tests. Review round 1 found 8 reviewer + 3 security blocking issues (non-canonical inputs defeating the replay key, high-s signatures, payload in exception causes, strict decoding of facilitator bodies, `extra` typing); all fixed. POM pins jackson-databind 3.1.5 and bcprov 1.86; Vert.x/ConnId/KZG/tuweni excluded with a build check.
+
+**In flight**
+- T2 (server, facilitator, FakeFacilitator) and T3 (client, SpendGuard, console buyer) in parallel; security-auditor re-checking T1 fixes.
 
 **Carry-forward review findings (must land in later tasks)**
 - T1–T3: no Bean Validation on key/address properties (Boot prints the rejected value); validate in code without echoing; output-capture tests.
