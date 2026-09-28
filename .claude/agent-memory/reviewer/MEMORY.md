@@ -1,4 +1,4 @@
 - [Boot 4 review checklist](boot4-review-checklist.md) — test clients, OTLP/OTEL_* env mapping, span exporters, TC lifecycle, jar-verified
 - [Spring test pitfalls](spring-test-pitfalls.md) — tautological MOCK-env asserts; runners in tests; actuator 404 access-vs-exposure; vacuous $.env info assert
-- [Infra/CI gotchas](review-gotchas-infra-ci.md) — JDBC span names, SHA pins, pnpm/action-setup package_json_file, compose env_file, Make default goal
+- [Infra/CI gotchas](review-gotchas-infra-ci.md) — JDBC span names, SHA pins, pnpm setup, compose env_file/merge, Make goals, secret echo, standalone sample builds
 - [Web review checklist](web-review-checklist.md) — pnpm release-age excludes (non-strict default), Vitest 5 + jest-dom TS2428, routeTree.gen/.tanstack

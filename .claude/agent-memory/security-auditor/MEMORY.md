@@ -1,1 +1,1 @@
-- [Threat model baseline](threat-model-baseline.md) — mitigations so far + deferred checks for x402 fail-closed, testnet allowlist, header leakage, actuator
+- [Threat model baseline](threat-model-baseline.md) — mitigations + deferred checks (x402 fail-closed, compose key policy gaps, bind-error value leak, facilitator trust)

@@ -1,0 +1,12 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# A service under a profile other than "apps" (e.g. a one-off debug service) still
+# leaks the buyer key. check-compose-policy.sh resolves with `--profile '*'` precisely
+# so a service like this isn't invisible to the scan just because it's gated behind a
+# profile nobody enables by default.
+name: cptest-key-in-non-apps-profile
+services:
+  debug:
+    profiles: ["debug"]
+    image: busybox:1
+    environment:
+      X402_BUYER_PRIVATE_KEY: "whatever-shape-the-value-has"

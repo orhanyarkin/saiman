@@ -1,0 +1,15 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# A private key added alongside a YAML merge key (the same `<<: *anchor` pattern
+# deploy/compose/docker-compose.yml uses for x-app-common), so the check must scan the
+# fully-merged environment map, not just literal keys written directly in the service
+# block.
+name: cptest-key-via-merge-key
+x-app-common: &app-common
+  environment: &app-common-env
+    UNRELATED: value
+services:
+  seller-api:
+    image: busybox:1
+    environment:
+      <<: *app-common-env
+      K: $X402_BUYER_PRIVATE_KEY

@@ -1,0 +1,11 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# A plain environment entry naming the buyer key, on orchestrator itself. ADR-0009's
+# only sanctioned path for the buyer key to reach orchestrator is a compose `secrets:`
+# mount (from M3); a bare environment entry is not exempt just because the service is
+# orchestrator.
+name: cptest-key-in-orchestrator-env
+services:
+  orchestrator:
+    image: busybox:1
+    environment:
+      X402_BUYER_PRIVATE_KEY: "whatever-shape-the-value-has"

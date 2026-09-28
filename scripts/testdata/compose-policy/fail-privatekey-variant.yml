@@ -1,0 +1,9 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# An environment key naming variant that still matches (?i)PRIVATE_?KEY, e.g. a
+# differently-named buyer/client key var, not just the literal X402_BUYER_PRIVATE_KEY.
+name: cptest-privatekey-variant
+services:
+  seller-api:
+    image: busybox:1
+    environment:
+      X402_CLIENT_PRIVATEKEY: "whatever-shape-the-value-has"

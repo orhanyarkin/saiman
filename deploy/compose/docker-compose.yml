@@ -11,11 +11,11 @@ x-app-common: &app-common
   mem_limit: 768m
   pull_policy: never
   restart: on-failure
-  # No per-service secrets in M0 (no M0 service calls an LLM or x402 provider), so app
-  # containers get no env_file: giving every container the full .env would hand every
-  # container the LLM API keys and the x402 buyer wallet key for no reason. Per-service
-  # secrets (compose `secrets:` / Spring config tree) arrive in M1 when a service
-  # actually needs one.
+  # Per-service secrets follow ADR-0009: seller-api never holds a private key, only the
+  # public X402_SELLER_PAYTO_ADDRESS (plain env var, set below); no app container gets
+  # an env_file, so none can see the others' secrets. The x402 buyer key reaches only
+  # the orchestrator, from M3, through compose `secrets:` mounted at /run/secrets/ and
+  # read with `spring.config.import=optional:configtree:/run/secrets/` — not before.
   environment: &app-common-env
     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/saiman
     SPRING_DATASOURCE_USERNAME: saiman
@@ -32,7 +32,7 @@ x-app-common: &app-common
     # Paketo tiny run images size the JVM's thread pool from container memory by
     # default; cap it explicitly to keep four ~768 MB app containers predictable.
     BPL_JVM_THREAD_COUNT: "50"
-  depends_on:
+  depends_on: &app-common-depends-on
     otel-collector:
       condition: service_started
   # Paketo "tiny" buildpack images have no shell, so compose cannot exec a healthcheck
@@ -136,8 +136,7 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
-      otel-collector:
-        condition: service_started
+      <<: *app-common-depends-on
       postgres:
         condition: service_healthy
 
@@ -146,6 +145,21 @@ services:
     image: ghcr.io/orhanyarkin/saiman-seller-api:dev
     ports:
       - "127.0.0.1:8081:8081"
+    environment:
+      <<: *app-common-env
+      # Public payout address only, no private key (ADR-0009). Left unset here on
+      # purpose: `${X402_SELLER_PAYTO_ADDRESS:-}` keeps `docker compose config` (and
+      # the `infra-up`/compose-policy paths, which never set it) working without a
+      # warning; the app itself fails closed at startup on a missing/invalid value,
+      # and `make up` fails even earlier via scripts/check-x402-env.sh. No
+      # X402_FACILITATOR_URL here: the property doesn't bind to
+      # `x402.server.facilitator.url`, and the starter host-allowlists the facilitator
+      # (x402.org + loopback) in code rather than taking it from config.
+      X402_SELLER_PAYTO_ADDRESS: ${X402_SELLER_PAYTO_ADDRESS:-}
+    depends_on:
+      <<: *app-common-depends-on
+      valkey:
+        condition: service_healthy
 
   ledger:
     <<: *app-common

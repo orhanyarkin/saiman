@@ -1,0 +1,9 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# An environment value that is a bare 0x-prefixed 32-byte hex literal — the shape of a
+# private key — under an innocuous-looking variable name.
+name: cptest-literal-hex-key
+services:
+  seller-api:
+    image: busybox:1
+    environment:
+      SOME_LEAKED_VALUE: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
