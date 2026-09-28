@@ -2,10 +2,28 @@
 
 ## Current milestone
 M1 — x402 starter + first paid endpoint: **in progress** on branch `m1-x402`. Plan: architect design pass approved 2026-09-28 (ADR-0008 native x402 v2, ADR-0009 secrets). Tasks: T0 orchestrator (catalog, publishing convention, ADRs) · T1 payments-engineer starter core/evm · T2 server + facilitator + FakeFacilitator · T3 client + SpendGuard + console buyer · T4 seller-api endpoint · T5 infra (compose payTo check, make x402-*, CI) · T6 README quickstart + live Base Sepolia payment.
-Status: T0 done; T1 next. M0 merged to main.
+Status: T0 done; T1 and T5 in progress. M0 merged to main.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
+
+### 2026-09-28 — M1 in progress (T0 done)
+
+**What changed**
+- T0 (orchestrator): catalog entries (web3j crypto 6.0.0, Resilience4j 2.4.0 core, Boot-managed restclient/data-redis/validation/configuration-processor, Testcontainers core); `saiman.published-library` convention (sources/javadoc jars, Apache-2.0 POM, resolved versions, no Boot BOM import); `@Tag("testnet")` tests excluded unless `-PincludeTestnet`; ADR-0008 (native x402 v2), ADR-0009 (secrets and wallet keys), ADR-0006 amendment (source-side redaction); PLAN/ARCHITECTURE/ADR-0005 wording; `X402_NETWORK` dropped from `.env.example`; shared contract in `docs/design/m1-x402.md`.
+
+**How it was verified**
+- `./gradlew build spotlessCheck` green; `publishToMavenLocal` POM inspected (concrete versions, no `dependencyManagement`).
+
+**In flight** (agents work in `.claude/worktrees/agent-*`; nothing from them is committed yet)
+- T1 payments-engineer: starter `core/` + `evm/`.
+- T5 infra: review round 1 fixes (blocking: payTo check echoed the rejected value; compose-policy only scanned `environment`).
+
+**Carry-forward review findings (must land in later tasks)**
+- T1–T3: no Bean Validation on key/address properties (Boot prints the rejected value); validate in code without echoing; output-capture tests.
+- T2: facilitator host allowlist in code (x402.org + loopback), https, no redirects, timeouts, response size cap, `/supported` handshake at startup (fail closed); log the host at INFO. M4: reconcile tx hashes on chain, don't trust facilitator `success`.
+- T3: key read at runtime only (bootRun not configuration-cache compatible); `new-wallet` writes repo-root `secrets/buyer.key`, refuses to overwrite, creates 0600 atomically; `testnet-check` signs a self-transfer with minimal value and short validity; sample excludes `testnet` tags itself, `mavenLocal()` limited to `io.github.orhanyarkin`, sample spotless in `make lint`; re-add the sample build to `make test` (after `./gradlew check`) and CI.
+- T6: README still says "built on the official x402 Java SDK"; add security-auditor's key-custody/facilitator-trust text to `docs/THREAT_MODEL.md`.
 
 ### 2026-09-28 — Housekeeping: Valkey port, Dependabot cooldown
 
