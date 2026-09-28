@@ -93,8 +93,9 @@ services:
     image: valkey/valkey:9.1.2-alpine
     restart: unless-stopped
     ports:
-      # Override when the host already uses 6379 (e.g. a native Redis on Windows): VALKEY_HOST_PORT=16379.
-      - "127.0.0.1:${VALKEY_HOST_PORT:-6379}:6379"
+      # Defaults to 16380 because 6379 and 16379 clash with a native Redis on Windows;
+      # override with VALKEY_HOST_PORT if 16380 is taken too.
+      - "127.0.0.1:${VALKEY_HOST_PORT:-16380}:6379"
     volumes:
       - valkey_data:/data
     healthcheck:
