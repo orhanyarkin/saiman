@@ -45,7 +45,12 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 tasks.withType<Test>().configureEach {
-    useJUnitPlatform()
+    // Tests tagged "testnet" talk to Base Sepolia or x402.org; CI stays hermetic (ADR-0008).
+    // Run them locally with `-PincludeTestnet`.
+    val includeTestnet = providers.gradleProperty("includeTestnet").isPresent
+    useJUnitPlatform {
+        if (!includeTestnet) excludeTags("testnet")
+    }
 }
 
 spotless {
