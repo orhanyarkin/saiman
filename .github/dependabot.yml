@@ -1,21 +1,35 @@
 version: 2
+# Every ecosystem waits 3 days after a release before proposing it, so a bad or compromised
+# release has time to be yanked before it reaches a PR.
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 3
 
   - package-ecosystem: gradle
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 3
 
   - package-ecosystem: npm
     directory: /web
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 3
+    ignore:
+      # TypeScript stays on 5.9.x until typescript-eslint and openapi-typescript support 6.x.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: docker-compose
     directory: /deploy/compose
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 3
