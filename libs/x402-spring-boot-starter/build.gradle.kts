@@ -1,13 +1,25 @@
 plugins {
     id("saiman.published-library")
+    `java-test-fixtures`
 }
 
 description = "Spring Boot starter for x402 v2 payments (exact scheme, EVM, Base Sepolia testnet only)"
 version = "0.1.0-SNAPSHOT"
 
 dependencies {
-    // T0 only fixes the publishing shape; T2/T3 add RestClient, Resilience4j and Redis.
     api(libs.spring.boot.autoconfigure)
+    annotationProcessor(libs.spring.boot.configuration.processor)
+
+    // Optional integrations: the consuming app brings the ones it uses and each
+    // auto-configuration is @ConditionalOnClass on them. Server side needs Spring MVC,
+    // client side needs RestClient, the Redis nonce store needs Spring Data Redis.
+    compileOnly(libs.spring.boot.starter.webmvc)
+    compileOnly(libs.spring.boot.starter.restclient)
+    compileOnly(libs.spring.boot.starter.data.redis)
+
+    // Circuit breaker + retry on facilitator calls, wired programmatically (no Spring module).
+    implementation(libs.resilience4j.circuitbreaker)
+    implementation(libs.resilience4j.retry)
 
     // EIP-712/EIP-3009 signing and recovery (ADR-0008). Only Hash/Sign/Keys/ECKeyPair/
     // StructuredDataEncoder are used here -- pure in-memory crypto, no I/O -- so the heavier
@@ -31,7 +43,33 @@ dependencies {
     // than web3j:crypto's own transitive 1.80 (CVE fixes in >= 1.85).
     implementation(libs.jackson.databind)
     implementation(libs.bcprov)
+
+    // FakeFacilitator, TestWallets, PaymentPayloads for this starter's tests and for seller-api's
+    // (`testImplementation(testFixtures(project(":libs:x402-spring-boot-starter")))`). Not published.
+    testFixturesImplementation(platform(libs.spring.boot.dependencies))
+    testFixturesApi(libs.spring.boot.starter.webmvc)
+    testFixturesImplementation(libs.web3j.crypto) {
+        exclude(group = "io.vertx")
+        exclude(group = "org.connid")
+        exclude(group = "io.consensys.protocols", module = "jc-kzg-4844")
+        exclude(group = "io.consensys.tuweni")
+    }
+
+    testImplementation(libs.spring.boot.starter.webmvc)
+    testImplementation(libs.spring.boot.starter.webmvc.test)
+    testImplementation(libs.spring.boot.starter.restclient)
+    testImplementation(libs.spring.boot.starter.data.redis)
+    testImplementation(libs.spring.boot.testcontainers)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(libs.spring.boot.micrometer.tracing.test)
+    testImplementation(libs.opentelemetry.sdk.testing)
 }
+
+// Test fixtures are for this build only; the published POM stays the library alone.
+val javaComponent = components["java"] as AdhocComponentWithVariants
+javaComponent.withVariantsFromConfiguration(configurations["testFixturesApiElements"]) { skip() }
+javaComponent.withVariantsFromConfiguration(configurations["testFixturesRuntimeElements"]) { skip() }
 
 // Guards the exclusions above: fails the build if any of web3j:crypto's heavier optional
 // dependencies reappear on the runtime classpath (e.g. because a future dependency bump adds
