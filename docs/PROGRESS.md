@@ -19,8 +19,10 @@ Status: T0, T1, T5 done (committed on `m1-x402`); T2 and T3 in progress; T1 secu
 - T5 (infra): `make up` requires a valid `X402_SELLER_PAYTO_ADDRESS` (never echoes it); compose-policy scans every profile for key material (env_file, secrets, configs, mounts, env) with 17 fixture tests in CI; seller-api gets payTo + healthy Valkey; `make x402-*` targets. Reviewed by reviewer + security-auditor; blocking findings fixed and verified by the fixture tests.
 - T1 (payments-engineer): x402 v2 records + codec, canonical EIP-3009 authorization, low-s signature policy, EIP-712 digest over a fixed Base Sepolia USDC domain. Known-answer tests: EIP-712 Mail vector; the x402 spec payment payload recovers to its payer; domain separator and typehash pinned; `@Tag("testnet")` check of `DOMAIN_SEPARATOR()` on chain (passed locally). 93 tests. Review round 1 found 8 reviewer + 3 security blocking issues (non-canonical inputs defeating the replay key, high-s signatures, payload in exception causes, strict decoding of facilitator bodies, `extra` typing); all fixed. POM pins jackson-databind 3.1.5 and bcprov 1.86; Vert.x/ConnId/KZG/tuweni excluded with a build check.
 
-**In flight**
-- T2 (server, facilitator, FakeFacilitator) and T3 (client, SpendGuard, console buyer) in parallel; security-auditor re-checking T1 fixes.
+**Paused 2026-09-28 (usage limit)** — resume here
+- T2 (server, facilitator, FakeFacilitator) and T3 (client, SpendGuard, console buyer) were started in agent worktrees and stopped early, still reading the code: both worktrees were at 8ed1e28 (T1 included) with no changes. On resume: restart T2 and T3 with the same prompts from the `m1-x402` tip.
+- The T1 security re-check (security-auditor) did not run; rerun it.
+- Then: T4 seller-api, re-add the sample build to `make test`/CI and the sample spotless to `make lint`, T6 README quickstart + live Base Sepolia payment.
 
 **Carry-forward review findings (must land in later tasks)**
 - T1–T3: no Bean Validation on key/address properties (Boot prints the rejected value); validate in code without echoing; output-capture tests.
