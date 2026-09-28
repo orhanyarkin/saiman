@@ -25,6 +25,7 @@ resilience4j-retry = { module = "io.github.resilience4j:resilience4j-retry", ver
 # Versions managed by the Spring Boot BOM
 jspecify = { module = "org.jspecify:jspecify" }
 jackson-databind = { module = "tools.jackson.core:jackson-databind" }
+micrometer-core = { module = "io.micrometer:micrometer-core" }
 spring-boot-starter-webmvc = { module = "org.springframework.boot:spring-boot-starter-webmvc" }
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
 spring-boot-starter-opentelemetry = { module = "org.springframework.boot:spring-boot-starter-opentelemetry" }
