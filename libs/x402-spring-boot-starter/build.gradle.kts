@@ -16,6 +16,8 @@ dependencies {
     compileOnly(libs.spring.boot.starter.webmvc)
     compileOnly(libs.spring.boot.starter.restclient)
     compileOnly(libs.spring.boot.starter.data.redis)
+    compileOnly(libs.micrometer.core) // x402.payments counter and amount summary when a MeterRegistry exists
+    testImplementation(libs.micrometer.core)
 
     // Circuit breaker + retry on facilitator calls, wired programmatically (no Spring module).
     implementation(libs.resilience4j.circuitbreaker)
