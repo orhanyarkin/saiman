@@ -9,9 +9,9 @@ Each milestone ends with something demo-able and a short write-up in `docs/PROGR
 **Accept:** `make up && make test && make lint` pass on a clean clone; CI green; one trace spans web → orchestrator → Postgres (in M0 verified by a manual click in the UI plus `make verify-trace` against Jaeger; browser automation arrives in M5).
 
 ## M1 — x402 Spring Boot starter + first paid endpoint (1 week)
-- `libs/x402-spring-boot-starter`: built on the official x402 Java SDK — server filter + `@RequiresPayment` (`exact` scheme), `RestClient` interceptor, `SpendGuard` hook, auto-configuration, fake facilitator for tests, real facilitator client for Base Sepolia.
+- `libs/x402-spring-boot-starter`: a native x402 v2 implementation (`exact` scheme on EVM only; ADR-0008, the official Java SDK is a reference) — server filter + `@RequiresPayment` (`exact` scheme), `RestClient` interceptor, `SpendGuard` hook, auto-configuration, fake facilitator for tests, real facilitator client for Base Sepolia.
 - `seller-api`: one paid endpoint (`GET /v1/disclosures/{ticker}/summary`, price in test USDC).
-- Spec-conformance tests against the x402 Foundation examples.
+- Spec-conformance tests against the x402 Foundation examples; EIP-712/EIP-3009 signing verified against the spec test vectors.
 
 **Accept:** a console client pays the endpoint on Base Sepolia and gets data; replayed payload is rejected; README quickstart works copy-paste; starter publishes to a local Maven repo and a sample app uses it with zero config beyond properties.
 
