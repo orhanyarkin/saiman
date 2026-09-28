@@ -3,6 +3,7 @@ package io.github.orhanyarkin.x402.core;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.Base64;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -54,6 +55,8 @@ import tools.jackson.databind.type.LogicalType;
  * the input. Thread-safe and stateless; one instance is enough for an application.
  */
 public final class X402Codec {
+
+    private static final Pattern SAFE_PATH_SEGMENT = Pattern.compile("[A-Za-z0-9_]{1,64}");
 
     /** Maximum size, in bytes, of a base64-decoded x402 header value this codec will parse. */
     public static final int MAX_DECODED_BYTES = 16 * 1024;
@@ -204,9 +207,17 @@ public final class X402Codec {
         if (path.isEmpty()) {
             return "";
         }
+        // Property names can come from the sender (an unknown property in a strict decode), so
+        // only short identifier-like names are shown; anything else becomes "?" to keep CR/LF,
+        // escape sequences and long attacker text out of logs and Problem Details.
         String dotted = path.stream()
-                .map(ref -> ref.getPropertyName() != null ? ref.getPropertyName() : "[" + ref.getIndex() + "]")
+                .map(ref ->
+                        ref.getPropertyName() != null ? safeSegment(ref.getPropertyName()) : "[" + ref.getIndex() + "]")
                 .collect(Collectors.joining("."));
         return " (at " + dotted + ")";
+    }
+
+    private static String safeSegment(String propertyName) {
+        return SAFE_PATH_SEGMENT.matcher(propertyName).matches() ? propertyName : "?";
     }
 }
