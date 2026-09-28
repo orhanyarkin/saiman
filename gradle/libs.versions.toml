@@ -8,6 +8,7 @@ errorprone-plugin = "5.1.1"
 nullaway = "0.14.2"
 datasource-micrometer = "2.3.0"    # 2.x line targets Spring Boot 4
 web3j = "6.0.0"                    # crypto module only (secp256k1, EIP-712); Jackson 3 (ADR-0008)
+bouncycastle = "1.86"               # pinned above web3j's 1.80 (CVE fixes in >= 1.85); published in the starter POM
 resilience4j = "2.4.0"             # core modules only; wired programmatically, no Spring integration module
 
 [libraries]
@@ -16,12 +17,14 @@ spring-ai-bom = { module = "org.springframework.ai:spring-ai-bom", version.ref =
 errorprone-core = { module = "com.google.errorprone:error_prone_core", version.ref = "errorprone" }
 nullaway = { module = "com.uber.nullaway:nullaway", version.ref = "nullaway" }
 datasource-micrometer-spring-boot = { module = "net.ttddyy.observation:datasource-micrometer-spring-boot", version.ref = "datasource-micrometer" }
+bcprov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 web3j-crypto = { module = "org.web3j:crypto", version.ref = "web3j" }
 resilience4j-circuitbreaker = { module = "io.github.resilience4j:resilience4j-circuitbreaker", version.ref = "resilience4j" }
 resilience4j-retry = { module = "io.github.resilience4j:resilience4j-retry", version.ref = "resilience4j" }
 
 # Versions managed by the Spring Boot BOM
 jspecify = { module = "org.jspecify:jspecify" }
+jackson-databind = { module = "tools.jackson.core:jackson-databind" }
 spring-boot-starter-webmvc = { module = "org.springframework.boot:spring-boot-starter-webmvc" }
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
 spring-boot-starter-opentelemetry = { module = "org.springframework.boot:spring-boot-starter-opentelemetry" }
