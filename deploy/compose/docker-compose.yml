@@ -58,7 +58,7 @@ services:
       start_period: 10s
 
   redpanda:
-    image: redpandadata/redpanda:v26.1.18
+    image: redpandadata/redpanda:v26.2.3
     restart: unless-stopped
     command:
       - redpanda
