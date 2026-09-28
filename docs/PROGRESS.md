@@ -2,7 +2,7 @@
 
 ## Current milestone
 M1 — x402 starter + first paid endpoint: **in progress** on branch `m1-x402`. Plan: architect design pass approved 2026-09-28 (ADR-0008 native x402 v2, ADR-0009 secrets). Tasks: T0 orchestrator (catalog, publishing convention, ADRs) · T1 payments-engineer starter core/evm · T2 server + facilitator + FakeFacilitator · T3 client + SpendGuard + console buyer · T4 seller-api endpoint · T5 infra (compose payTo check, make x402-*, CI) · T6 README quickstart + live Base Sepolia payment.
-Status: T0, T1, T5 done (committed on `m1-x402`); T2 and T3 in progress; T1 security re-check running. M0 merged to main.
+Status: T0, T1, T5 done (committed on `m1-x402`); T2 and T3 in review/fix rounds. M0 merged to main.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
@@ -19,10 +19,11 @@ Status: T0, T1, T5 done (committed on `m1-x402`); T2 and T3 in progress; T1 secu
 - T5 (infra): `make up` requires a valid `X402_SELLER_PAYTO_ADDRESS` (never echoes it); compose-policy scans every profile for key material (env_file, secrets, configs, mounts, env) with 17 fixture tests in CI; seller-api gets payTo + healthy Valkey; `make x402-*` targets. Reviewed by reviewer + security-auditor; blocking findings fixed and verified by the fixture tests.
 - T1 (payments-engineer): x402 v2 records + codec, canonical EIP-3009 authorization, low-s signature policy, EIP-712 digest over a fixed Base Sepolia USDC domain. Known-answer tests: EIP-712 Mail vector; the x402 spec payment payload recovers to its payer; domain separator and typehash pinned; `@Tag("testnet")` check of `DOMAIN_SEPARATOR()` on chain (passed locally). 93 tests. Review round 1 found 8 reviewer + 3 security blocking issues (non-canonical inputs defeating the replay key, high-s signatures, payload in exception causes, strict decoding of facilitator bodies, `extra` typing); all fixed. POM pins jackson-databind 3.1.5 and bcprov 1.86; Vert.x/ConnId/KZG/tuweni excluded with a build check.
 
-**Paused 2026-09-28 (usage limit)** — resume here
-- T2 (server, facilitator, FakeFacilitator) and T3 (client, SpendGuard, console buyer) were started in agent worktrees and stopped early, still reading the code: both worktrees were at 8ed1e28 (T1 included) with no changes. On resume: restart T2 and T3 with the same prompts from the `m1-x402` tip.
-- The T1 security re-check (security-auditor) did not run; rerun it.
-- Then: T4 seller-api, re-add the sample build to `make test`/CI and the sample spotless to `make lint`, T6 README quickstart + live Base Sepolia payment.
+**Status (updated 2026-09-28 evening)** — resume here if a session stops
+- Committed after T1: codec log-injection fix (3fcd40e; T1 security re-check otherwise all resolved), starter build deps for T2/T3 (8ed1e28) and micrometer-core (71a29d1), `make` reads only the public `X402_SELLER_PAYTO_ADDRESS` from `.env` via an allowlisted reader (28b7943).
+- T2 (server, facilitator, observation, FakeFacilitator): implemented, 119 tests green together with T3; uncommitted in the main checkout (copied from `.claude/worktrees/agent-a382207546068b271`). Reviewer + security-auditor round 1 in progress. Known gaps: `x402.payments` counter / `x402.payment.amount` summary not yet added; no dedicated facilitator-timeout test.
+- T3 (client, SpendGuard, console buyer): round 1 blocking findings being fixed in `.claude/worktrees/agent-aaeb3ed3f8bab648a` (release after a sent signature, PropertiesSpendGuard race, signing-failure leak, redirects, missing fail-closed tests). The main checkout has T3's pre-fix version — replace it with the worktree version when done.
+- Next: commit T2/T3 after review, T4 seller-api, re-add the sample to `make test`/`make lint`/CI, T6.
 
 **Carry-forward review findings (must land in later tasks)**
 - T1–T3: no Bean Validation on key/address properties (Boot prints the rejected value); validate in code without echoing; output-capture tests.
