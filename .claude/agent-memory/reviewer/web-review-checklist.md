@@ -9,10 +9,10 @@ Verified on 2026-09-27 (M0 T5 review) with pnpm 12.6.0, in a scratchpad copy of 
 
 - **pnpm minimumReleaseAge.** Built-in default is 1440 min and NON-strict: pnpm silently appends
   immature versions to `minimumReleaseAgeExclude` in pnpm-workspace.yaml, and CI's frozen install
-  then trusts them. Setting `minimumReleaseAge: 1440` explicitly makes it strict (install fails
+  then trusts them. Setting `minimumReleaseAge` explicitly (the repo uses 4320 = 3 days, matching Dependabot `cooldown`) makes it strict (install fails
   instead). A frozen install re-verifies lockfile entries against the cutoff. Flag any exclude
   entry; the fix is pinning the previous release. Path: pin in package.json, install WITH the old
-  excludes still present, then replace the file with `minimumReleaseAge: 1440`.
+  excludes still present, then replace the file with `minimumReleaseAge: 4320`.
   Check dates with `pnpm view <pkg> time --json`.
 - **Vitest 5 + @testing-library/jest-dom 7.0.1**: `tsc -b` fails with TS2428 ("All declarations
   of 'Assertion' must have identical type parameters"). Runtime tests pass. `skipLibCheck: true`

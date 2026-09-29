@@ -17,7 +17,7 @@ match those too — e.g. `@tanstack/router-plugin` pins its `@tanstack/router-co
 `router-generator` versions, so going one patch back on the top-level package had to go back on
 those transitively-resolved versions too, which only shows up via `npm view <pkg>@<version>
 dependencies`). Then replace whatever `pnpm-workspace.yaml` content resulted with an explicit
-`minimumReleaseAge: <minutes>` value (I used 1440 = 24h) — an explicit value puts pnpm in *strict*
+`minimumReleaseAge: <minutes>` value (the repo now uses 4320 = 3 days, matching Dependabot `cooldown`) — an explicit value puts pnpm in *strict*
 mode, so future auto-excludes aren't silently written; a fresh `install --frozen-lockfile` failing
 loudly is the correct behavior if this happens again, not a silent bypass.
 
