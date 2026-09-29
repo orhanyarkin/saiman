@@ -16,9 +16,10 @@ Each milestone ends with something demo-able and a short write-up in `docs/PROGR
 **Accept:** a console client pays the endpoint on Base Sepolia and gets data; replayed payload is rejected; README quickstart works copy-paste; starter publishes to a local Maven repo and a sample app uses it with zero config beyond properties.
 
 ## M2 — Ingest + RAG (1 week)
-- `ingest` (Spring AI `PgVectorStore`): KAP disclosure + news pipeline into pgvector, idempotent, DLQ.
-- Hybrid retrieval (vector + Turkish full-text, RRF) exposed to seller-api; answers cite chunk ids.
-- Paid endpoints use RAG; also exposed as MCP tools.
+- `ingest` (Spring AI `PgVectorStore`): the official MKK KAP data API (free tier = test environment, a frozen 2023 snapshot; ADR-0010) into pgvector for ~20 BIST tickers, idempotent, DLQ, blocked disclosures honoured. News ingestion is dropped (no source with an aligned time window).
+- `libs/model-router` (ADR-0011): tiers, data-class policy, daily USD cap and metrics; embeddings and answers go through it.
+- Hybrid retrieval (vector + Turkish full-text, RRF) exposed to seller-api over an internal API (ADR-0012); answers cite chunk ids.
+- Paid endpoints use RAG: the disclosure summary and a new questions endpoint. MCP tools move to M3 (paid MCP needs x402's MCP transport and its only client is M3's orchestrator).
 
 **Accept:** ≥5k chunks indexed; a question returns an answer with ≥2 valid citations; re-running ingest creates no duplicates.
 

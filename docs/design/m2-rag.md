@@ -1,0 +1,64 @@
+# M2 design: ingest + RAG
+
+Approved 2026-09-29. Decisions: ADR-0010 (official MKK KAP API, frozen 2023 corpus), ADR-0011 (model router library), ADR-0012 (corpus ownership, hybrid retrieval), ADR-0009 amendment (credentials). This file is the shared contract for the M2 tasks; the ADRs say *why*, this says *what*.
+
+**Acceptance (docs/PLAN.md):** ≥5k chunks indexed; a question returns an answer with ≥2 valid citations; re-running ingest creates no duplicates.
+
+## Facts about the data source (measured 2026-09-29)
+- Base URL `https://apigwdev.mkk.com.tr/api/vyk`, header `Authorization: Basic <base64>`; the value is the content of `secrets/mkk_credentials` (never read or print it). 6 calls/minute; use **5/minute**.
+- Queryable `disclosureIndex` range **1091689–1231017** (≈2023). `GET /lastDisclosureIndex` → `{"lastDisclosureIndex":"1231017"}`.
+- `GET /members` → `[{id, title, stockCode ("A,B" possible), memberType}]`; THYAO is company id `1107`. Filter `memberType == "IGS"`.
+- `GET /disclosures?disclosureIndex=N&companyId=ID` → JSON array of `{disclosureIndex, disclosureType, disclosureClass, subReportIds, title, companyId, acceptedDataFileTypes}`. **Windowed**: it scans a bounded, variable index window and returns the matches (≤50), so a short or empty page does not mean the end. Page with cursor = max returned index + 1; on an empty page advance the cursor by a fixed step (default 5000); stop when the cursor passes `lastDisclosureIndex`. `companyId` is a single id.
+- `GET /disclosureDetail/{idx}?fileType=html` → `{disclosureIndex, senderId, senderTitle, senderExchCodes, disclosureReason (NEW|UPD|CORR|CANC), relatedDisclosureIndex, disclosureType, disclosureClass, subject{tr,en}, summary{tr,en}, time "dd.MM.yyyy HH:mm:ss", link, attachmentUrls[], htmlMessages[{id, tr, en}], year, period}`. Each `htmlMessages[].tr` is **base64**; the decoded XHTML text is **UTF-8** although its XML header says ISO-8859-9. Remove `<style>`, `<script>` and comments, extract text with jsoup, normalise to NFC, collapse whitespace.
+- `GET /blockedDisclosures` → `[{blockedType ("Disclosure"|"Attachment"), disclosureIndex, ...}]`.
+- Yield measured on THYAO: ODA ≈ 2.7–4.6k chars (2–3 chunks); DG governance forms 36–49k chars (23–31 chunks); FR HTML ≈ 700 chars of text (content is in PDFs) → **skip FR**, no attachments. Expected ≈250–400 chunks per company-year, so ~15–20 companies reach 5k chunks (≈1.5–2k detail calls ≈ 4–6 h).
+- Citation URL: `https://www.kap.org.tr/tr/Bildirim/<disclosureIndex>` (the detail's `link` points at a test site; do not use it).
+
+## `libs/shared` (orchestrator-owned, already committed in T0)
+- `shared.money.Money(long atomicUnits, String asset, int decimals)`: non-negative, `plus`/`minus`/`compareTo`, `usdMicros(..)`, `usdc(..)`.
+- `shared.retrieval`: `RetrieveRequest(query, tickers, topK)` (validated: query 1–500 chars, ≤10 tickers `[A-Z0-9]{3,6}`, topK 1–20), `RetrievedChunk`, `RetrieveResponse(chunks, corpusWatermark)`, `IndexedTicker`.
+
+## `libs/model-router` (T1, agent-engineer)
+Package `io.github.orhanyarkin.saiman.modelrouter`. Public API:
+```java
+public enum Tier { TIER0, TIER1, TIER1_PREMIUM, TIER2 }        // embeddings are a separate method
+public enum DataClass { PUBLIC, INTERNAL, SENSITIVE }
+public interface ModelRouter {
+  ChatClient chatClient(Tier tier, DataClass dataClass);         // default advisors: cost cap + cost metrics
+  EmbeddingModel embeddingModel(DataClass dataClass);            // decorator: cost cap + metrics
+}
+```
+- Config (`@ConfigurationProperties("saiman.router")`, records, no Bean Validation on secrets): routes (tier → provider, model id, allowed data classes, hosting region), prices per million tokens (in `config/router/prices.yaml`, USD micros as `long`), `daily-cap-usd-micros` (default 700000 = $0.70), `embedding.model` (`text-embedding-3-small`), `embedding.dimensions` (1536).
+- **Data-class policy** is code, not prompt: a route whose provider does not allow the requested class throws `DataClassViolationException` before any network call.
+- **Daily cap** in Valkey (`StringRedisTemplate`, key `router:cost:{yyyy-MM-dd}` in micro-dollars, atomic `INCRBY`; a call is refused when the day's total already ≥ cap; cost is added after the call from the response usage). Without a `StringRedisTemplate` an in-memory counter with a startup WARN.
+- Metrics (Micrometer, only when `MeterRegistry` exists): `router.tokens` (tier, direction), `router.cost.usd_micros` (tier), calls counter with outcome.
+- OpenAI adapter built by hand from `spring-ai-openai` (no Boot starter); `OPENAI_API_KEY` from the property `openai_api_key` (configtree file `openai_api_key`) — absent key ⇒ the beans exist and the first call fails closed with a clear message; `toString()` of the properties redacts the key; errors never include request bodies or the key.
+- Test fakes: `FakeChatModel` and `FakeEmbeddingModel` (deterministic hash-based vectors of the configured dimension) in `src/testFixtures`, so ingest and seller-api tests never need a key or network.
+- Model ids for chat tiers come from config; the ids in `docs/ARCHITECTURE.md` are display names and are **unverified as API ids** — the live smoke test (T7) fixes them.
+
+## `services/ingest` (T2, ai-engineer)
+Base package `io.github.orhanyarkin.saiman.ingest`, feature packages `mkk` (client), `pipeline`, `chunking`, `store`, `retrieval`, `dlq`.
+- Config `saiman.ingest.*`: `mkk.base-url`, `mkk.credentials` (`${mkk_credentials:}` from configtree), `mkk.rate-per-minute=5`, `mkk.empty-page-step=5000`, `tickers` (default ≈20: THYAO, ASELS, GARAN, AKBNK, ISCTR, YKBNK, EREGL, KCHOL, SAHOL, BIMAS, TUPRS, SISE, FROTO, TOASO, PGSUS, TCELL, ARCLK, PETKM, SASA, KRDMD), `classes=ODA,DG`, `chunk.target-tokens=400`, `max-attempts=3`, `backfill.enabled=false`. Unknown tickers are logged and skipped, never fatal. `spring.config.import=optional:configtree:${saiman.secrets-dir:/run/secrets/}`.
+- Pipeline (per company, resumable): resolve companyId via `/members` (cached) → page `/disclosures` with the windowed cursor → keep `disclosureClass ∈ classes` → skip blocked (`/blockedDisclosures`, refreshed at run start) → `/disclosureDetail` → normalise → content hash → skip if unchanged → chunk (Spring AI `TokenTextSplitter`, metadata: documentId, ticker, disclosureIndex, chunkNumber, title, sourceUrl, publishedAt) → embed + `PgVectorStore.add` (outside the DB transaction) → finalize (status `INDEXED`, delete surplus chunk numbers). `CORR`/`UPD` mark the `relatedDisclosureIndex` document `SUPERSEDED`; `CANC` marks it `SUPERSEDED` and skips the cancelling notice. Blocked disclosures already indexed are deleted.
+- HTTP client: `RestClient`, User-Agent `saiman-ingest/<version> (+https://github.com/orhanyarkin/saiman; non-commercial research)`, redirects off, connect 5 s / read 30 s, Resilience4j `RateLimiter` (5/min) + `CircuitBreaker` + `Retry` (429/5xx/IO, jittered, honours `Retry-After`; 4xx other than 429 is not retried). Base URL from config only; path ids are numeric and validated.
+- Run mode: on demand. `saiman.ingest.backfill.enabled=true` starts the job in the background at startup; a Postgres advisory lock (`pg_try_advisory_lock`) prevents concurrent runs; the job is resumable through `source_cursor` and document statuses; the service serves retrieval while it runs.
+- Schema (Flyway `V1__ingest.sql`, schema `ingest`, `PgVectorStore` with `initialize-schema=false`, `.schemaName("ingest").vectorTableName("chunk")`, TEXT ids): tables `source_document`, `chunk`, `source_cursor`, `dead_letter` as in ADR-0012 (documents: unique `(source, external_id)`, `content_hash`, `status PENDING|INDEXED|FAILED|SUPERSEDED|BLOCKED`, `attempts`; chunk: `id text` = `kap:<index>:<nnnn>`, `content`, `metadata jsonb`, `embedding vector(1536)`, generated `document_id`, `ticker`, `content_tsv tsvector` = `to_tsvector('turkish', lower(content COLLATE "tr-TR-x-icu"))`; HNSW `vector_cosine_ops`, GIN on `content_tsv`, btree on `ticker`, `document_id`). If the ICU collation is unavailable in the pgvector image, fall back to `translate()`-based Turkish lower-casing and record it in the ADR.
+- Retrieval (`@Transactional(readOnly = true)`, `SET LOCAL hnsw.iterative_scan = relaxed_order`): vector leg top 40 with the ticker filter (embedding of the query through the router, `DataClass.INTERNAL` because it derives from a buyer question), lexical leg top 40 with `websearch_to_tsquery('turkish', lower(:q COLLATE "tr-TR-x-icu"))` and `ts_rank_cd`; both exclude `SUPERSEDED`/`BLOCKED` documents; fuse with RRF k=60 in a pure `RrfFusion` class (unit-tested). Endpoints: `POST /internal/v1/retrieve`, `GET /internal/v1/chunks/{chunkId}` (chunk id validated `kap:\d{1,10}:\d{4}`), `GET /internal/v1/tickers`. Errors are Problem Details; no query text in logs.
+- DLQ: `dead_letter` unique `(source, external_id, stage)`; after `max-attempts` a document is `FAILED` and parked; a `POST /internal/v1/admin/retry-dlq` (localhost-only compose network) resets it (wrapped by `make ingest-retry-dlq`).
+- Observability: a span per stage, counters `ingest.documents{outcome}`, `ingest.chunks`, `ingest.mkk.calls{outcome}`, gauge of DLQ size; embeddings' tokens and USD come from the router.
+- Tests (hermetic, no network, no key): `MockRestServiceServer`/local `HttpServer` fake of the MKK API with **synthetic** fixtures of the real shape (no KAP text in git) including base64 bodies, the windowed paging and blocked disclosures; Testcontainers Postgres (`pgvector/pgvector:0.8.6-pg17-trixie`) for schema, idempotency (second run ⇒ counts unchanged **and zero embed calls**), Turkish casing (`YOLLARI` matches `yolları`; `İ`/`ı`), RRF, superseded/blocked exclusion, DLQ.
+
+## `services/seller-api` (T4, payments-engineer)
+- `RagDisclosureSummaryService` replaces the fixture behind `DisclosureSummaryService` when `seller.disclosures.source=rag` (default `fixture` in tests and dev without ingest); `dataSource: "kap-rag"`. The summary is produced by the router (`Tier.TIER1`, `DataClass.PUBLIC`) from retrieved chunks with structured output `{summary, citedChunkIds}`; cached in Valkey by `(ticker, corpusWatermark)`. Ingest unreachable ⇒ 503 (never settled); never silently fall back to fixture data inside a paid response.
+- New `POST /v1/disclosures/{ticker}/questions` with `{question}` (3–500 chars) → `{ticker, question, answer, citations[{chunkId, sourceUrl, title, publishedAt, excerpt}], dataSource, corpusAsOf}`, price `seller.prices.disclosure-answer=20000` (0.02 USDC). Router `Tier.TIER1`, `DataClass.INTERNAL`. Structured output `{answer, citedChunkIds}`; ids outside the retrieved set are dropped; **fewer than 2 valid citations ⇒ 422**, which is never settled. The question is untrusted input: it is never concatenated into a system prompt, retrieved chunk text is wrapped as quoted data with an instruction to ignore instructions inside it, and the answer schema is validated.
+- Path variable `ticker` `^[A-Z0-9]{3,6}$` (400 otherwise); unknown/unindexed ticker ⇒ 404; both never settled.
+- `seller.ingest.base-url` (default `http://ingest:8083`), timeouts and Resilience4j on the client, `OPENAI_API_KEY` via configtree `openai_api_key`.
+- Tests: FakeFacilitator + Testcontainers Valkey as in M1; a fake retrieval server; router fakes. Paths that must not settle: 400, 404, 422, 503, ingest down, router refusal (daily cap).
+
+## `deploy`, Makefile, CI (T5, infra)
+- Compose: `ingest` gets `secrets: [mkk_credentials, openai_api_key]`, `seller-api` gets `secrets: [openai_api_key]` (top-level `secrets:` from `../../secrets/...`, `file:` sources), `SAIMAN_SECRETS_DIR` default, `SELLER_INGEST_BASE_URL=http://ingest:8083`, `depends_on` postgres/valkey healthy; `ingest` reaches Postgres schema `ingest` (own role is a later hardening item). `scripts/check-compose-policy.sh` allows exactly those secrets (ADR-0009 amendment) and keeps failing everything else; extend `scripts/test-check-compose-policy.sh` fixtures accordingly.
+- Make targets: `ingest-backfill` (runs the ingest service locally against the compose Postgres with `--saiman.ingest.backfill.enabled=true`, secrets dir `./secrets`), `ingest-status` (tickers and counts via the internal API), `ingest-verify-rerun` (runs the backfill twice against a small ticker set and asserts counts are unchanged), `ingest-retry-dlq`, `rag-ask` (pays for a question with the console buyer). A one-off `make secrets-check` reports which of `secrets/mkk_credentials` and `secrets/openai_api_key` exist, without reading them.
+- CI: no outbound calls to MKK or OpenAI, no keys; Testcontainers Postgres for ingest tests.
+
+## Not in M2
+News ingestion, MCP tools (M3), FR reports and PDF attachments, Kafka events and the outbox (M4), per-run budgets and non-OpenAI adapters (M3), the evals golden set beyond an optional seed (M6).

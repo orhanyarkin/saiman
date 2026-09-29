@@ -15,12 +15,13 @@ settings.gradle.kts
 gradle/libs.versions.toml         version catalog — every dependency version lives here
 libs/
   x402-spring-boot-starter/       x402 server filter + @RequiresPayment + RestClient interceptor, auto-configured (open-source, publishable)
-  shared/                         event contracts (records), Money type, OTel helpers
+  shared/                         event contracts (records), Money type, retrieval contract, OTel helpers
+  model-router/                   the only path to LLM/embedding providers: tiers, data-class policy, daily USD cap (ADR-0011)
 services/
   seller-api/                     paid endpoints behind x402 + MCP tools (@McpTool)
-  orchestrator/                   agents (Spring AI ChatClient), model router, spend control, SSE/WebSocket run stream
+  orchestrator/                   agents (Spring AI ChatClient) via libs/model-router, spend control, SSE/WebSocket run stream
   ledger/                         double-entry ledger, inbox/outbox, reconciliation job
-  ingest/                         KAP/news → chunk → embed → pgvector (Spring AI VectorStore)
+  ingest/                         MKK KAP API → chunk → embed → pgvector (Spring AI VectorStore); internal hybrid retrieval
   evals/                          golden-set evals, cost/quality reports (Spring Boot CLI app)
 web/                              React 19 + Vite + TypeScript + TanStack Router/Query + Tailwind + shadcn/ui
 deploy/
@@ -37,7 +38,7 @@ docs/                             ARCHITECTURE, PLAN, PROGRESS, SETUP, KICKOFF, 
 3. **Spend limits live outside the LLM.** Budget checks are deterministic code in the spend-control plane (Valkey + Postgres), never a prompt instruction. Every paid call needs: per-run budget, global daily cap, payee allowlist, idempotency key.
 4. **Money is integers.** `long` atomic units + asset decimals (USDC = 6), wrapped in a `Money` record. No `double`/`float`; no `BigDecimal` on the wire. Format only at the UI edge.
 5. **Idempotency + outbox.** Every state change that emits an event goes through the transactional outbox; consumers dedupe through an inbox table keyed by event id, in the same transaction as the state change.
-6. **LLM calls go through the model router** in `orchestrator` (a `ChatClient`/`ChatModel` facade over Spring AI). No code calls a provider directly. The router enforces the data-classification policy (ADR-0003).
+6. **LLM calls go through the model router** (`libs/model-router`, a `ChatClient`/`EmbeddingModel` facade over Spring AI; ADR-0011). No code calls a provider directly. The router enforces the data-classification policy (ADR-0003).
 7. **No real cloud changes.** Terraform `init`/`validate`/`fmt`/`plan` are fine; `apply`/`destroy` are for the human only.
 8. **Public data only** in RAG. Respect KAP terms; store source URL + retrieval time per chunk; answers cite chunk ids.
 9. **Don't install toolchains** (no `curl | bash`, no SDKMAN installs). Everything is preinstalled (docs/SETUP.md). If something is missing, stop and tell the human.
@@ -82,7 +83,7 @@ The main session is the **orchestrator**: it plans, delegates, integrates and ve
 
 1. Start each milestone with a read-only design pass from `architect`; check it against the acceptance criteria in `docs/PLAN.md`.
 2. Split work into tasks touching **disjoint directories** and delegate to the owner:
-   `payments-engineer` (libs/x402-spring-boot-starter, services/seller-api, services/ledger) · `agent-engineer` (services/orchestrator) · `ai-engineer` (services/ingest, services/evals, prompts, router configs) · `frontend` (web) · `infra` (deploy, CI, Makefile).
+   `payments-engineer` (libs/x402-spring-boot-starter, services/seller-api, services/ledger) · `agent-engineer` (services/orchestrator, libs/model-router) · `ai-engineer` (services/ingest, services/evals, prompts, router configs) · `frontend` (web) · `infra` (deploy, CI, Makefile).
    Shared contracts in `libs/shared` and `gradle/libs.versions.toml` change only through the orchestrator, before parallel work starts.
 3. After each task: `test-runner` verifies and `reviewer` reviews the diff **once**. `security-auditor` reviews **once per task**, and only for code touching payments, wallets, budgets or auth; plus **one audit at the end of each milestone**.
 4. Send blocking findings back to the owner. **No re-check rounds**: `test-runner` verifies the fixes; re-review (reviewer or security-auditor) only for **Critical** findings. Then merge, run `make test && make lint`, update `docs/PROGRESS.md`.

@@ -21,3 +21,9 @@ M0 left open how secrets reach services and which containers may hold a wallet k
 + The configtree pattern is the same one used for Kubernetes secrets later.
 − Paketo images run as a non-root user; mounted secret files must be readable by that user (check in M3).
 Revisit if: a service other than the orchestrator needs to sign.
+
+## Amendment (2026-09-29, M2): provider and data-source credentials
+- `ingest` holds the read-only **MKK API credential** (`mkk_credentials`, ADR-0010) and an **OpenAI API key**; `seller-api` holds the OpenAI key too (it answers questions through the model router, ADR-0011). Both are real, cost- or quota-bearing secrets, so they follow the buyer-key pattern: files under the git-ignored `secrets/` (mode 0600), mounted with compose `secrets:` only into the containers that need them, read through `spring.config.import=optional:configtree:…`. Never an environment variable, never in `.env` for containers, never logged. A `make`-time read of `.env` stays limited to the one public payout address.
+- `scripts/check-compose-policy.sh` allows exactly: `ingest` → `mkk_credentials`, `openai_api_key`; `seller-api` → `openai_api_key`; `orchestrator` → the buyer key (from M3). Any other service or secret fails the policy.
+- Spend containment does not rely on the key alone: the OpenAI project has a hard provider-side limit, and the router enforces a daily USD cap in code.
+
