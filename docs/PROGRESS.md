@@ -1,8 +1,9 @@
 # Progress
 
 ## Current milestone
-M1 — x402 starter + first paid endpoint: **done and merged to `main`** (PR [#10](https://github.com/orhanyarkin/saiman/pull/10), 2026-09-29). Tasks: T0 orchestrator (catalog, publishing convention, ADRs) · T1 payments-engineer starter core/evm · T2 server + facilitator + FakeFacilitator · T3 client + SpendGuard + console buyer · T4 seller-api endpoint · T5 infra (compose payTo check, make x402-*, CI) · T6 README quickstart + live Base Sepolia payment.
-Status: T0–T6 and the milestone-end security audit all done (one Medium finding, fixed and verified). Next: M2 (ingest + RAG), starting with an architect design pass per `docs/PLAN.md`.
+M2 — Ingest + RAG: **in progress** on branch `m2-rag` (not pushed yet). Architect design pass approved 2026-09-29 with the human's answers: corpus = the official MKK KAP API free tier, a frozen 2023 snapshot (ADR-0010); no news source; MCP tools moved to M3; ~20 BIST tickers; questions endpoint 0.02 USDC; OpenAI key provided (hard limit $10 at the provider, daily cap in code). Tasks: T0 orchestrator (done: catalog, `Money` + retrieval contract in `libs/shared`, `libs/model-router` interfaces, ADR-0010/0011/0012, `docs/design/m2-rag.md`) · T1 agent-engineer `libs/model-router` · T2 ai-engineer `services/ingest` · T4 payments-engineer seller-api RAG endpoints · T5 infra (compose secrets, make targets, CI) · T7 orchestrator: live backfill to ≥5k chunks, re-run delta 0, paid question with ≥2 citations. Milestone-end security audit (`model: opus`) at the end.
+Status: T0 committed; T1 and T2 running in parallel.
+M1 (x402 starter + first paid endpoint) is done and merged (PR #10).
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
