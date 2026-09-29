@@ -88,7 +88,11 @@ These are checked mechanically, not just by review:
 - **Decoder limits.** A 16 KB cap on the decoded payload, checked by encoded length *before*
   base64 decoding; strict duplicate-key detection; no scalar coercion (a JSON number can't become
   a wire string); required fields enforced by each record's compact constructor rather than
-  arriving as silent nulls.
+  arriving as silent nulls — for wire-input records (`PaymentPayload`, `Eip3009Authorization`, …).
+  Facilitator-response records (`SettlementResponse`, `VerifyResponse`) are decoded tolerantly and
+  have no such constructor, so a field a hostile or buggy facilitator omits (e.g. `transaction`)
+  really can come back `null` at runtime despite not being `@Nullable` in source — every call site
+  that reads one of these fields must check for that itself (M1-A was exactly this gap).
 - **Residual risk.** The private key's `String`/`BigInteger` forms can't be zeroised from the JVM
   heap — mitigated only by never exposing `/actuator/heapdump` or `/actuator/env`. A third party
   can front-run settlement (see "Ambiguous settlement" below): the seller gets paid but a given
@@ -104,9 +108,16 @@ These are checked mechanically, not just by review:
 
 - **Order: verify → serve (buffered) → settle.** The response is captured in a
   `ContentCachingResponseWrapper` and only flushed to the real client after a successful
-  `/settle` on a 2xx handler response. `/settle` is never retried (an ambiguous double-settle is
-  worse than a false 402); `/verify` and the startup `/supported` handshake retry only on 5xx, not
-  on 4xx/429 (the facilitator's own rejection is authoritative, not a transient condition).
+  `/settle` on a 2xx handler response — including on the paths the happy-path description above
+  doesn't cover: any unexpected exception while finishing a verified settlement (a malformed
+  facilitator response, an unforeseen failure) is caught and routed through the same
+  ambiguous-failure path (M1-A, fixed and covered by a test) rather than left to fall through and
+  flush the still-buffered body regardless. `/settle` is never retried (an ambiguous double-settle
+  is worse than a false 402); `/verify` and the startup `/supported` handshake retry on network
+  errors, timeouts, 5xx, and an undecodable or oversized body, never on 4xx/429 or while the
+  circuit breaker is open (the facilitator's own rejection is authoritative, not a transient
+  condition) — a 4xx on `/verify` releases the nonce claim (this server will never settle under
+  it), while a well-formed `isValid:false` response keeps it.
 - **Fail closed at startup**, for every configuration where the verify→settle order can't hold:
   no `@RequiresPayment` handler may return an async type (`Callable`, `DeferredResult`,
   `CompletableFuture`, `SseEmitter`, `StreamingResponseBody`, …) — an async dispatch would let the
@@ -114,22 +125,29 @@ These are checked mechanically, not just by review:
   registered on the handler mapping (an app overriding `WebMvcConfigurationSupport` directly would
   otherwise silently serve paid content for free); a missing, zero, or malformed
   `x402.server.pay-to` stops the app before it binds a port; the facilitator's `/supported` must
-  confirm `exact` on `eip155:84532` before any paid handler is allowed to exist.
+  confirm `exact` on `eip155:84532` before any paid handler is allowed to exist. This check is on
+  the handler's *declared* return type; a handler declared to return a wider type (e.g. `Object`)
+  that returns an async value at runtime is not caught here (tracked as a gap below).
 - **Settlement failure never leaks the handler's response.** On a settle failure the buffered
   response is fully reset — body, status *and* headers the handler set (a signed download URL, a
   `Set-Cookie`) — before writing the 402; headers set by *outer* filters (CORS, security headers)
   are restored from a snapshot taken before the handler ran.
 - **`PAYMENT-RESPONSE` is server-built**, from locally-known values only (the recovered signer as
   `payer`, the offer's own `network`/`amount`, a settlement transaction hash validated against
-  `0x[0-9a-f]{64}` or else treated as an ambiguous failure) — never a re-serialisation of whatever
-  the facilitator's response contained, which could otherwise carry attacker- or facilitator-sized
-  `extensions` past Tomcat's response header limit and turn a *settled* payment into a 500.
+  `0x[0-9a-fA-F]{64}`, missing or malformed treated as an ambiguous failure, never as success) —
+  never a re-serialisation of whatever the facilitator's response contained, which could otherwise
+  carry attacker- or facilitator-sized `extensions` past Tomcat's response header limit and turn a
+  *settled* payment into a 500.
 - **Replay** is defence-in-depth ahead of the on-chain EIP-3009 nonce: an atomic pre-settle claim
-  on `(network, asset, canonicalNonceKey)` in Valkey (`SET NX`, TTL tied to `validBefore`),
-  released with compare-and-delete so an expired claim someone else re-acquired is never deleted
-  out from under them. Cross-endpoint reuse of one signed payload at the *same* price and payee is
-  inherent to the `exact` scheme, not a bug in this starter — a signature doesn't bind to one
-  specific resource.
+  on `(network, asset, canonicalNonceKey)`, released with compare-and-delete so an expired claim
+  someone else re-acquired is never deleted out from under them. It's held in Valkey (`SET NX`,
+  TTL tied to `validBefore`) when a `StringRedisTemplate` bean exists — seller-api always has one —
+  or, failing that, per-JVM-instance in memory with a startup `WARN` (single-instance only, so it
+  offers no protection across a fleet); a Valkey outage answers `503`, never silently falling back
+  to an unprotected state. This assumes every instance's clock is within a few seconds of the
+  others'; a lagging instance can accept a replay its peers would already reject. Cross-endpoint
+  reuse of one signed payload at the *same* price and payee is inherent to the `exact` scheme, not
+  a bug in this starter — a signature doesn't bind to one specific resource.
 - **Request-derived metadata is never trusted.** The resource URL sent to the facilitator and
   recorded in events comes from an explicit `x402.server.public-base-url` (or the request path
   alone), never `Host`/`X-Forwarded-*`. The payload forwarded to the facilitator is rebuilt
@@ -215,6 +233,10 @@ These are checked mechanically, not just by review:
 | Handler side effects happen before settlement succeeds | Verify-then-serve-then-settle is the only order that keeps the resource unpaid-for on failure, but it means a drained/expiring-key attacker gets one free handler run | M2/M3 ADR: an opt-in settle-before-serve mode for expensive (LLM-backed) handlers |
 | A resource's ticker/path reaches the third-party facilitator as part of the standard `/verify`/`/settle` call | Inherent to x402 — the facilitator has to know what it's authorizing; not PII here (public stock symbols) | Revisit if a future paid resource's identifier is sensitive |
 | No test drives a genuine 5xx from inside a real `@RequiresPayment` handler (only the starter's synthetic fixtures) | Coverage gap, not a known defect | Add when the next paid handler lands |
+| A handler declared with a wide return type (e.g. `Object`) that returns an async value at runtime bypasses the startup rejection of async handlers | The startup check only inspects the *declared* return type; Spring MVC picks the async handling path from the runtime value | Before M2's handlers grow return types wider than a concrete record: register `CallableProcessingInterceptor`/`DeferredResultProcessingInterceptor` to catch every async path regardless of declared type |
+| One circuit breaker instance is shared by `/verify` and `/settle`, and counts a facilitator rejection (`FacilitatorClientErrorException`, including 429) as a breaker failure | A flood of unfunded-wallet signatures rate-limited by x402.org could open the breaker and short-circuit `/settle` for requests that already ran their (paid-for) handler | M3, alongside the per-payer/IP rate limit above: separate breakers for verify and settle, and don't count 4xx (or at least not 429) as a breaker failure |
+| The starter's client interceptor still follows redirects on Spring Boot's defaults; only the console-buyer *sample* pins `spring.http.clients.redirects=dont-follow` | `X402RestClients.nonRedirectingRequestFactory()` exists but isn't applied automatically | The M2/M3 orchestrator's paying `RestClient` must use it explicitly, with its own real-socket test (same shape as the sample's) |
+| Valkey (the nonce store) is reachable from every app container, not only seller-api | Compose gives every service the same `SPRING_DATA_REDIS_URL`; a future service with an unrelated vulnerability (e.g. an SSRF-exposed fetcher in `ingest`) could reach it too | Same remediation as the no-auth gap above: scope network/credentials to the services that actually need it |
 
 ## How to re-verify
 
@@ -224,6 +246,12 @@ These are checked mechanically, not just by review:
 - `scripts/test-check-compose-policy.sh` (K1) and the starter's own test suite (K2 — every
   validation-message test plants a marker and asserts it's absent from output; K3 — testnet-tagged
   tests are excluded by default) run in CI on every change.
-- The milestone-end audit for M1 covers T2's server flow end to end (replay protection, the
+- The milestone-end audit for M1 covered T2's server flow end to end (replay protection, the
   verify → handler → settle order, no retry on `/settle`, 4xx/429 handling) as a single pass
-  across the whole flow, since individual-task reviews only ever see one diff at a time.
+  across the whole flow, since individual-task reviews only ever see one diff at a time — probed,
+  not just read: concurrent replay with re-cased nonces, injected settle timeouts/5xx/429/missing
+  transactions, and a circuit-breaker retry-predicate check by reflection. All four properties held
+  except one gap this pass found and closed: a settlement response missing its transaction hash
+  could fall through to flushing the paid response anyway (M1-A, fixed, now a regression test in
+  `RequiresPaymentIntegrationTests`). M1's real payment on Base Sepolia (`docs/PROGRESS.md`) went
+  through this exact fixed path.

@@ -59,6 +59,7 @@ public final class FakeFacilitator implements AutoCloseable {
     private final Set<String> usedAuthorizations = ConcurrentHashMap.newKeySet();
     private final AtomicReference<@Nullable String> injectedVerifyInvalidReason = new AtomicReference<>();
     private final AtomicReference<@Nullable String> injectedSettleFailureReason = new AtomicReference<>();
+    private final AtomicReference<Boolean> injectedSettleMissingTransaction = new AtomicReference<>(false);
     private final AtomicLong injectedSettleDelayMillis = new AtomicLong();
     private final AtomicLong txHashCounter = new AtomicLong();
     private final AtomicLong verifyCallCount = new AtomicLong();
@@ -96,6 +97,16 @@ public final class FakeFacilitator implements AutoCloseable {
         injectedSettleFailureReason.set(reason);
     }
 
+    /**
+     * Forces the next {@code /settle} call to answer {@code success:true} with no {@code
+     * transaction} field -- a malformed but not-outright-rejecting facilitator response, to
+     * exercise the server's ambiguous-settlement handling (M1-A: this must never be treated as a
+     * real success).
+     */
+    public void injectSettleSuccessWithoutTransaction() {
+        injectedSettleMissingTransaction.set(true);
+    }
+
     /** Delays every {@code /settle} response by {@code delay}, to exercise a client-side read timeout. */
     public void injectSettleDelay(Duration delay) {
         injectedSettleDelayMillis.set(delay.toMillis());
@@ -121,6 +132,7 @@ public final class FakeFacilitator implements AutoCloseable {
     public void resetInjectedFailures() {
         injectedVerifyInvalidReason.set(null);
         injectedSettleFailureReason.set(null);
+        injectedSettleMissingTransaction.set(false);
         injectedSettleDelayMillis.set(0);
         injectedVerifyServerErrorCount.set(0);
         injectedVerifyClientErrorCount.set(0);
@@ -237,6 +249,19 @@ public final class FakeFacilitator implements AutoCloseable {
                 return;
             }
             usedAuthorizations.add(authorization.canonicalNonceKey());
+            if (injectedSettleMissingTransaction.get()) {
+                // Raw JSON, not the SettlementResponse record: a real hostile/malformed
+                // facilitator sends bytes, not a Java object, and the record's `transaction`
+                // component isn't @Nullable (NullAway would reject constructing one with a null
+                // transaction) -- this is exactly the shape a facilitator omitting the field
+                // produces once decoded through the server's tolerant mapper.
+                writeJson(
+                        exchange,
+                        200,
+                        "{\"success\":true,\"payer\":\"" + authorization.from() + "\",\"network\":\""
+                                + request.paymentRequirements().network() + "\"}");
+                return;
+            }
             SettlementResponse success = new SettlementResponse(
                     true,
                     null,

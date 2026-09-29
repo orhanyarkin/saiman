@@ -239,6 +239,55 @@ class RequiresPaymentIntegrationTests {
     }
 
     @Test
+    void settleSuccessWithoutAWellFormedTransactionIsTreatedAsAmbiguousNotCharged() {
+        // M1-A: a facilitator answering "success" with no (or a malformed) transaction hash must
+        // never be treated as a real settlement -- the field isn't validated by the wire codec
+        // (it's a facilitator-response record, not client input), so this is the server's own
+        // last line of defence against flushing paid content for an unconfirmed payment.
+        RecordingEventListener.settled.clear();
+        RecordingEventListener.failed.clear();
+        FACILITATOR.injectSettleSuccessWithoutTransaction();
+        PaymentPayload payload = PaymentPayloads.build(TestWallets.PAYER, offer());
+        String header = PaymentPayloads.header(codec, payload);
+
+        String body = client.get()
+                .uri("/paid/leaky")
+                .header(X402Headers.PAYMENT_SIGNATURE, header)
+                .exchange()
+                .expectStatus()
+                .isEqualTo(402)
+                .expectHeader()
+                .doesNotExist(X402Headers.PAYMENT_RESPONSE)
+                .expectHeader()
+                .doesNotExist("X-Download-Url")
+                .expectHeader()
+                .doesNotExist("Set-Cookie")
+                .expectBody(String.class)
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(body).isNotNull().doesNotContain("paid content");
+        assertThat(RecordingEventListener.settled).isEmpty();
+        assertThat(RecordingEventListener.failed).hasSize(1);
+        assertThat(RecordingEventListener.failed.get(0).errorReason()).isEqualTo("ambiguous");
+
+        long verifyCallsBeforeReplay = FACILITATOR.verifyCallCount();
+        long settleCallsBeforeReplay = FACILITATOR.settleCallCount();
+
+        // The nonce claim was NOT released (an ambiguous outcome, not a rejection): the same
+        // authorization replayed is refused before it ever reaches the facilitator again.
+        client.get()
+                .uri("/paid/leaky")
+                .header(X402Headers.PAYMENT_SIGNATURE, header)
+                .exchange()
+                .expectStatus()
+                .isEqualTo(402);
+
+        assertThat(FACILITATOR.verifyCallCount()).isEqualTo(verifyCallsBeforeReplay);
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(settleCallsBeforeReplay);
+    }
+
+    @Test
     void handlerRejectionIsNeverSettledAndReleasesTheNonceClaim() {
         PaymentPayload payload = PaymentPayloads.build(TestWallets.PAYER, offer());
         String header = PaymentPayloads.header(codec, payload);
