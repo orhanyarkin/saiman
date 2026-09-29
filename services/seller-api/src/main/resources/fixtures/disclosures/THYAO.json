@@ -1,0 +1,11 @@
+{
+  "ticker": "THYAO",
+  "summary": "Fixture data (M1 demo, not a real disclosure). Türk Hava Yolları (THYAO) reported quarterly passenger traffic growth and reaffirmed its full-year capacity guidance in its latest KAP special-case disclosure.",
+  "citations": [
+    {
+      "chunkId": "thyao-fixture-chunk-1",
+      "sourceUrl": "https://www.kap.org.tr/en/sirket-bilgileri/ozet/1105-turk-hava-yollari-a-o",
+      "retrievedAt": "2026-09-01T08:00:00Z"
+    }
+  ]
+}

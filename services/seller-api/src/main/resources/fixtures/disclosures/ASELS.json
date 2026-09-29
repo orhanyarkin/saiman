@@ -1,0 +1,11 @@
+{
+  "ticker": "ASELS",
+  "summary": "Fixture data (M1 demo, not a real disclosure). Aselsan (ASELS) disclosed a new export contract award and noted the expected delivery schedule in its latest KAP material event disclosure.",
+  "citations": [
+    {
+      "chunkId": "asels-fixture-chunk-1",
+      "sourceUrl": "https://www.kap.org.tr/en/sirket-bilgileri/ozet/1102-aselsan-elektronik-sanayi-ve-ticaret-a-s",
+      "retrievedAt": "2026-09-01T08:00:00Z"
+    }
+  ]
+}
