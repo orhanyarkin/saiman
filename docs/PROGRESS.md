@@ -1,8 +1,8 @@
 # Progress
 
 ## Current milestone
-M1 — x402 starter + first paid endpoint: **done**, pending the human's push/PR approval. Plan: architect design pass approved 2026-09-28 (ADR-0008 native x402 v2, ADR-0009 secrets). Tasks: T0 orchestrator (catalog, publishing convention, ADRs) · T1 payments-engineer starter core/evm · T2 server + facilitator + FakeFacilitator · T3 client + SpendGuard + console buyer · T4 seller-api endpoint · T5 infra (compose payTo check, make x402-*, CI) · T6 README quickstart + live Base Sepolia payment.
-Status: T0–T6 done and the milestone-end security audit is complete (one Medium finding, fixed and verified) — all committed on `m1-x402`. Ready for the human's go-ahead to push and open a PR to main.
+M1 — x402 starter + first paid endpoint: **done and merged to `main`** (PR [#10](https://github.com/orhanyarkin/saiman/pull/10), 2026-09-29). Tasks: T0 orchestrator (catalog, publishing convention, ADRs) · T1 payments-engineer starter core/evm · T2 server + facilitator + FakeFacilitator · T3 client + SpendGuard + console buyer · T4 seller-api endpoint · T5 infra (compose payTo check, make x402-*, CI) · T6 README quickstart + live Base Sepolia payment.
+Status: T0–T6 and the milestone-end security audit all done (one Medium finding, fixed and verified). Next: M2 (ingest + RAG), starting with an architect design pass per `docs/PLAN.md`.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
