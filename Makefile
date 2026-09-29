@@ -55,12 +55,14 @@ ps: ## List container status.
 logs: ## Follow container logs.
 	$(COMPOSE) --profile apps logs -f
 
-test: web/node_modules ## Run backend + web tests.
+test: web/node_modules ## Run backend + web tests, then build the x402 sample against the mavenLocal starter.
 	./gradlew check
+	$(MAKE) x402-sample
 	pnpm --dir web test
 
 lint: web/node_modules ## Run backend + web linters (no formatting changes).
 	./gradlew spotlessCheck
+	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer spotlessCheck
 	pnpm --dir web lint
 	pnpm --dir web typecheck
 
