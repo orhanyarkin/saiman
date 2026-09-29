@@ -1,1 +1,1 @@
-- [Threat model baseline](threat-model-baseline.md) — mitigations + open items (x402 fail-closed, web3j laxness, T3 client re-checked (redirect default, tx null NPE, 402 outcome tag open), T2 server async/fail-open/header leaks)
+- [Threat model baseline](threat-model-baseline.md) — x402 mitigations/open items through M1-close audit 2026-09-29 (settle null-tx fail-open, Object async bypass, shared CB, M3 carry-forwards)

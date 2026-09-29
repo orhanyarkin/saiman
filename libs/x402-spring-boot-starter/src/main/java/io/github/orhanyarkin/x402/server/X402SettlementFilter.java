@@ -68,7 +68,10 @@ import org.springframework.web.util.ContentCachingResponseWrapper;
  *       writes a fresh 402, keeping the nonce claim (the outcome is ambiguous -- see {@link
  *       X402PaymentFailedEvent}). A non-2xx (including 3xx: content is only ever delivered via a
  *       2xx) handler response means nothing is settled, the nonce claim is released, and the
- *       handler's own response is passed through untouched.
+ *       handler's own response is passed through untouched. Anything unexpected while finishing a
+ *       verified settlement (a malformed facilitator response, an unforeseen failure) is caught
+ *       and routed through the same ambiguous-failure path -- never left to escape and have the
+ *       still-buffered handler body flushed unchecked.
  * </ol>
  */
 public final class X402SettlementFilter extends OncePerRequestFilter {
@@ -221,36 +224,54 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
             failSettlement(request, wrappedResponse, headerSnapshot, attempt, null);
             return;
         }
-        if (!settlement.success()
-                || !TRANSACTION_HASH_PATTERN.matcher(settlement.transaction()).matches()) {
-            // A "successful" settlement without a well-formed transaction hash is treated as
-            // ambiguous, not as success: never echo an unvalidated facilitator-supplied value into
-            // the client-facing PAYMENT-RESPONSE.
-            failSettlement(
-                    request,
-                    wrappedResponse,
-                    headerSnapshot,
-                    attempt,
-                    settlement.success() ? "ambiguous" : settlement.errorReason());
-            return;
-        }
+        // Anything unexpected from here on (a null/malformed transaction hash -- the field isn't
+        // @Nullable on SettlementResponse, but the tolerant facilitator-response mapper leaves it
+        // null when a hostile or buggy facilitator omits it; or any other failure while finishing
+        // the response) must never let doFilterInternal's finally block flush the handler's
+        // already-buffered 2xx body. Route every such case through failSettlement (reset, keep the
+        // nonce claim, ask again) instead of letting an exception escape -- this is the money-safe
+        // default, not merely an error handler.
+        try {
+            String transaction = settlement.transaction();
+            if (!settlement.success()
+                    || transaction == null
+                    || !TRANSACTION_HASH_PATTERN.matcher(transaction).matches()) {
+                // A "successful" settlement without a well-formed transaction hash is treated as
+                // ambiguous, not as success: never echo an unvalidated facilitator-supplied value
+                // into the client-facing PAYMENT-RESPONSE.
+                failSettlement(
+                        request,
+                        wrappedResponse,
+                        headerSnapshot,
+                        attempt,
+                        settlement.success() ? "ambiguous" : settlement.errorReason());
+                return;
+            }
 
-        Eip3009Authorization authorization = attempt.payload().payload().authorization();
-        SettlementResponse clientFacing = buildClientFacingSettlement(attempt, settlement.transaction());
-        wrappedResponse.setHeader(X402Headers.PAYMENT_RESPONSE, codec.encodeSettlementResponse(clientFacing));
-        attempt.outcome("settled");
-        attempt.txHash(settlement.transaction());
-        publishSafely(new X402PaymentSettledEvent(
-                UUID.randomUUID(),
-                request.getRequestURI(),
-                attempt.entry().offer(),
-                authorization.from(),
-                authorization.nonce(),
-                authorization.value(),
-                authorization.validBefore(),
-                authorization.from(),
-                settlement.transaction(),
-                clock.instant()));
+            Eip3009Authorization authorization = attempt.payload().payload().authorization();
+            SettlementResponse clientFacing = buildClientFacingSettlement(attempt, transaction);
+            wrappedResponse.setHeader(X402Headers.PAYMENT_RESPONSE, codec.encodeSettlementResponse(clientFacing));
+            attempt.outcome("settled");
+            attempt.txHash(transaction);
+            publishSafely(new X402PaymentSettledEvent(
+                    UUID.randomUUID(),
+                    request.getRequestURI(),
+                    attempt.entry().offer(),
+                    authorization.from(),
+                    authorization.nonce(),
+                    authorization.value(),
+                    authorization.validBefore(),
+                    authorization.from(),
+                    transaction,
+                    clock.instant()));
+        } catch (RuntimeException unexpected) {
+            log.error(
+                    "unexpected failure while finishing settlement for {}: {}",
+                    request.getRequestURI(),
+                    unexpected.getClass().getSimpleName(),
+                    unexpected);
+            failSettlement(request, wrappedResponse, headerSnapshot, attempt, "internal_error");
+        }
     }
 
     /**
