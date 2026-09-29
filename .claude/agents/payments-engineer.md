@@ -3,7 +3,8 @@ name: payments-engineer
 description: Implements the money path in Java/Spring — libs/x402-spring-boot-starter (x402 filter, @RequiresPayment, RestClient interceptor), services/seller-api (paid endpoints, MCP tools) and services/ledger (double-entry, inbox/outbox, reconciliation). Use for any payment, x402 or ledger task.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch
 model: sonnet
-effort: high
+effort: medium
+maxTurns: 80
 isolation: worktree
 memory: project
 color: blue

@@ -3,7 +3,8 @@ name: infra
 description: Owns deploy/ — docker-compose for local dev, Terraform for the on-demand AWS deployment (demo-lite on ECS Fargate; enterprise EKS+MSK is a stretch goal), demo capture tooling, GitHub Actions CI/CD, OpenTelemetry collector config. Never applies infrastructure.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch
 model: sonnet
-effort: high
+effort: medium
+maxTurns: 60
 isolation: worktree
 memory: project
 color: yellow

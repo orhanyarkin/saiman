@@ -4,6 +4,7 @@ description: Runs builds, test suites and linters and reports only the failures 
 tools: Read, Bash, Grep, Glob
 model: sonnet
 effort: low
+maxTurns: 15
 color: green
 ---
 
