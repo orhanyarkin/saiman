@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.sellerapi;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.orhanyarkin.saiman.sellerapi.testsupport.SharedTestFacilitator;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -12,6 +13,8 @@ import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTe
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.client.RestTestClient;
 
 /**
@@ -19,9 +22,15 @@ import org.springframework.test.web.servlet.client.RestTestClient;
  * and the liveness/readiness probes are up, health hides component details, info carries build
  * metadata only, and every other Actuator endpoint does not exist at all.
  */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+// No Redis here, so its health indicator is off; the Redis nonce store is tested in DisclosureSummaryEndpointTests.
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "management.health.redis.enabled=false")
 @AutoConfigureRestTestClient
 class ActuatorEndpointsTests {
+
+    @DynamicPropertySource
+    static void x402Properties(DynamicPropertyRegistry registry) {
+        SharedTestFacilitator.register(registry);
+    }
 
     @Autowired
     private RestTestClient client;

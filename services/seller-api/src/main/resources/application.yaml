@@ -4,9 +4,24 @@ spring:
   threads:
     virtual:
       enabled: true
+  mvc:
+    problemdetails:
+      enabled: true # RFC 9457 bodies for ResponseStatusException/ErrorResponseException/validation errors
 
 server:
   port: 8081
+
+# x402 v2 server config (ADR-0008). No default for pay-to: fails startup closed if
+# X402_SELLER_PAYTO_ADDRESS is not set (ADR-0009 -- seller-api never holds a private key, only this
+# public payout address). x402.server.facilitator.url is left at its default
+# (https://x402.org/facilitator); tests override it to a FakeFacilitator.
+x402:
+  server:
+    pay-to: ${X402_SELLER_PAYTO_ADDRESS}
+
+seller:
+  prices:
+    disclosure-summary: 10000 # 0.01 test USDC, 6 decimals (GET /v1/disclosures/{ticker}/summary)
 
 management:
   endpoints:

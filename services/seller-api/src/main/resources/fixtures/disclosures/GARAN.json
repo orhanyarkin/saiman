@@ -1,0 +1,11 @@
+{
+  "ticker": "GARAN",
+  "summary": "Fixture data (M1 demo, not a real disclosure). Garanti BBVA (GARAN) published its quarterly financial statements and held an investor call summarising loan growth and net interest margin trends, per its latest KAP disclosure.",
+  "citations": [
+    {
+      "chunkId": "garan-fixture-chunk-1",
+      "sourceUrl": "https://www.kap.org.tr/en/sirket-bilgileri/ozet/1104-turkiye-garanti-bankasi-a-s",
+      "retrievedAt": "2026-09-01T08:00:00Z"
+    }
+  ]
+}
