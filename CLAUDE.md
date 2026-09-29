@@ -95,7 +95,8 @@ Delegation prompts must be self-contained (goal, owned dirs, acceptance criteria
 - Agent models and effort live in `.claude/agents/*.md`: `architect` opus/high; `security-auditor` sonnet/high; `reviewer` and implementers sonnet/medium; `test-runner` sonnet/low. Each has a `maxTurns` cap.
 - Invoke `security-auditor` with `model: opus` for any change to signing, signature verification, nonce/replay handling or payment settlement code.
 - Per-invocation effort can't be set: for signing/crypto implementation tasks, invoke `payments-engineer` with `model: opus` instead.
-- A PreToolUse hook (`.claude/hooks/filter-test-output.sh`) filters `./gradlew` check/test/build, `make test|lint` and `pnpm test|lint|typecheck` output down to failures/errors and the final summary; append `# nofilter` to a command for full output.
+- A PreToolUse hook (`.claude/hooks/filter-test-output.sh`) rewrites a plain `./gradlew` check/test/build, `make test|lint` or `pnpm test|lint|typecheck` command into one literal call of `.claude/hooks/run-filtered.sh`, which prints only failures/errors and the final summary and keeps the exit status. Compound commands (`;`, `&&`, `|`, `$(…)`, redirects) are never rewritten; append `# nofilter` for full output.
+- **Same error twice → stop.** An agent (or the orchestrator) that gets the same tool error twice must stop and report it instead of retrying the same command.
 
 ## The human is learning Spring
 
