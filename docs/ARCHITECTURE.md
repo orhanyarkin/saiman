@@ -2,7 +2,7 @@
 
 ## What it does
 
-A user (or a scheduled job) asks a research question about a BIST company or a crypto asset. The **orchestrator** plans the work, calls tools, and — when a tool sits behind a paywall — pays for it per request over **x402** on Base Sepolia, within budgets enforced in code. Answers come from **RAG** over public disclosures and news, with citations. Every payment is recorded in a **double-entry ledger** and reconciled against the chain. An **eval harness** measures answer quality against cost.
+A user (or a scheduled job) asks a research question about a BIST company or a crypto asset. The **orchestrator** plans the work, calls tools, and — when a tool sits behind a paywall — pays for it per request over **x402** on Base Sepolia, within budgets enforced in code. Answers come from **RAG** over public KAP disclosures (a frozen 2023 snapshot, ADR-0010), with citations. Every payment is recorded in a **double-entry ledger** and reconciled against the chain. An **eval harness** measures answer quality against cost.
 
 ## Services
 
@@ -11,9 +11,10 @@ A user (or a scheduled job) asks a research question about a BIST company or a c
 | `seller-api` | Spring Boot 4.1 | Paid endpoints (disclosure summary, news sentiment, order-book snapshot from TickForge), protected by the x402 starter; same capabilities as MCP tools (`@McpTool`) |
 | `orchestrator` | Spring Boot 4.1 + Spring AI 2.0 | Agents on `ChatClient`, model router, spend-control plane, x402 client, SSE run stream |
 | `ledger` | Spring Boot 4.1 | Double-entry ledger, inbox/outbox, reconciliation with Base Sepolia (web3j) |
-| `ingest` | Spring Boot 4.1 + Spring AI 2.0 | ETL: fetch → normalise → chunk → embed → `PgVectorStore`; emits index events |
+| `ingest` | Spring Boot 4.1 + Spring AI 2.0 | Owns the corpus (ADR-0012): MKK KAP API → normalise → chunk → embed → `PgVectorStore`; serves internal hybrid retrieval (vector + Turkish full-text, RRF). No events until M4 |
 | `evals` | Spring Boot CLI | Golden-set evals, LLM-as-judge (batch), cost/quality reports |
 | `web` | React 19 + Vite | Static SPA on Cloudflare Pages |
+| `model-router` | Java library | The only path to LLM/embedding providers (ADR-0011): tiers, data-class policy, daily USD cap, metrics |
 | `x402-spring-boot-starter` | Java library | Open-source Spring Boot starter implementing x402 v2 (`exact` scheme on EVM, Base Sepolia only; ADR-0008): filter, `@RequiresPayment`, `RestClient` interceptor, auto-config |
 
 ## Data and messaging

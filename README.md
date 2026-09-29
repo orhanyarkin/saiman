@@ -12,7 +12,7 @@
 - **Agents on Spring AI 2.0** — planner → researcher → risk → synthesis, with a model router (cheap models for routine steps, stronger ones where it matters) and a data-classification policy.
 - **Spend control** — per-run budgets, daily caps, payee allowlists, idempotency and human approval above a threshold, all checked before anything is signed.
 - **Ledger** — double-entry, inbox/outbox, Kafka events, on-chain reconciliation.
-- **RAG + evals** — hybrid retrieval over public KAP disclosures and news, with an eval harness that reports quality *and* USD per task.
+- **RAG + evals** — hybrid retrieval over public KAP disclosures, with an eval harness that reports quality *and* USD per task.
 
 ## Quickstart (local)
 
