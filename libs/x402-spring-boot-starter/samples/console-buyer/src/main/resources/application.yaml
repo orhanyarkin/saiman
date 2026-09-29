@@ -1,0 +1,31 @@
+# "Zero config beyond properties" (M1 acceptance criterion): everything this sample needs besides
+# the buyer's private key is declared here, none of it wired in Java.
+#
+# x402.client.private-key is deliberately NOT set here: X402_BUYER_PRIVATE_KEY does not match Boot's
+# relaxed-binding name for that property (which would be X402_CLIENT_PRIVATE_KEY), and the
+# secrets/buyer.key file fallback needs the repository root resolved at runtime (RepoRoot), which a
+# property file cannot do. ConsoleBuyerApplication resolves and injects it in code instead, at a
+# property-source precedence above this file.
+x402:
+  client:
+    # A generous but bounded per-request ceiling for this demo client (seller-api's M1 prices are
+    # around 10 000 atomic units / 0.01 USDC, per docs/design/m1-x402.md); override with the normal
+    # Boot relaxed-binding env var X402_CLIENT_MAX_AMOUNT_PER_REQUEST.
+    max-amount-per-request: 100000
+    # seller-api's own required env var (Makefile's check-x402-env.sh) doubles as this sample's
+    # default allowlist entry in the monorepo dev loop. An empty value here (the env var unset)
+    # binds to an empty list, which correctly fails startup with "allowed-pay-to must list at least
+    # one payee address" rather than silently accepting a blank entry (verified in
+    # X402ClientAutoConfigurationTest / a Binder-level check, not just assumed). Override with the
+    # normal Boot relaxed-binding env var X402_CLIENT_ALLOWED_PAY_TO for any other seller.
+    allowed-pay-to: ${X402_SELLER_PAYTO_ADDRESS:}
+
+spring:
+  http:
+    clients:
+      # This starter's payment interceptor refuses to sign over plain http/non-loopback URLs, but a
+      # redirect on the *paid retry* to an https URL would still be followed by default (Boot 4.1's
+      # default is to follow redirects) and would forward the Idempotency-Key and PAYMENT-SIGNATURE
+      # headers to wherever that redirect points. See X402PaymentInterceptor's Javadoc "Redirects"
+      # section: this property is not optional for any RestClient this interceptor is attached to.
+      redirects: dont-follow
