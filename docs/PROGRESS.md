@@ -18,7 +18,7 @@ M0 — Skeleton: **done** (branch `m0-skeleton`, PR to main awaiting the human's
 - `./gradlew spotlessCheck check` green, including `--rerun-tasks`; `make lint && make test` green.
 
 **What's next**
-- **Follow-up PR after 2026-09-29 07:00Z:** raise pnpm `minimumReleaseAge` to 4320 (3 days, matching the Dependabot cooldown) and update the reviewer and frontend agent-memory notes that still describe 1440. Not done now because 12 lockfile entries (vitest 5.0.2, @tanstack/react-query 5.104.0, @types/node 26.6.3, csstools) are younger than 3 days until 2026-09-26 06:37Z + 3 days, so a frozen install fails.
+- **Done 2026-09-29 (branch `chore/pnpm-min-release-age`):** pnpm `minimumReleaseAge` raised to 4320 (3 days, matching the Dependabot cooldown); reviewer and frontend agent-memory notes updated. Verified with a frozen install, web tests, lint and typecheck.
 
 **Open questions / watch**
 - Possible flake: one local `./gradlew spotlessCheck check -q` run exited 1 with no output; it did not reproduce in two further runs (one with `--rerun-tasks`). Watch CI for an unexplained backend failure.
