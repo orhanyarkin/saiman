@@ -1,6 +1,6 @@
 ---
 name: x402-starter-review-checklist
-description: Verified pitfalls when reviewing libs/x402-spring-boot-starter (codec strictness vs reference TS impl, Jackson 3 cause leaks, web3j EIP-712 leniency, spec KAT)
+description: Verified pitfalls when reviewing libs/x402-spring-boot-starter (codec strictness, Jackson 3 leaks, web3j leniency, spec KAT; client release semantics, SpendGuard races, tag keys; server auto-config ordering, handshake network calls, filter fail-open/async)
 metadata:
   type: project
 ---
@@ -15,3 +15,19 @@ Facts verified 2026-09-28 (M1 T1 review) with a scratch probe against the built 
 
 **Why:** these are easy to miss by reading code alone; each maps to a money or interop failure mode.
 **How to apply:** on any change to core/, evm/, facilitator/ or the FakeFacilitator, check these first. Probe recipe: `java -cp build/classes/java/main:<web3j,jackson3,bcprov,jackson-annotations jars from ~/.gradle/caches> Probe.java` in the scratchpad.
+
+Client side (M1 T3 review, 2026-09-28):
+
+- A 402 on the payment-carrying retry is NOT proof of "no charge": the server answers 402 when /settle fails or times out, and the signed EIP-3009 authorization stays settleable by the seller until validBefore. Releasing the SpendGuard reservation there frees the idempotency key/budget while a live authorization exists. Only a failure *before* the signature left the process is safe to release.
+- In-memory guards built from two concurrent sets (reserved/committed) with check-then-act are racy (reserve checks committed, commit moves key, reserve adds to reserved -> second payment under the same key). Demand one map with atomic putIfAbsent/replace/remove(key, expected).
+- Observation low-cardinality keys must be set on every path (early rejects happen before network/scheme/asset are known); otherwise the same meter name gets different tag-key sets (Prometheus drops them).
+- Spring Framework 7.0 InterceptingClientHttpRequest composes interceptors with andThen, so calling execution.execute twice re-runs downstream interceptors (verified in spring-web 7.0.9 sources). Boot 4.1 RestClientAutoConfiguration does NOT auto-attach ClientHttpRequestInterceptor beans (verified by javap).
+- EIP-3009 validAfter back-dating: reference TS client uses now-600; a 5 s skew breaks on WSL2 clock drift.
+- `./gradlew -p <standalone sample>` does not read the root gradle.properties (config cache, auto-download=false, jvmargs are not applied).
+
+Server side (M1 T2 review, 2026-09-28), verified by probe/test XML:
+
+- `@ConditionalOnBean(StringRedisTemplate)` inside X402ServerAutoConfiguration without `afterName = DataRedisAutoConfiguration` silently picks the in-memory nonce store ("io..." sorts before "org..."; probe with WebApplicationContextRunner + DataRedisAutoConfiguration showed InMemoryPaymentNonceStore). Demand an auto-config test with Boot's Redis auto-config, not a hand-built template.
+- HttpFacilitatorClient's /supported handshake (afterPropertiesSet) runs whenever MVC is on the classpath, even with zero @RequiresPayment handlers; the imports test hit real x402.org (grep build/test-results XML for "facilitator host: x402.org"). Client-only MVC apps (orchestrator) would need the facilitator to start.
+- Filter/interceptor split: check the "filter created the attempt but the interceptor never ran" path (fail-open if 2xx is flushed), async handler return types (settle before body), and exceptions from synchronous ApplicationEvent listeners after /settle (charged but 500).
+- Valkey in tests: `@ServiceConnection(name = "redis")` on a GenericContainer works (Boot 4.1.1 RedisContainerConnectionDetailsFactory accepts connection name "redis"; image-name match is only redis / redis-stack).

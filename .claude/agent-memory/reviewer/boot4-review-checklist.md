@@ -54,3 +54,5 @@ Added 2026-09-27 (M0 T2 orchestrator review), verified against 4.1.1 sources / T
   `connection|query|result-set`. A "any span with a jdbc.* attribute" assertion is satisfied by the
   connection span alone; ask for name `query` + `jdbc.query[0]`.
 - Gradle `test` runs `*IT` classes too (no failsafe split); fine, but naming implies otherwise.
+
+Added 2026-09-28 (M1 T2 review): any `@ConditionalOnBean(X)` in a custom auto-config needs `after`/`afterName` on the Boot auto-config that defines X. Sorting is alphabetical first, so `io.github...` runs before `org.springframework...` and the condition is silently false (probe-verified for DataRedisAutoConfiguration). Also check whether auto-config beans make network calls at startup (InitializingBean): grep test-results XML for external hosts.

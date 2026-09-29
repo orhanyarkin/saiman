@@ -1,1 +1,1 @@
-- [Threat model baseline](threat-model-baseline.md) — mitigations + deferred checks (x402 fail-closed, compose key policy, web3j EIP-712 laxness, starter dep CVEs)
+- [Threat model baseline](threat-model-baseline.md) — mitigations + open items (x402 fail-closed, web3j laxness, T3 client re-checked (redirect default, tx null NPE, 402 outcome tag open), T2 server async/fail-open/header leaks)

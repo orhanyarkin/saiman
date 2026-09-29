@@ -6,7 +6,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.context.annotation.ImportCandidates;
+import org.springframework.boot.restclient.autoconfigure.RestClientAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
+import org.springframework.boot.webmvc.autoconfigure.WebMvcAutoConfiguration;
 
 /**
  * Verifies the three x402 auto-configuration classes are registered and each starts a plain
@@ -25,8 +28,18 @@ class X402AutoConfigurationImportsTest {
 
     @Test
     void serverAutoConfigurationStartsCleanly() {
-        new ApplicationContextRunner()
-                .withConfiguration(AutoConfigurations.of(X402ServerAutoConfiguration.class))
+        // A WebApplicationContextRunner (not a plain ApplicationContextRunner), plus
+        // WebMvcAutoConfiguration and RestClientAutoConfiguration: a real Spring MVC application
+        // always has RequestMappingHandlerMapping and RestClient.Builder beans whenever
+        // spring-boot-starter-webmvc/-restclient are present (Boot's own auto-configurations, not
+        // something only this starter's auto-configuration class provides), and
+        // WebMvcAutoConfiguration itself is @ConditionalOnWebApplication(SERVLET).
+        new WebApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(
+                        X402ServerAutoConfiguration.class,
+                        X402ObservationAutoConfiguration.class,
+                        WebMvcAutoConfiguration.class,
+                        RestClientAutoConfiguration.class))
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(X402ServerAutoConfiguration.class);
@@ -55,11 +68,13 @@ class X402AutoConfigurationImportsTest {
 
     @Test
     void allThreeTogetherStartCleanly() {
-        new ApplicationContextRunner()
+        new WebApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(
                         X402ServerAutoConfiguration.class,
                         X402ClientAutoConfiguration.class,
-                        X402ObservationAutoConfiguration.class))
+                        X402ObservationAutoConfiguration.class,
+                        WebMvcAutoConfiguration.class,
+                        RestClientAutoConfiguration.class))
                 .run(context -> assertThat(context).hasNotFailed());
     }
 }
