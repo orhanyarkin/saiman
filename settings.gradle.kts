@@ -17,6 +17,7 @@ rootProject.name = "saiman"
 
 include(
     ":libs:shared",
+    ":libs:model-router",
     ":libs:x402-spring-boot-starter",
     ":services:seller-api",
     ":services:orchestrator",
