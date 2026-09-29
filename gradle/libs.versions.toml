@@ -1,6 +1,6 @@
 [versions]
 spring-boot = "4.1.1"
-spring-ai = "2.0.1"                # BOM only in M0; model starters arrive with M2/M3
+spring-ai = "2.0.1"                # BOM applied per module (ingest, model-router, seller-api); no Boot starters: the router builds the OpenAI models by hand (ADR-0011)
 spotless = "8.10.3"
 palantir-java-format = "2.99.0"    # >= 2.71 required on JDK 25
 errorprone = "2.50.0"
@@ -9,11 +9,16 @@ nullaway = "0.14.2"
 datasource-micrometer = "2.3.0"    # 2.x line targets Spring Boot 4
 web3j = "6.0.0"                    # crypto module only (secp256k1, EIP-712); Jackson 3 (ADR-0008)
 bouncycastle = "1.86"               # pinned above web3j's 1.80 (CVE fixes in >= 1.85); published in the starter POM
+jsoup = "1.23.2"                   # HTML -> text for KAP disclosure bodies (ADR-0010)
 resilience4j = "2.4.0"             # core modules only; wired programmatically, no Spring integration module
 
 [libraries]
 spring-boot-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
 spring-ai-bom = { module = "org.springframework.ai:spring-ai-bom", version.ref = "spring-ai" }
+# Versions managed by the Spring AI BOM (apply `platform(libs.spring.ai.bom)` in the module)
+spring-ai-client-chat = { module = "org.springframework.ai:spring-ai-client-chat" }
+spring-ai-openai = { module = "org.springframework.ai:spring-ai-openai" }
+spring-ai-pgvector-store = { module = "org.springframework.ai:spring-ai-pgvector-store" }
 errorprone-core = { module = "com.google.errorprone:error_prone_core", version.ref = "errorprone" }
 nullaway = { module = "com.uber.nullaway:nullaway", version.ref = "nullaway" }
 datasource-micrometer-spring-boot = { module = "net.ttddyy.observation:datasource-micrometer-spring-boot", version.ref = "datasource-micrometer" }
@@ -21,6 +26,8 @@ bcprov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycast
 web3j-crypto = { module = "org.web3j:crypto", version.ref = "web3j" }
 resilience4j-circuitbreaker = { module = "io.github.resilience4j:resilience4j-circuitbreaker", version.ref = "resilience4j" }
 resilience4j-retry = { module = "io.github.resilience4j:resilience4j-retry", version.ref = "resilience4j" }
+resilience4j-ratelimiter = { module = "io.github.resilience4j:resilience4j-ratelimiter", version.ref = "resilience4j" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 
 # Versions managed by the Spring Boot BOM
 jspecify = { module = "org.jspecify:jspecify" }
