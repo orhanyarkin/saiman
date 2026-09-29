@@ -22,7 +22,8 @@ Status: T0–T3 and T5 done (committed on `m1-x402`); T4 in progress; T6 and the
 **Status (updated 2026-09-29 afternoon)** — resume here if a session stops
 - Committed on `m1-x402`: T0, T1, T2 (adcaded), T3 (83b0d3f), T5, `make` reads the public payTo from `.env`, sample in `make test`/`make lint`/CI. Starter: 198 tests green; no test calls x402.org; 4xx/429 from the facilitator are not retried (verified in code and test).
 - T2's pending security re-check was dropped under the new lean review policy (no re-check rounds; no Critical findings); fixes are covered by tests.
-- In progress: T4 seller-api paid endpoint (payments-engineer). Then T6 (README quickstart, THREAT_MODEL, live Base Sepolia payment by the human) and the milestone-end security audit.
+- T4 seller-api paid endpoint committed (0aa1b64): 23 seller-api tests green, reviewer + security-auditor approved (no blocking findings). The T4 agent was stopped because the first test-output hook broke worktree agents ("command name computed at runtime"); fixed in 6b6f8d5 (single literal `run-filtered.sh` call, plain commands only) and PR #9 to main. The orchestrator finished T4's verification (format fix; Redis health indicator off in the two actuator tests that have no Redis).
+- Next: after PR #9 merges, merge main into `m1-x402` and restart Claude Code (lean mode). Then T6 (README quickstart, THREAT_MODEL, live Base Sepolia payment by the human) and the milestone-end security audit.
 - PRs #7 (pnpm 4320) and #8 (lean mode) merged 2026-09-29; main merged into `m1-x402` (4889567), `make test` green, `stash@{0}` dropped. Lean mode applies after a Claude Code restart.
 - Milestone-end security audit (human's instruction): run security-auditor with `model: opus` and explicitly cover T2's server flow — replay protection, verify → handler → settle order, no retry on /settle, 4xx/429 handling — since T2's re-check round was skipped.
 
@@ -32,7 +33,8 @@ Status: T0–T3 and T5 done (committed on `m1-x402`); T4 in progress; T6 and the
 - M3 design/ADR: paid handlers run before settle, so an attacker can make them run without paying (drain the wallet between verify and settle) — per-payer/IP limits on unsettled attempts and an opt-in settle-before-serve mode for expensive (LLM) handlers.
 - M4: reconcile ambiguous settlements on chain; events carry (from, nonce) as the dedupe key; don't trust facilitator `success`.
 - The `exact` scheme doesn't bind a signature to a resource (same price and payTo → usable once on another endpoint); document in THREAT_MODEL.
-- Infra: osv-scanner on the generated starter POM in CI; re-add the sample build to `make test`/CI and its spotlessCheck to `make lint`; `.gitignore` `build-logic/bin/`.
+- Infra: osv-scanner on the generated starter POM in CI; Valkey has no auth in compose (any container on the network could flush the nonce store) — add requirepass/ACL or network segmentation before anything beyond the local demo.
+- T4 follow-ups (non-blocking): the nonce is claimed before the ticker's @Pattern validation, so a malformed-ticker request burns a valid authorization (buyer-side only; release the claim on non-2xx or validate earlier); add a seller-api test where the service throws (500, not settled, no handler headers); springdoc/OpenAPI for seller-api before M1 closes (CLAUDE.md conventions); M2's RAG lookup must keep "no request-time file/DB access keyed by raw client input".
 
 ### 2026-09-28 — Housekeeping: Valkey port, Dependabot cooldown
 
