@@ -2,7 +2,7 @@
 
 ## Current milestone
 M1 — x402 starter + first paid endpoint: **in progress** on branch `m1-x402`. Plan: architect design pass approved 2026-09-28 (ADR-0008 native x402 v2, ADR-0009 secrets). Tasks: T0 orchestrator (catalog, publishing convention, ADRs) · T1 payments-engineer starter core/evm · T2 server + facilitator + FakeFacilitator · T3 client + SpendGuard + console buyer · T4 seller-api endpoint · T5 infra (compose payTo check, make x402-*, CI) · T6 README quickstart + live Base Sepolia payment.
-Status: T0–T3 and T5 done (committed on `m1-x402`); T4 in progress; T6 and the milestone-end audit next. M0 merged to main.
+Status: T0–T5 done (committed on `m1-x402`); T6 (README, THREAT_MODEL, live payment) and the milestone-end audit next. M0 merged to main.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->

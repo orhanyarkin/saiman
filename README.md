@@ -8,7 +8,7 @@
 
 ## What's inside
 
-- **x402 Spring Boot starter** — `@RequiresPayment` for sellers, a `RestClient` interceptor with a spend guard for buyers. Built on the official x402 Java SDK.
+- **x402 Spring Boot starter** — `@RequiresPayment` for sellers, a `RestClient` interceptor with a spend guard for buyers. A native x402 v2 implementation (`exact` scheme, EVM, Base Sepolia only; the official Java SDK is v1-only and is used as a reference — ADR-0008).
 - **Agents on Spring AI 2.0** — planner → researcher → risk → synthesis, with a model router (cheap models for routine steps, stronger ones where it matters) and a data-classification policy.
 - **Spend control** — per-run budgets, daily caps, payee allowlists, idempotency and human approval above a threshold, all checked before anything is signed.
 - **Ledger** — double-entry, inbox/outbox, Kafka events, on-chain reconciliation.
@@ -38,13 +38,49 @@ Jaeger UI: http://localhost:16686. Valkey is published on host port **16380** (n
 `export VALKEY_HOST_PORT=<port>` before `make up`. `make down` stops everything; `make clean` also
 drops volumes.
 
+## Quickstart (x402, Base Sepolia testnet)
+
+The x402 starter is fail-closed: `make up` refuses to start without a valid seller payout
+address, and seller-api won't come up without one either. Everything here is **testnet only**
+(rule 1) — test USDC has no value, and every wallet below is throwaway.
+
+1. **Create two throwaway wallets** (a seller payout address, a buyer signing key) with any
+   wallet tool, e.g. [Foundry](https://getfoundry.sh)'s `cast wallet new`, or:
+   ```bash
+   make x402-new-wallet                    # writes secrets/buyer.key (0600), prints only the address
+   ```
+   Put the seller address in `.env` (copy it from `.env.example` first) as
+   `X402_SELLER_PAYTO_ADDRESS=0x...` — never the private key, and never commit `.env` or
+   `secrets/`. `make` reads only this one public variable from `.env`; everything else (LLM
+   keys, the buyer key) must be exported in your shell or left in `secrets/`.
+
+2. **Fund the buyer** from the [Circle testnet faucet](https://faucet.circle.com/) (Base Sepolia,
+   20 test USDC every 2 hours, no account needed) — paste the buyer's **address**, not the key.
+   The buyer needs no ETH: EIP-3009 payments are gasless for the payer.
+
+3. **Start the stack** and pay for the one paid endpoint:
+   ```bash
+   make up                                 # fails fast if X402_SELLER_PAYTO_ADDRESS is missing/invalid
+   export X402_BUYER_PRIVATE_KEY=0x...     # or rely on secrets/buyer.key from step 1
+   make x402-buy                           # pays seller-api's disclosure summary (0.01 test USDC) and prints the tx hash
+   ```
+   `make x402-buy` prints a [BaseScan](https://sepolia.basescan.org) link for the settlement
+   transaction. `make x402-replay` resends the same signed payload and must get **402** back
+   (replay protection); `make x402-testnet-check` does a read-only `/verify` call against the
+   public facilitator (never `/settle`, moves no funds).
+
+See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for what's guaranteed (and what isn't yet) about
+key custody, replay and settlement, and [docs/design/m1-x402.md](docs/design/m1-x402.md) for the
+wire-level contract.
+
 ## Stack
 
 Java 25 · Spring Boot 4.1 · Spring AI 2.0 · PostgreSQL + pgvector · Kafka (Redpanda) · Valkey · React + Vite · OpenTelemetry · Terraform (AWS ECS Fargate)
 
 ## Docs
 
-[Architecture](docs/ARCHITECTURE.md) · [Decisions (ADRs)](docs/adr/) · [Plan](docs/PLAN.md)
+[Architecture](docs/ARCHITECTURE.md) · [Decisions (ADRs)](docs/adr/) · [Plan](docs/PLAN.md) ·
+[Threat model](docs/THREAT_MODEL.md)
 
 ## License
 

@@ -1,0 +1,229 @@
+# Threat model
+
+Scope: the x402 payment path added in M1 — `libs/x402-spring-boot-starter` (wire format, signing,
+server settlement, client payment), `services/seller-api`'s first paid endpoint, and the secrets
+that make them work. Later milestones (spend-control plane, ledger, RAG, orchestrator) get their
+own sections here as they land; this file is a living document, updated by every
+payments/wallets/budgets/auth-touching security review (`CLAUDE.md`, "Agent orchestration
+protocol").
+
+Everything below assumes **testnet only** (`CLAUDE.md` rule 1): Base Sepolia, test USDC with no
+real value. The mitigations are still real — the point is to build the habits and the code paths
+that would matter on a network where the money is real.
+
+## Assets
+
+- The buyer's EIP-3009 private key (testnet). Whoever holds it can sign payments up to whatever
+  budget the holder enforces.
+- Signed EIP-3009 authorizations in flight. A signed authorization is a **bearer instrument**:
+  anyone holding it can settle it (once) until `validBefore`, regardless of who sent it or to whom.
+- The seller's payout address (public, not a secret, but wrong values are funds-destroying: the
+  zero address or the USDC contract itself would burn a payment).
+- The facilitator's trust: it is believed for *liveness* (does `/verify`/`/settle` respond), never
+  for *truth* (its claims are re-derived locally wherever that's possible).
+- The Valkey-backed payment nonce store (replay defence-in-depth ahead of the on-chain nonce).
+
+## Trust boundaries
+
+```
+buyer (console / M3 orchestrator) --PAYMENT-SIGNATURE--> seller-api --/verify,/settle--> x402.org facilitator
+                                                              |
+                                                        Valkey nonce store
+```
+
+- The **facilitator** (`https://x402.org/facilitator`) is a third party outside this codebase's
+  control. It sees the resource being purchased, the payer's address and the payment amount.
+- The **seller** never holds a signing key (ADR-0009): it only has a public payout address, so a
+  compromised seller-api container cannot move funds.
+- The **buyer's key** stays as close to the payer as possible: the console buyer in M1, and only
+  the orchestrator container from M3, via compose `secrets:` + configtree, never an environment
+  variable (ADR-0009).
+
+## Invariants
+
+These are checked mechanically, not just by review:
+
+- **K1 — key custody.** Only the orchestrator (from M3) and the local console buyer may hold the
+  buyer key, and the orchestrator only through compose `secrets:` + configtree, never an
+  environment variable. Enforced by `scripts/check-compose-policy.sh` (rejects `env_file`,
+  `environment`, `secrets:` on a non-orchestrator service, `configs:` and bind mounts sourcing a
+  key), with fixture tests in `scripts/test-check-compose-policy.sh` run in CI.
+- **K2 — no echo.** No tool, script, validation error, exception message or log line ever prints a
+  value that might be a key or a signature. Validation failures state *what's* wrong, never the
+  rejected value (`scripts/check-x402-env.sh`, `X402Codec`, `Eip3009Authorization`,
+  `PrivateKeyPaymentSigner`, `X402ClientProperties.toString()`, all covered by tests that plant a
+  marker string and assert it never reaches output).
+- **K3 — hermetic CI.** CI never holds a wallet key and never contacts `x402.org`. Tests tagged
+  `@Tag("testnet")` are excluded from every build, including the standalone console-buyer sample,
+  which doesn't inherit the root build's convention plugins and has to exclude them itself.
+
+## Wire format and signing (`core/`, `evm/`)
+
+- The network and asset are fixed in code (`TestnetAssets`: `eip155:84532`, the Base Sepolia USDC
+  contract), never a runtime property — the server only ever offers this pair, the client rejects
+  any other, and the signer only ever builds this one EIP-712 domain. The domain is never built
+  from wire-supplied `extra`/chainId fields. Known-answer tests: the EIP-712 spec's `Mail` example
+  (domain separator, struct hash, digest and the published signature, byte for byte) and the x402
+  v2 spec's own payment-payload example, which recovers to its stated payer under this domain
+  (separator `0x71f17a3b2ff373b803d70a5a07c046c1a2bc8e89c09ef722fcb047abe94c9818`); a
+  `@Tag("testnet")` test additionally checks that separator against `DOMAIN_SEPARATOR()` on the
+  live contract.
+- **Canonical form before hashing or keying.** web3j's EIP-712 encoder alone is lax — it accepts
+  `"0x2710"`/`"010000"`/`"+10000"` as equivalent uints, any letter case or missing `0x` for
+  addresses, even non-hex characters (silently mapped to a digit), and it *skips* null fields
+  entirely (so a missing `validAfter` collides with a missing `validBefore`). Left unchecked, that
+  would let an attacker resend a payload with the nonce's case flipped and defeat the replay key.
+  `Eip3009Authorization`'s compact constructor requires strict canonical hex/decimal forms before
+  anything is signed, hashed or used as a key; `canonicalNonceKey()` (lowercased `from` + `nonce`)
+  is the only key the nonce store ever uses, and it's taken only after the signature has been
+  recovered — never from the payload's claimed `from`.
+- **Signature policy.** 65-byte `r‖s‖v`, `v ∈ {27, 28}`, `1 ≤ r < n`, `1 ≤ s ≤ n/2` — the same
+  low-`s` rule FiatToken's on-chain `ecrecover` enforces, so nothing verifies locally that the
+  chain would reject. The signer itself always emits low-`s` (RFC 6979, via web3j).
+- **No payload in errors.** No exception message or cause chain — codec, signer, key parsing —
+  carries a header value, a payload, a signature or key material (ADR-0006 amendment). This
+  extends to the decoder's own machinery: unrecognised-property paths are sanitised to short
+  identifier segments so an attacker-chosen JSON key can't inject control characters into a log
+  line or a Problem Details body.
+- **Decoder limits.** A 16 KB cap on the decoded payload, checked by encoded length *before*
+  base64 decoding; strict duplicate-key detection; no scalar coercion (a JSON number can't become
+  a wire string); required fields enforced by each record's compact constructor rather than
+  arriving as silent nulls.
+- **Residual risk.** The private key's `String`/`BigInteger` forms can't be zeroised from the JVM
+  heap — mitigated only by never exposing `/actuator/heapdump` or `/actuator/env`. A third party
+  can front-run settlement (see "Ambiguous settlement" below): the seller gets paid but a given
+  buyer's own `/settle` call may still fail; only on-chain reconciliation (M4) resolves this for
+  certain.
+- **Supply chain.** web3j's `crypto` module is the only dependency used for signing; its heavier
+  optional pieces (Vert.x, ConnId, a KZG blob library, the tuweni ecosystem) are excluded and a
+  build check keeps them from reappearing. Jackson and BouncyCastle are pinned directly in the
+  starter's own `build.gradle.kts`, above the versions web3j would otherwise pull in transitively,
+  so a consumer without the Spring Boot BOM still gets patched versions in the published POM.
+
+## Server settlement (`server/`, `facilitator/`)
+
+- **Order: verify → serve (buffered) → settle.** The response is captured in a
+  `ContentCachingResponseWrapper` and only flushed to the real client after a successful
+  `/settle` on a 2xx handler response. `/settle` is never retried (an ambiguous double-settle is
+  worse than a false 402); `/verify` and the startup `/supported` handshake retry only on 5xx, not
+  on 4xx/429 (the facilitator's own rejection is authoritative, not a transient condition).
+- **Fail closed at startup**, for every configuration where the verify→settle order can't hold:
+  no `@RequiresPayment` handler may return an async type (`Callable`, `DeferredResult`,
+  `CompletableFuture`, `SseEmitter`, `StreamingResponseBody`, …) — an async dispatch would let the
+  filter settle before the handler has produced a body; the interceptor must actually be
+  registered on the handler mapping (an app overriding `WebMvcConfigurationSupport` directly would
+  otherwise silently serve paid content for free); a missing, zero, or malformed
+  `x402.server.pay-to` stops the app before it binds a port; the facilitator's `/supported` must
+  confirm `exact` on `eip155:84532` before any paid handler is allowed to exist.
+- **Settlement failure never leaks the handler's response.** On a settle failure the buffered
+  response is fully reset — body, status *and* headers the handler set (a signed download URL, a
+  `Set-Cookie`) — before writing the 402; headers set by *outer* filters (CORS, security headers)
+  are restored from a snapshot taken before the handler ran.
+- **`PAYMENT-RESPONSE` is server-built**, from locally-known values only (the recovered signer as
+  `payer`, the offer's own `network`/`amount`, a settlement transaction hash validated against
+  `0x[0-9a-f]{64}` or else treated as an ambiguous failure) — never a re-serialisation of whatever
+  the facilitator's response contained, which could otherwise carry attacker- or facilitator-sized
+  `extensions` past Tomcat's response header limit and turn a *settled* payment into a 500.
+- **Replay** is defence-in-depth ahead of the on-chain EIP-3009 nonce: an atomic pre-settle claim
+  on `(network, asset, canonicalNonceKey)` in Valkey (`SET NX`, TTL tied to `validBefore`),
+  released with compare-and-delete so an expired claim someone else re-acquired is never deleted
+  out from under them. Cross-endpoint reuse of one signed payload at the *same* price and payee is
+  inherent to the `exact` scheme, not a bug in this starter — a signature doesn't bind to one
+  specific resource.
+- **Request-derived metadata is never trusted.** The resource URL sent to the facilitator and
+  recorded in events comes from an explicit `x402.server.public-base-url` (or the request path
+  alone), never `Host`/`X-Forwarded-*`. The payload forwarded to the facilitator is rebuilt
+  server-side, never the client's raw `resource`/`extensions`.
+- **Events carry `(from, nonce, value, validBefore, payer)`** — enough for M4 to reconcile an
+  ambiguous settlement via `authorizationState(from, nonce)` on chain — and never the signature.
+- **Ambiguous settlement / side effects before settle** (open design item, not a bug): the handler
+  runs *before* settlement succeeds, so an attacker can make a paid handler run for free by
+  draining the payer's balance (or using a `validBefore` that's about to expire) between `/verify`
+  and `/settle`; every signed payload, funded or not, costs one `/verify` call, which is a resource
+  a flood of unfunded signatures could exhaust (the circuit breaker limits the blast radius, not
+  the cost). Mitigation is **not yet built**: a per-payer/IP limit on unsettled attempts (M3,
+  Valkey) and, for expensive handlers (LLM calls from M2 on), an opt-in settle-before-serve mode
+  need their own ADR before M2/M3 land.
+
+## Client payment (`client/`)
+
+- **A signature that left the process is money in flight until `validBefore`.** The client's
+  `SpendGuard` reservation is released *only* when nothing was ever sent (a rejection before
+  signing, or a signing/encoding failure) — never after a `PAYMENT-SIGNATURE` request has actually
+  gone out. A 402 on the paid retry does **not** prove no charge happened (the seller's own 402 on
+  a settle timeout is exactly this case) and raises a distinct, typed exception rather than a
+  plain 402, so a caller can't mistake "declined before anything was signed" for "signed and sent,
+  outcome unknown" and simply retry under a fresh idempotency key.
+- **Idempotency state is one atomic map**, not a check-then-act pair of sets — the original
+  two-`Set` design allowed two threads to both reserve and commit the same key under contention.
+- **The seller's `PAYMENT-RESPONSE` is untrusted input**, validated before it can commit a
+  reservation (a missing or malformed `transaction` field is treated as ambiguous, not success) and
+  sanitised before it reaches metrics, logs or the terminal (control characters stripped, only a
+  well-formed transaction hash gets an explorer link printed).
+- **Redirects must be disabled on every paying client.** Spring Boot 4's HTTP client follows
+  redirects by default; an unpatched paying client would forward `PAYMENT-SIGNATURE` and
+  `Idempotency-Key` to whatever host a 302 on the paid retry points at. The starter ships
+  `X402RestClients.nonRedirectingRequestFactory()` for this; the M2/M3 orchestrator's paying
+  `RestClient` must use it (or the equivalent `spring.http.clients.redirects=dont-follow`
+  property), with its own test proving it.
+- **402 and other seller response bodies are untrusted tool output**, not just untrusted HTTP: once
+  the orchestrator (M2+) feeds tool results back to an LLM, a seller-controlled error message is a
+  prompt-injection surface like any other retrieved text.
+- Current gap, accepted for M1: `PropertiesSpendGuard` enforces only a per-request maximum and a
+  payee allowlist. There is no per-run budget or daily cap yet (`CLAUDE.md` rule 3's full
+  requirement) — **don't wire the client interceptor into an LLM-driven retry loop before the M3
+  SpendGuard exists**, and M3's guard must count *held* reservations (signed, outcome unknown)
+  against the budget, not just committed ones.
+
+## Facilitator trust
+
+- The facilitator is allowlisted in code (`x402.org` over https, or loopback for tests) — nothing
+  reads a facilitator URL from a wire message or a client-controlled header. No redirects are
+  followed on facilitator calls either. A `/supported` handshake at startup requires `exact` on
+  `eip155:84532` before any paid handler is allowed to exist.
+- What a malicious or compromised facilitator **cannot** do: redirect funds. The EIP-3009 signature
+  binds `to`, `value` and `nonce`, and the EIP-712 domain binds the chain id and the USDC contract
+  — none of that is something the facilitator controls.
+- What it **can** do: lie about `/verify` or `/settle` (claim success without settling, or claim
+  failure after actually settling), return a fabricated transaction hash, or simply be slow (bounded
+  by timeouts and a circuit breaker, at the cost of availability, not correctness). This is why
+  server-built response fields, the hash-format check, and — eventually — on-chain reconciliation
+  in M4 exist: the facilitator's `success` field is a hint, never the source of truth.
+
+## seller-api and future paid handlers
+
+- `services/seller-api`'s first paid endpoint proves the starter's fail-closed contract end to end
+  for a real handler, not just the starter's own synthetic test fixtures: no key material on the
+  seller, a missing/invalid payout address refuses to start, 400/404 never settle.
+- The fixture disclosure data is served from an in-memory map built once from a fixed classpath
+  glob — the `{ticker}` path variable never reaches a filesystem or database lookup, so path
+  traversal via that input is structurally impossible, not merely filtered. **This must be
+  re-verified whenever `DisclosureSummaryService`'s implementation changes** — M2's RAG-backed
+  version swaps the implementation behind the same interface, and it must not introduce
+  request-time file or database access keyed by unsanitised client input.
+- Any future `@RequiresPayment` handler inherits this starter's guarantees automatically (buffered
+  settlement, fail-closed startup checks) but is responsible for its own input handling — validate
+  path/query input the same way, and don't log or echo it before it's validated.
+
+## Known gaps (tracked, not yet closed)
+
+| Gap | Why it's open | Revisit |
+|---|---|---|
+| Valkey (the nonce store) has no auth in the local compose stack | Local-only, 127.0.0.1-published port; any container on the compose network could otherwise flush the nonce store and defeat replay protection | Before any shared or multi-tenant deployment (M3+ secrets/network-segmentation work) |
+| No per-run budget / daily cap in the M1 `SpendGuard` | `CLAUDE.md` rule 3's full spend-control plane is M3 scope | M3 — don't wire the client into agent-driven loops before then |
+| No per-payer/IP rate limit on unsettled `/verify` attempts | Would need Valkey-backed counters, M3 scope | M3, alongside the budget plane |
+| Handler side effects happen before settlement succeeds | Verify-then-serve-then-settle is the only order that keeps the resource unpaid-for on failure, but it means a drained/expiring-key attacker gets one free handler run | M2/M3 ADR: an opt-in settle-before-serve mode for expensive (LLM-backed) handlers |
+| A resource's ticker/path reaches the third-party facilitator as part of the standard `/verify`/`/settle` call | Inherent to x402 — the facilitator has to know what it's authorizing; not PII here (public stock symbols) | Revisit if a future paid resource's identifier is sensitive |
+| No test drives a genuine 5xx from inside a real `@RequiresPayment` handler (only the starter's synthetic fixtures) | Coverage gap, not a known defect | Add when the next paid handler lands |
+
+## How to re-verify
+
+- Every payments/wallets/budgets/auth-touching change gets a `security-auditor` pass
+  (`CLAUDE.md`, "Agent orchestration protocol"); update this file when a finding changes one of
+  the invariants above or closes a gap in the table.
+- `scripts/test-check-compose-policy.sh` (K1) and the starter's own test suite (K2 — every
+  validation-message test plants a marker and asserts it's absent from output; K3 — testnet-tagged
+  tests are excluded by default) run in CI on every change.
+- The milestone-end audit for M1 covers T2's server flow end to end (replay protection, the
+  verify → handler → settle order, no retry on `/settle`, 4xx/429 handling) as a single pass
+  across the whole flow, since individual-task reviews only ever see one diff at a time.
