@@ -23,7 +23,8 @@ Status: T0–T3 and T5 done (committed on `m1-x402`); T4 in progress; T6 and the
 - Committed on `m1-x402`: T0, T1, T2 (adcaded), T3 (83b0d3f), T5, `make` reads the public payTo from `.env`, sample in `make test`/`make lint`/CI. Starter: 198 tests green; no test calls x402.org; 4xx/429 from the facilitator are not retried (verified in code and test).
 - T2's pending security re-check was dropped under the new lean review policy (no re-check rounds; no Critical findings); fixes are covered by tests.
 - In progress: T4 seller-api paid endpoint (payments-engineer). Then T6 (README quickstart, THREAT_MODEL, live Base Sepolia payment by the human) and the milestone-end security audit.
-- Separate branches awaiting the human's OK to push + PR: `chore/pnpm-min-release-age` (worktree `/home/orhan/code/saiman-pnpm`, d73447d; drop `stash@{0}` after merge) and `chore/lean-mode` (worktree `/home/orhan/code/saiman-lean`, 82eabcd: opusplan, 2 concurrent subagents, agent models/effort/maxTurns, review policy, test-output filter hook).
+- PRs #7 (`chore/pnpm-min-release-age`, drop `stash@{0}` after merge) and #8 (`chore/lean-mode`) are open. After both merge: merge main into `m1-x402`, then restart Claude Code so the new settings apply.
+- Milestone-end security audit (human's instruction): run security-auditor with `model: opus` and explicitly cover T2's server flow — replay protection, verify → handler → settle order, no retry on /settle, 4xx/429 handling — since T2's re-check round was skipped.
 
 **Carry-forward review findings (must land in later tasks)**
 - T6: README still says "built on the official x402 Java SDK"; write `docs/THREAT_MODEL.md` from the security-auditor's M1 sections (key custody K1–K3, facilitator trust, signing/wire format, client money-in-flight rules, server settlement policy).
