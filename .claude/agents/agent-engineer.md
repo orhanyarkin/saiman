@@ -3,7 +3,8 @@ name: agent-engineer
 description: Implements services/orchestrator in Java/Spring — agent loop on Spring AI ChatClient and tools, model router with tiers and data-classification policy, spend-control plane, human approvals, live run stream. Use for any agent, router or budget task.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch
 model: sonnet
-effort: high
+effort: medium
+maxTurns: 80
 isolation: worktree
 memory: project
 color: purple

@@ -5,6 +5,7 @@ tools: Read, Grep, Glob, WebFetch, WebSearch
 disallowedTools: Write, Edit, NotebookEdit
 model: opus
 effort: high
+maxTurns: 40
 memory: project
 color: purple
 ---

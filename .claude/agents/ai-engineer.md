@@ -3,7 +3,8 @@ name: ai-engineer
 description: Owns ingest ETL and RAG (services/ingest), the eval harness (services/evals), prompts, retrieval tuning, router route configs and eval datasets — in Java with Spring AI. Use for embeddings, chunking, retrieval, prompts, evals and LLM cost/quality work.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch, WebSearch
 model: sonnet
-effort: high
+effort: medium
+maxTurns: 80
 isolation: worktree
 memory: project
 color: green

@@ -3,8 +3,9 @@ name: reviewer
 description: Reviews a diff after each completed task for correctness, design, tests and adherence to CLAUDE.md and ADRs. Read-only. Use proactively after any specialist finishes.
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit
-model: opus
-effort: high
+model: sonnet
+effort: medium
+maxTurns: 30
 memory: project
 color: red
 ---

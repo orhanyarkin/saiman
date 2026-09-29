@@ -84,11 +84,18 @@ The main session is the **orchestrator**: it plans, delegates, integrates and ve
 2. Split work into tasks touching **disjoint directories** and delegate to the owner:
    `payments-engineer` (libs/x402-spring-boot-starter, services/seller-api, services/ledger) · `agent-engineer` (services/orchestrator) · `ai-engineer` (services/ingest, services/evals, prompts, router configs) · `frontend` (web) · `infra` (deploy, CI, Makefile).
    Shared contracts in `libs/shared` and `gradle/libs.versions.toml` change only through the orchestrator, before parallel work starts.
-3. After each task: `test-runner` verifies, `reviewer` reviews the diff; anything touching payments, wallets, budgets or auth also goes to `security-auditor`.
-4. Send blocking findings back to the owner, merge, run `make test && make lint`, update `docs/PROGRESS.md`.
+3. After each task: `test-runner` verifies and `reviewer` reviews the diff **once**. `security-auditor` reviews **once per task**, and only for code touching payments, wallets, budgets or auth; plus **one audit at the end of each milestone**.
+4. Send blocking findings back to the owner. **No re-check rounds**: `test-runner` verifies the fixes; re-review (reviewer or security-auditor) only for **Critical** findings. Then merge, run `make test && make lint`, update `docs/PROGRESS.md`.
 5. **Stop and ask the human** before: pushing to remote, anything in rule 7, adding a paid external service, changing an accepted ADR, or when blocked by a missing tool or credential.
 
-Delegation prompts must be self-contained (goal, owned dirs, acceptance criteria, relevant ADRs): subagents don't see this conversation.
+Delegation prompts must be self-contained (goal, owned dirs, acceptance criteria, relevant ADRs) and must **list the exact files to read** (paths, not "read the docs"): subagents don't see this conversation.
+
+### Lean mode (usage limits)
+- Main session model `opusplan` (Opus in plan mode, Sonnet when executing); at most 2 concurrent subagents (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`).
+- Agent models and effort live in `.claude/agents/*.md`: `architect` opus/high; `security-auditor` sonnet/high; `reviewer` and implementers sonnet/medium; `test-runner` sonnet/low. Each has a `maxTurns` cap.
+- Invoke `security-auditor` with `model: opus` for any change to signing, signature verification, nonce/replay handling or payment settlement code.
+- Per-invocation effort can't be set: for signing/crypto implementation tasks, invoke `payments-engineer` with `model: opus` instead.
+- A PreToolUse hook (`.claude/hooks/filter-test-output.sh`) filters `./gradlew` check/test/build, `make test|lint` and `pnpm test|lint|typecheck` output down to failures/errors and the final summary; append `# nofilter` to a command for full output.
 
 ## The human is learning Spring
 
