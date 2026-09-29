@@ -1,11 +1,31 @@
 # Progress
 
 ## Current milestone
-M1 — x402 starter + first paid endpoint: **in progress** on branch `m1-x402`. Plan: architect design pass approved 2026-09-28 (ADR-0008 native x402 v2, ADR-0009 secrets). Tasks: T0 orchestrator (catalog, publishing convention, ADRs) · T1 payments-engineer starter core/evm · T2 server + facilitator + FakeFacilitator · T3 client + SpendGuard + console buyer · T4 seller-api endpoint · T5 infra (compose payTo check, make x402-*, CI) · T6 README quickstart + live Base Sepolia payment.
-Status: T0–T6 done (committed on `m1-x402`); the milestone-end security audit is next, then M1 closes.
+M1 — x402 starter + first paid endpoint: **done**, pending the human's push/PR approval. Plan: architect design pass approved 2026-09-28 (ADR-0008 native x402 v2, ADR-0009 secrets). Tasks: T0 orchestrator (catalog, publishing convention, ADRs) · T1 payments-engineer starter core/evm · T2 server + facilitator + FakeFacilitator · T3 client + SpendGuard + console buyer · T4 seller-api endpoint · T5 infra (compose payTo check, make x402-*, CI) · T6 README quickstart + live Base Sepolia payment.
+Status: T0–T6 done and the milestone-end security audit is complete (one Medium finding, fixed and verified) — all committed on `m1-x402`. Ready for the human's go-ahead to push and open a PR to main.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
+
+### 2026-09-29 — M1 closing: milestone-end security audit
+
+**What changed**
+- Ran the milestone-end `security-auditor` pass (`model: opus`) over the full M1 diff (178 files vs. `main`), with an explicit focus on T2's server flow — the one per-task review that got skipped under lean mode's "no re-check rounds" policy.
+- Found one blocking issue, **M1-A (Medium)**: `X402SettlementFilter` matched a settlement's transaction hash against a regex without a null check. A facilitator answering `/settle` with `success:true` but no `transaction` field (malformed, buggy, or hostile) threw an NPE that was caught, logged and rethrown by the outer dispatch handler — but the `finally` block still unconditionally flushed the already-buffered handler body (with its headers) to the client, because nothing had reset it first. Net effect: content served with no confirmed settlement.
+- Fixed: a null/malformed transaction hash now takes the same "ambiguous, reset, 402, keep the nonce claim" path as any other settle failure; the rest of the verified-settlement handling (building the client-facing response, publishing the settled event) is now wrapped so *any* unexpected exception in that zone routes through the same safe path instead of escaping to the filter's fail-open `finally`. `FakeFacilitator` gained `injectSettleSuccessWithoutTransaction()` to reproduce this from a test.
+- `docs/THREAT_MODEL.md` corrected per the audit: exact retry/4xx-vs-429 behaviour, the Redis-vs-in-memory nonce store fallback and its clock-skew assumption, that facilitator-response records (unlike wire-input records) aren't null-checked by a compact constructor, and four new known-gaps rows (declared-vs-runtime async handler types, one circuit breaker shared by verify/settle counting 4xx as failures, the starter itself still following redirects by default, Valkey reachable from every app container).
+
+**How it was verified**
+- The audit itself probed rather than only read: 64 concurrent requests (half re-cased nonce/from) against replay protection — 1×200, 63×402, one `/verify`, one `/settle`; injected settle timeouts, 5xx, 429 and the missing-transaction case, each producing exactly one `/settle` call and a held claim; read the Resilience4j retry predicate by reflection to confirm `/settle` has no retry policy at all and 4xx/429 are excluded from `/verify`'s retry.
+- After the fix: `./gradlew :libs:x402-spring-boot-starter:check` green (a new regression test, `settleSuccessWithoutAWellFormedTransactionIsTreatedAsAmbiguousNotCharged`, asserts 402, no leaked handler headers, no `PAYMENT-RESPONSE`, the failed (not settled) event fires with reason `ambiguous`, and a replay is rejected without reaching the facilitator again). `make test && make lint` both green.
+- Per `CLAUDE.md`'s lean-mode review policy, M1-A is Medium (not Critical), so `test-runner`-equivalent verification (the test suite passing) was sufficient — no re-review round.
+
+**What's next**
+- Ask the human before pushing `m1-x402` and opening the PR to `main` (per their explicit instruction and rule 5).
+- M2 (ingest + RAG) starts with its own architect design pass, per `docs/PLAN.md`.
+
+**Open questions**
+- None blocking. The known-gaps table in `docs/THREAT_MODEL.md` carries everything deferred to M2/M3/M4.
 
 ### 2026-09-29 — M1 T6: README quickstart, THREAT_MODEL.md, live Base Sepolia payment
 
