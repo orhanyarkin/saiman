@@ -35,6 +35,11 @@ jobs:
           cache-provider: basic
       - name: ./gradlew check
         run: ./gradlew check --continue
+      # ADR-0008: the starter must work when consumed from a Maven repository with properties only.
+      - name: Publish the x402 starter to mavenLocal
+        run: ./gradlew :libs:x402-spring-boot-starter:publishToMavenLocal
+      - name: Build the console-buyer sample against it
+        run: ./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer build
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
