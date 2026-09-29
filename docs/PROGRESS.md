@@ -2,10 +2,38 @@
 
 ## Current milestone
 M1 — x402 starter + first paid endpoint: **in progress** on branch `m1-x402`. Plan: architect design pass approved 2026-09-28 (ADR-0008 native x402 v2, ADR-0009 secrets). Tasks: T0 orchestrator (catalog, publishing convention, ADRs) · T1 payments-engineer starter core/evm · T2 server + facilitator + FakeFacilitator · T3 client + SpendGuard + console buyer · T4 seller-api endpoint · T5 infra (compose payTo check, make x402-*, CI) · T6 README quickstart + live Base Sepolia payment.
-Status: T0–T5 done (committed on `m1-x402`); T6 (README, THREAT_MODEL, live payment) and the milestone-end audit next. M0 merged to main.
+Status: T0–T6 done (committed on `m1-x402`); the milestone-end security audit is next, then M1 closes.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
+
+### 2026-09-29 — M1 T6: README quickstart, THREAT_MODEL.md, live Base Sepolia payment
+
+**What changed**
+- README: fixed the stale "built on the official x402 Java SDK" claim (ADR-0008: native v2, the official SDK is a reference only) and added a copy-paste x402 quickstart (two throwaway wallets, fund the buyer from the Circle testnet faucet, `make up`, `make x402-buy`/`-replay`/`-testnet-check`).
+- `docs/THREAT_MODEL.md` (new): consolidates every payments-touching security review from M1 into one document — invariants K1–K3 (key custody, no-echo, hermetic CI), wire format and signing, server settlement, client payment, facilitator trust, seller-api, a known-gaps table, and how to re-verify each invariant on future changes. Linked from the README.
+- Live payment on Base Sepolia: created a fresh throwaway buyer wallet (`make x402-new-wallet`), funded it from the Circle faucet, rebuilt and restarted the stack (`make up`, picking up T4's seller-api endpoint), then `make x402-buy` against `GET /v1/disclosures/THYAO/summary`.
+
+**How it was verified**
+- `curl` against the unpaid endpoint returned 402 with a decodable `PAYMENT-REQUIRED` header (amount `10000`, network `eip155:84532`, asset the Base Sepolia USDC contract, payTo the configured seller address).
+- `make x402-buy`: HTTP 200, the fixture summary body, and a settlement tx hash.
+  - **Tx:** `0xe9811f2d8473aa1fd4c7bef4483f50adf1edf586812f3df6f9f63272a5e9d50a` — https://sepolia.basescan.org/tx/0xe9811f2d8473aa1fd4c7bef4483f50adf1edf586812f3df6f9f63272a5e9d50a
+  - Confirmed independently via `eth_getTransactionReceipt` on the public Base Sepolia RPC (not just the app's own report): `status: success`, block `47469579` (2026-09-29T18:44:06Z), a USDC `Transfer` event for exactly `10000` atomic units (0.01 test USDC) from the buyer to the configured seller payTo address.
+- `make x402-replay`: HTTP 402, "this payment authorization has already been used" — the same signed payload is rejected the second time. Confirms AC1 (a console client pays on Base Sepolia and gets data) and AC2 (a replayed payload is rejected).
+- README quickstart's doc links checked to resolve; the commands match the actual `make` targets and `.env.example`.
+- Buyer key never left `secrets/buyer.key` (0600, git-ignored); the orchestrator never read `.env` or the key file directly, only ran the allowlisted `make check-x402-env` / `make x402-*` targets.
+
+**What's next**
+- Milestone-end security audit (`model: opus`), covering T2's server flow end to end: replay protection, verify → handler → settle order, no retry on `/settle`, 4xx/429 handling — since T2's per-task re-check round was skipped under the lean review policy.
+- Then M1 closes; M2 (ingest + RAG) starts with its own architect design pass.
+
+**Open questions / carried to later milestones**
+- M2/M3 (orchestrator): paying `RestClient` must use the starter's non-redirecting request factory (`X402RestClients`), with its own test; M3's `SpendGuard` counts *held* reservations against run/daily budgets and reconciles them via `authorizationState(from, nonce)` after `validBefore`; 402 and seller response bodies are untrusted tool output (prompt injection) once fed back to an LLM; idempotency keys should be opaque random values; don't wire the client interceptor into an LLM-driven retry loop before the M3 budget plane exists.
+- M3 design/ADR: paid handlers run before settlement succeeds, so an attacker can make one run for free by draining the buyer's balance between verify and settle — needs per-payer/IP limits on unsettled attempts and, for expensive (LLM-backed) handlers, an opt-in settle-before-serve mode.
+- M4: reconcile ambiguous settlements on chain; events already carry `(from, nonce)` as the dedupe key; don't trust the facilitator's `success` field as ground truth.
+- Infra: add `osv-scanner` on the generated starter POM in CI; Valkey has no auth in the compose stack (any container on the network could flush the nonce store) — add `requirepass`/ACL or network segmentation before anything beyond the local demo.
+- T4 follow-ups (non-blocking): the nonce is claimed before the ticker's `@Pattern` validation, so a malformed-ticker request burns a valid authorization (buyer-side self-inflicted, no seller-side exploit); add a seller-api test where the service throws (500, not settled, no leaked handler headers); springdoc/OpenAPI for seller-api; M2's RAG-backed `DisclosureSummaryService` must keep "no request-time file/DB access keyed by raw client input".
+- All details in `docs/THREAT_MODEL.md`.
 
 ### 2026-09-28 — M1 in progress (T0 done)
 
@@ -19,22 +47,15 @@ Status: T0–T5 done (committed on `m1-x402`); T6 (README, THREAT_MODEL, live pa
 - T5 (infra): `make up` requires a valid `X402_SELLER_PAYTO_ADDRESS` (never echoes it); compose-policy scans every profile for key material (env_file, secrets, configs, mounts, env) with 17 fixture tests in CI; seller-api gets payTo + healthy Valkey; `make x402-*` targets. Reviewed by reviewer + security-auditor; blocking findings fixed and verified by the fixture tests.
 - T1 (payments-engineer): x402 v2 records + codec, canonical EIP-3009 authorization, low-s signature policy, EIP-712 digest over a fixed Base Sepolia USDC domain. Known-answer tests: EIP-712 Mail vector; the x402 spec payment payload recovers to its payer; domain separator and typehash pinned; `@Tag("testnet")` check of `DOMAIN_SEPARATOR()` on chain (passed locally). 93 tests. Review round 1 found 8 reviewer + 3 security blocking issues (non-canonical inputs defeating the replay key, high-s signatures, payload in exception causes, strict decoding of facilitator bodies, `extra` typing); all fixed. POM pins jackson-databind 3.1.5 and bcprov 1.86; Vert.x/ConnId/KZG/tuweni excluded with a build check.
 
-**Status (updated 2026-09-29 afternoon)** — resume here if a session stops
-- Committed on `m1-x402`: T0, T1, T2 (adcaded), T3 (83b0d3f), T5, `make` reads the public payTo from `.env`, sample in `make test`/`make lint`/CI. Starter: 198 tests green; no test calls x402.org; 4xx/429 from the facilitator are not retried (verified in code and test).
-- T2's pending security re-check was dropped under the new lean review policy (no re-check rounds; no Critical findings); fixes are covered by tests.
-- T4 seller-api paid endpoint committed (0aa1b64): 23 seller-api tests green, reviewer + security-auditor approved (no blocking findings). The T4 agent was stopped because the first test-output hook broke worktree agents ("command name computed at runtime"); fixed in 6b6f8d5 (single literal `run-filtered.sh` call, plain commands only) and PR #9 to main. The orchestrator finished T4's verification (format fix; Redis health indicator off in the two actuator tests that have no Redis).
-- PR #9 merged; main merged into `m1-x402` (c96776d), `make test` green through the fixed hook. Restart Claude Code (lean mode), then continue. Then T6 (README quickstart, THREAT_MODEL, live Base Sepolia payment by the human) and the milestone-end security audit.
-- PRs #7 (pnpm 4320) and #8 (lean mode) merged 2026-09-29; main merged into `m1-x402` (4889567), `make test` green, `stash@{0}` dropped. Lean mode applies after a Claude Code restart.
-- Milestone-end security audit (human's instruction): run security-auditor with `model: opus` and explicitly cover T2's server flow — replay protection, verify → handler → settle order, no retry on /settle, 4xx/429 handling — since T2's re-check round was skipped.
-
-**Carry-forward review findings (must land in later tasks)**
-- T6: README still says "built on the official x402 Java SDK"; write `docs/THREAT_MODEL.md` from the security-auditor's M1 sections (key custody K1–K3, facilitator trust, signing/wire format, client money-in-flight rules, server settlement policy).
-- M2/M3 (orchestrator): paying RestClient uses the starter's non-redirecting request factory, with a real-socket test; M3 SpendGuard counts held reservations against run/daily budgets and reconciles them via `authorizationState(from, nonce)` after `validBefore`; 402 and seller bodies are untrusted tool output (prompt injection); Idempotency-Keys are opaque random values; don't wire the interceptor into LLM-driven loops before the M3 budgets exist.
-- M3 design/ADR: paid handlers run before settle, so an attacker can make them run without paying (drain the wallet between verify and settle) — per-payer/IP limits on unsettled attempts and an opt-in settle-before-serve mode for expensive (LLM) handlers.
-- M4: reconcile ambiguous settlements on chain; events carry (from, nonce) as the dedupe key; don't trust facilitator `success`.
-- The `exact` scheme doesn't bind a signature to a resource (same price and payTo → usable once on another endpoint); document in THREAT_MODEL.
-- Infra: osv-scanner on the generated starter POM in CI; Valkey has no auth in compose (any container on the network could flush the nonce store) — add requirepass/ACL or network segmentation before anything beyond the local demo.
-- T4 follow-ups (non-blocking): the nonce is claimed before the ticker's @Pattern validation, so a malformed-ticker request burns a valid authorization (buyer-side only; release the claim on non-2xx or validate earlier); add a seller-api test where the service throws (500, not settled, no handler headers); springdoc/OpenAPI for seller-api before M1 closes (CLAUDE.md conventions); M2's RAG lookup must keep "no request-time file/DB access keyed by raw client input".
+**Task history** (T0–T6, all committed on `m1-x402`)
+- T0: catalog, `saiman.published-library` convention, ADR-0008/0009, ADR-0006 amendment, shared design contract (`docs/design/m1-x402.md`).
+- T1 (payments-engineer): x402 v2 wire model, codec, canonical EIP-3009 authorization, low-s signature policy, EIP-712 digest over the fixed Base Sepolia USDC domain. Known-answer tests (EIP-712 Mail vector, the spec's own payment payload, a `@Tag("testnet")` check against the live contract). Review found 8 reviewer + 3 security blocking issues (non-canonical inputs defeating the replay key, high-s signatures, payload in exception causes, facilitator-body decoding too strict, `extra` typing) — all fixed; POM pins patched Jackson/BouncyCastle versions.
+- T2 (payments-engineer): server filter, `@RequiresPayment`, `HttpFacilitatorClient`, observability. Review found blocking issues (async handlers settling without a body, fail-open when the interceptor isn't registered, handler headers leaking on settle failure, PAYMENT-RESPONSE built from unvalidated facilitator output, Redis nonce store never actually selected, `/supported` handshake breaking CI's hermeticity) — all fixed; 198 starter tests green, no test contacts x402.org. Its per-task security re-check was skipped once lean mode's "no re-check rounds" policy landed — covered instead by the milestone-end audit.
+- T3 (payments-engineer): client interceptor, `SpendGuard`, console-buyer sample. Two review rounds found and fixed: releasing a spend reservation after a signature had already been sent, a TOCTOU race in `PropertiesSpendGuard`, redirects forwarding `PAYMENT-SIGNATURE` to another host, a settlement response with no valid tx hash being committed anyway. Security re-check confirmed all resolved.
+- T4 (payments-engineer): seller-api's first paid endpoint (`GET /v1/disclosures/{ticker}/summary`, 10000 atomic units). Reviewer and security-auditor approved with no blocking findings. Fixture data covers 3 BIST tickers, clearly labelled, each citation carrying a source URL and retrieval time.
+- T5 (infra): `make up` requires a valid `X402_SELLER_PAYTO_ADDRESS` (never echoed, read from `.env` via an allowlisted script); compose-policy scans every profile for key material with 17 fixture tests in CI; `make x402-*` targets.
+- T6: see the entry above.
+- Also on this branch: a lean-mode PreToolUse hook broke worktree-isolated agents ("command name computed at runtime") — fixed by rewriting to a single literal script call, merged via PR #9.
 
 ### 2026-09-28 — Housekeeping: Valkey port, Dependabot cooldown
 
