@@ -22,6 +22,7 @@ class InternalRequestGuardFilterTests {
     private Result call(String method, String uri, String host, String contentType, String internalHeader)
             throws ServletException, IOException {
         MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        request.setServletPath(uri);
         if (host != null) {
             request.addHeader("Host", host);
         }
@@ -90,10 +91,39 @@ class InternalRequestGuardFilterTests {
     }
 
     @Test
-    void getsNeedNoHeaderAndOtherPathsAreUntouched() throws Exception {
+    void getsNeedNoHeader() throws Exception {
         assertThat(call("GET", "/internal/v1/tickers", "localhost:1", null, null))
                 .isEqualTo(new Result(200, true));
-        assertThat(call("POST", "/actuator/health", "evil.example", "text/plain", null))
+    }
+
+    @Test
+    void healthProbesSkipOnlyTheHostCheck() throws Exception {
+        assertThat(call("GET", "/actuator/health", "evil.example", null, null)).isEqualTo(new Result(200, true));
+        assertThat(call("GET", "/actuator/health/liveness", "evil.example", null, null))
                 .isEqualTo(new Result(200, true));
+        assertThat(call("GET", "/actuator/info", "evil.example", null, null)).isEqualTo(new Result(400, false));
+        assertThat(call("POST", "/actuator/health", "evil.example", "text/plain", null))
+                .isEqualTo(new Result(403, false));
+    }
+
+    @Test
+    void theCsrfRuleAppliesToEveryPath() throws Exception {
+        assertThat(call("POST", "/anything/else", "localhost:1", "text/plain", null))
+                .isEqualTo(new Result(403, false));
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "/internal;x=1/v1/admin/retry-dlq",
+                "/%69nternal/v1/admin/retry-dlq",
+                "//internal/v1/admin/retry-dlq",
+                "/internal%2Fv1/admin/retry-dlq",
+                "/internal/../internal/v1/admin/retry-dlq",
+                "/internal/./v1/admin/retry-dlq",
+                "/internal\\v1"
+            })
+    void nonNormalRawPathsGet400(String uri) throws Exception {
+        assertThat(call("POST", uri, "localhost:1", "application/json", null)).isEqualTo(new Result(400, false));
     }
 }

@@ -11,19 +11,24 @@ import java.util.Set;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Protects {@code /internal/**}, which has no authentication (ADR-0012: loopback and the compose
- * network only), from a web page in the developer's browser.
+ * Protects the service, whose {@code /internal/**} has no authentication (ADR-0012: loopback and
+ * the compose network only), from a web page in the developer's browser. The checks apply to every
+ * request whatever its path form; deciding by an {@code /internal/} prefix of the raw URI was
+ * bypassable ({@code /internal;x=1/}, {@code /%69nternal/}, {@code //internal/}).
  *
  * <ul>
- *   <li><b>DNS rebinding:</b> the {@code Host} header must be in the allowlist, else 400. A rebound
+ *   <li><b>DNS rebinding:</b> the {@code Host} header must be in the allowlist, else 400 (health probes excepted). A rebound
  *       attacker domain keeps its own name in {@code Host}.
- *   <li><b>CSRF:</b> a state-changing request (POST/PUT/PATCH/DELETE) must carry
+ *   <li><b>CSRF:</b> a state-changing request (POST/PUT/PATCH/DELETE) on any path must carry
  *       {@code Content-Type: application/json} or {@code X-Saiman-Internal: 1}, else 403. A page can
  *       send a "simple" cross-site POST (form, text/plain) without a preflight, but not with either
  *       of these; the preflight it would then trigger is never answered (no CORS config).
+ *   <li><b>Strict paths:</b> a raw URI with {@code ;}, {@code %}, {@code //}, a backslash or dot
+ *       segments is refused with 400.
  * </ul>
  */
 @Component
@@ -41,15 +46,13 @@ public class InternalRequestGuardFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        return !(path.equals("/internal") || path.startsWith("/internal/"));
-    }
-
-    @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        if (!hostAllowed(request.getHeader(HttpHeaders.HOST))) {
+        if (!strictPath(request.getRequestURI())) {
+            reject(response, HttpServletResponse.SC_BAD_REQUEST, "Malformed request path");
+            return;
+        }
+        if (!healthProbe(request) && !hostAllowed(request.getHeader(HttpHeaders.HOST))) {
             reject(response, HttpServletResponse.SC_BAD_REQUEST, "Host not allowed");
             return;
         }
@@ -58,6 +61,31 @@ public class InternalRequestGuardFilter extends OncePerRequestFilter {
             return;
         }
         chain.doFilter(request, response);
+    }
+
+    /**
+     * The raw request line must already be in normal form: no path parameters ({@code ;}), no
+     * percent-encoding, no empty segments ({@code //}), no dot segments or backslashes. Tomcat and
+     * Spring MVC route on the decoded, normalised path, so any other form could reach a handler the
+     * guard did not recognise (the same idea as Spring Security's StrictHttpFirewall).
+     */
+    private static boolean strictPath(String rawUri) {
+        if (rawUri == null || !rawUri.startsWith("/")) {
+            return false;
+        }
+        if (rawUri.indexOf(';') >= 0
+                || rawUri.indexOf('%') >= 0
+                || rawUri.indexOf('\\') >= 0
+                || rawUri.contains("//")) {
+            return false;
+        }
+        return StringUtils.cleanPath(rawUri).equals(rawUri);
+    }
+
+    /** Only the exact health endpoint and its probe groups skip the Host allowlist. */
+    private static boolean healthProbe(HttpServletRequest request) {
+        String path = request.getServletPath();
+        return path.equals("/actuator/health") || path.startsWith("/actuator/health/");
     }
 
     private boolean hostAllowed(String hostHeader) {
