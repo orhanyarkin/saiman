@@ -797,6 +797,100 @@ class X402PaymentInterceptorTest {
     }
 
     @Test
+    void anExactlyAllowedPlaintextHostIsPaidOverHttp() {
+        SpendGuard spendGuard = passthroughSpendGuard();
+        X402PaymentInterceptor interceptor = new X402PaymentInterceptor(
+                realSigner,
+                spendGuard,
+                codec,
+                5000,
+                List.of(PAY_TO),
+                List.of("Seller-API"),
+                ObservationRegistry.NOOP,
+                fixedClock);
+        bindServer(interceptor);
+        String url = "http://seller-api:8081/v1/resource";
+
+        server.expect(requestTo(url))
+                .andRespond(withStatus(HttpStatus.PAYMENT_REQUIRED)
+                        .header(X402Headers.PAYMENT_REQUIRED, encodedPaymentRequired(offer(PAY_TO, AMOUNT))));
+        server.expect(requestTo(url))
+                .andExpect(request -> assertThat(request.getHeaders().getFirst(X402Headers.PAYMENT_SIGNATURE))
+                        .isNotBlank())
+                .andRespond(withSuccess("ok", org.springframework.http.MediaType.TEXT_PLAIN)
+                        .header(X402Headers.PAYMENT_RESPONSE, encodedSettlementResponse(true, realSigner.address())));
+
+        restClientBuilder
+                .build()
+                .get()
+                .uri(url)
+                .header("Idempotency-Key", "req-plaintext-ok")
+                .retrieve()
+                .toBodilessEntity();
+
+        server.verify();
+        verify(spendGuard).commit(any(), any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(
+            strings = {
+                "http://seller-api2:8081/v1/resource",
+                "http://seller-api.evil.com/v1/resource",
+                "http://evilseller-api/v1/resource",
+                "http://seller-api@evil.com/v1/resource",
+                "http://seller-api:8081@evil.com/v1/resource",
+                "http://api/v1/resource",
+                "http://seller/v1/resource"
+            })
+    void aHostThatIsNotExactlyAllowedIsRefusedOverPlaintextBeforeReserving(String url) {
+        SpendGuard spendGuard = passthroughSpendGuard();
+        PaymentSigner signer = mock(PaymentSigner.class);
+        when(signer.address()).thenReturn(realSigner.address());
+        X402PaymentInterceptor interceptor = new X402PaymentInterceptor(
+                signer,
+                spendGuard,
+                codec,
+                5000,
+                List.of(PAY_TO),
+                List.of("seller-api"),
+                ObservationRegistry.NOOP,
+                fixedClock);
+        bindServer(interceptor);
+
+        server.expect(requestTo(url))
+                .andRespond(withStatus(HttpStatus.PAYMENT_REQUIRED)
+                        .header(X402Headers.PAYMENT_REQUIRED, encodedPaymentRequired(offer(PAY_TO, AMOUNT))));
+
+        assertThatThrownBy(() -> restClientBuilder
+                        .build()
+                        .get()
+                        .uri(URI.create(url))
+                        .header("Idempotency-Key", "req-plaintext-refused")
+                        .retrieve()
+                        .toBodilessEntity())
+                .isInstanceOf(PaymentRejectedException.class);
+
+        server.verify();
+        verify(spendGuard, never()).reserve(any());
+        verify(signer, never()).signTransferWithAuthorization(any());
+    }
+
+    @Test
+    void anInvalidPlaintextHostEntryFailsConstruction() {
+        assertThatThrownBy(() -> new X402PaymentInterceptor(
+                        realSigner,
+                        passthroughSpendGuard(),
+                        codec,
+                        5000,
+                        List.of(PAY_TO),
+                        List.of("*.internal"),
+                        ObservationRegistry.NOOP))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageNotContaining("*.internal");
+    }
+
+    @Test
     void timeWindowUsesTheFixedClockExactly() {
         SpendGuard spendGuard = passthroughSpendGuard();
         PaymentSigner signer = spy(realSigner);

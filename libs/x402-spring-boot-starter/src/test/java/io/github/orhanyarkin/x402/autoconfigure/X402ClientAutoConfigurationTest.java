@@ -1,14 +1,18 @@
 package io.github.orhanyarkin.x402.autoconfigure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import io.github.orhanyarkin.x402.client.PropertiesSpendGuard;
 import io.github.orhanyarkin.x402.client.SpendGuard;
+import io.github.orhanyarkin.x402.client.X402ClientProperties;
 import io.github.orhanyarkin.x402.client.X402PaymentInterceptor;
+import io.github.orhanyarkin.x402.core.TestnetAssets;
 import io.github.orhanyarkin.x402.evm.PaymentSigner;
 import io.github.orhanyarkin.x402.evm.PrivateKeyPaymentSigner;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -151,6 +155,59 @@ class X402ClientAutoConfigurationTest {
                     assertThat(context).hasSingleBean(SpendGuard.class);
                     assertThat(context).hasSingleBean(X402PaymentInterceptor.class);
                 });
+    }
+
+    @Test
+    void anExactPlaintextHostStartsOnTheTestnetAndIsEmptyByDefault() {
+        runner.withPropertyValues(
+                        "x402.client.private-key=" + COW_PRIVATE_KEY,
+                        "x402.client.max-amount-per-request=1000",
+                        "x402.client.allowed-pay-to=" + PAY_TO,
+                        "x402.client.allowed-plaintext-hosts=seller-api")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(X402ClientProperties.class).allowedPlaintextHosts())
+                            .containsExactly("seller-api");
+                    assertThat(context).hasSingleBean(X402PaymentInterceptor.class);
+                });
+        runner.run(context -> assertThat(
+                        context.getBean(X402ClientProperties.class).allowedPlaintextHosts())
+                .isEmpty());
+    }
+
+    @Test
+    void aWildcardPlaintextHostFailsStartupWithoutEchoingIt() {
+        runner.withPropertyValues(
+                        "x402.client.private-key=" + COW_PRIVATE_KEY,
+                        "x402.client.max-amount-per-request=1000",
+                        "x402.client.allowed-pay-to=" + PAY_TO,
+                        "x402.client.allowed-plaintext-hosts=*.internal")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseInstanceOf(IllegalStateException.class)
+                            .hasStackTraceContaining("x402.client.allowed-plaintext-hosts")
+                            .satisfies(e -> assertThat(rootCauseMessage(e))
+                                    .doesNotContain("*.internal")
+                                    .doesNotContain(COW_PRIVATE_KEY));
+                });
+    }
+
+    @Test
+    void aNonEmptyPlaintextListFailsOnANetworkOtherThanBaseSepolia() {
+        X402ClientProperties properties = new X402ClientProperties(null, 1000L, List.of(PAY_TO), List.of("seller-api"));
+
+        assertThat(X402ClientAutoConfiguration.requireAllowedPlaintextHosts(properties, TestnetAssets.NETWORK))
+                .containsExactly("seller-api");
+        // Base mainnet and Ethereum mainnet: the plaintext exception is never available there.
+        assertThatThrownBy(() -> X402ClientAutoConfiguration.requireAllowedPlaintextHosts(properties, "eip155:8453"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> X402ClientAutoConfiguration.requireAllowedPlaintextHosts(properties, "eip155:1"))
+                .isInstanceOf(IllegalStateException.class);
+        // An empty list is fine anywhere.
+        assertThat(X402ClientAutoConfiguration.requireAllowedPlaintextHosts(
+                        new X402ClientProperties(null, 1000L, List.of(PAY_TO), List.of()), "eip155:8453"))
+                .isEmpty();
     }
 
     private static String rootCauseMessage(Throwable e) {

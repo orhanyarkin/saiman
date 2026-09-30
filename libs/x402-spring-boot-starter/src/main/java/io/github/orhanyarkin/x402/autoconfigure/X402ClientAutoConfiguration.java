@@ -1,9 +1,11 @@
 package io.github.orhanyarkin.x402.autoconfigure;
 
+import io.github.orhanyarkin.x402.client.PlaintextHostAllowlist;
 import io.github.orhanyarkin.x402.client.PropertiesSpendGuard;
 import io.github.orhanyarkin.x402.client.SpendGuard;
 import io.github.orhanyarkin.x402.client.X402ClientProperties;
 import io.github.orhanyarkin.x402.client.X402PaymentInterceptor;
+import io.github.orhanyarkin.x402.core.TestnetAssets;
 import io.github.orhanyarkin.x402.core.X402Codec;
 import io.github.orhanyarkin.x402.evm.PaymentSigner;
 import io.github.orhanyarkin.x402.evm.PrivateKeyPaymentSigner;
@@ -39,7 +41,9 @@ import org.springframework.web.client.RestClient;
  *       checked again here, independently of {@link PropertiesSpendGuard}, since a consuming
  *       application may supply its own {@link SpendGuard} bean and skip {@link
  *       PropertiesSpendGuard} entirely — the interceptor still needs a maximum and an allowlist to
- *       pick an offer from the server).
+ *       pick an offer from the server). {@code x402.client.allowed-plaintext-hosts} is checked
+ *       here too: exact host names only, and startup fails if the list is non-empty on any
+ *       network other than the Base Sepolia testnet.
  * </ul>
  *
  * None of the failure messages above echo the rejected value (see {@link X402ClientProperties}).
@@ -88,7 +92,22 @@ public class X402ClientAutoConfiguration {
                 codec,
                 requireMaxAmountPerRequest(properties),
                 requireAllowedPayTo(properties),
+                requireAllowedPlaintextHosts(properties, TestnetAssets.NETWORK),
                 observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP));
+    }
+
+    /**
+     * Checks {@code x402.client.allowed-plaintext-hosts} against {@code network}, the network this
+     * client pays on. There is no network property (ADR-0008): the starter pays only on {@link
+     * TestnetAssets#NETWORK}, so this is called with that constant; the parameter keeps the rule
+     * ("never a plaintext exception off the testnet") explicit and testable should a network ever
+     * become configurable.
+     *
+     * @throws IllegalStateException if the list is non-empty on a network other than Base
+     *     Sepolia, or holds anything but exact host names; never echoes an entry
+     */
+    static List<String> requireAllowedPlaintextHosts(X402ClientProperties properties, String network) {
+        return PlaintextHostAllowlist.requireValidAndNormalize(properties.allowedPlaintextHosts(), network);
     }
 
     /**

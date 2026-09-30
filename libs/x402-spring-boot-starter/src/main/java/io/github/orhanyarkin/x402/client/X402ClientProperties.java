@@ -24,13 +24,21 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *     sign; required once {@link #privateKey()} is set
  * @param allowedPayTo the wallet addresses this starter is allowed to pay, matched
  *     case-insensitively; required and non-empty once {@link #privateKey()} is set
+ * @param allowedPlaintextHosts exact host names (besides loopback) the client may pay over plain
+ *     {@code http}, e.g. {@code seller-api} on a private compose network; empty by default. No
+ *     wildcard, suffix, port, path or range (see {@link PlaintextHostAllowlist}); startup fails if
+ *     non-empty on any network other than the Base Sepolia testnet
  */
 @ConfigurationProperties(prefix = "x402.client")
 public record X402ClientProperties(
-        @Nullable String privateKey, @Nullable Long maxAmountPerRequest, List<String> allowedPayTo) {
+        @Nullable String privateKey,
+        @Nullable Long maxAmountPerRequest,
+        List<String> allowedPayTo,
+        List<String> allowedPlaintextHosts) {
 
     public X402ClientProperties {
         allowedPayTo = allowedPayTo == null ? List.of() : List.copyOf(allowedPayTo);
+        allowedPlaintextHosts = allowedPlaintextHosts == null ? List.of() : List.copyOf(allowedPlaintextHosts);
     }
 
     /** {@code true} if {@link #privateKey()} is set to a non-blank value. */
@@ -47,6 +55,8 @@ public record X402ClientProperties(
                 + maxAmountPerRequest
                 + ", allowedPayTo="
                 + allowedPayTo
+                + ", allowedPlaintextHosts="
+                + allowedPlaintextHosts
                 + "]";
     }
 }
