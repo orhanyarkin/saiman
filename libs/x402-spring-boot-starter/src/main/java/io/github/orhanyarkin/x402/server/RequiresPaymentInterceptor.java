@@ -265,7 +265,9 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
             return "window_too_large";
         }
         long minimumWindow = Math.max(
-                properties.facilitator().readTimeout().toSeconds() + SETTLEMENT_MARGIN.toSeconds(),
+                properties.facilitator().connectTimeout().toSeconds()
+                        + properties.facilitator().readTimeout().toSeconds()
+                        + SETTLEMENT_MARGIN.toSeconds(),
                 entry.minWindowSeconds());
         if (window < minimumWindow) {
             return "window_too_short";

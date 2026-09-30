@@ -834,6 +834,43 @@ class X402PaymentInterceptorTest {
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(
+            strings = {"HTTP://SELLER-API:8081/v1/resource", "http://[::1]:8081/v1/resource"})
+    void schemeAndHostCaseAndBracketedIpv6LoopbackAreAllowedOverPlaintext(String url) {
+        SpendGuard spendGuard = passthroughSpendGuard();
+        X402PaymentInterceptor interceptor = new X402PaymentInterceptor(
+                realSigner,
+                spendGuard,
+                codec,
+                5000,
+                List.of(PAY_TO),
+                List.of("seller-api"),
+                ObservationRegistry.NOOP,
+                fixedClock);
+        bindServer(interceptor);
+
+        server.expect(requestTo(url))
+                .andRespond(withStatus(HttpStatus.PAYMENT_REQUIRED)
+                        .header(X402Headers.PAYMENT_REQUIRED, encodedPaymentRequired(offer(PAY_TO, AMOUNT))));
+        server.expect(requestTo(url))
+                .andExpect(request -> assertThat(request.getHeaders().getFirst(X402Headers.PAYMENT_SIGNATURE))
+                        .isNotBlank())
+                .andRespond(withSuccess("ok", org.springframework.http.MediaType.TEXT_PLAIN)
+                        .header(X402Headers.PAYMENT_RESPONSE, encodedSettlementResponse(true, realSigner.address())));
+
+        restClientBuilder
+                .build()
+                .get()
+                .uri(URI.create(url))
+                .header("Idempotency-Key", "req-plaintext-case")
+                .retrieve()
+                .toBodilessEntity();
+
+        server.verify();
+        verify(spendGuard).commit(any(), any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(
             strings = {
                 "http://seller-api2:8081/v1/resource",
                 "http://seller-api.evil.com/v1/resource",
@@ -841,7 +878,9 @@ class X402PaymentInterceptorTest {
                 "http://seller-api@evil.com/v1/resource",
                 "http://seller-api:8081@evil.com/v1/resource",
                 "http://api/v1/resource",
-                "http://seller/v1/resource"
+                "http://seller/v1/resource",
+                "http://seller-api./v1/resource",
+                "ws://seller-api/v1/resource"
             })
     void aHostThatIsNotExactlyAllowedIsRefusedOverPlaintextBeforeReserving(String url) {
         SpendGuard spendGuard = passthroughSpendGuard();

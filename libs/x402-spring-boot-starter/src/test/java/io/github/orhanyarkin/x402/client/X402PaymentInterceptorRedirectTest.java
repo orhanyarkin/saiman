@@ -125,4 +125,80 @@ class X402PaymentInterceptorRedirectTest {
         assertThat(otherServerRequests.get()).isEqualTo(0);
         assertThat(otherServerSawPaymentSignature.get()).isFalse();
     }
+
+    /**
+     * The plaintext allowlist checks the first hop only. A listed host answering the paid retry with
+     * a redirect to another loopback address ({@code 127.0.0.2}) must never hand the signature on:
+     * with the non-following factory the second listener sees zero {@code PAYMENT-SIGNATURE}
+     * headers. (With a following factory it would, which is why the auto-configuration refuses a
+     * non-empty allowlist unless {@code spring.http.clients.redirects=dont-follow}.)
+     */
+    @Test
+    void aListedPlaintextHostRedirectingToAnotherAddressNeverForwardsThePaymentSignature() throws Exception {
+        AtomicInteger signaturesSeenByTheOtherListener = new AtomicInteger();
+        otherServer = HttpServer.create(new InetSocketAddress(InetAddress.getByName("127.0.0.2"), 0), 0);
+        otherServer.createContext("/", exchange -> {
+            if (exchange.getRequestHeaders().containsKey(X402Headers.PAYMENT_SIGNATURE)) {
+                signaturesSeenByTheOtherListener.incrementAndGet();
+            }
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        otherServer.start();
+        String otherUrl = "http://127.0.0.2:" + otherServer.getAddress().getPort() + "/elsewhere";
+
+        PaymentRequirements offer = new PaymentRequirements(
+                TestnetAssets.SCHEME_EXACT,
+                TestnetAssets.NETWORK,
+                AMOUNT,
+                TestnetAssets.USDC_ADDRESS,
+                PAY_TO,
+                60,
+                Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION));
+        String encodedPaymentRequired = codec.encodePaymentRequired(new PaymentRequired(
+                2,
+                null,
+                new ResourceInfo("http://listed.test/paid", null, null, null, null, null),
+                List.of(offer),
+                null));
+        AtomicInteger paidRequests = new AtomicInteger();
+        paidServer = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        paidServer.createContext("/paid", exchange -> {
+            if (paidRequests.incrementAndGet() == 1) {
+                exchange.getResponseHeaders().add(X402Headers.PAYMENT_REQUIRED, encodedPaymentRequired);
+                exchange.sendResponseHeaders(402, -1);
+            } else {
+                exchange.getResponseHeaders().add("Location", otherUrl);
+                exchange.sendResponseHeaders(302, -1);
+            }
+            exchange.close();
+        });
+        paidServer.start();
+        // "127.0.0.1" is a valid exact allowlist entry (digits and dots) and resolves without DNS.
+        String paidUrl = "http://127.0.0.1:" + paidServer.getAddress().getPort() + "/paid";
+
+        X402PaymentInterceptor interceptor = new X402PaymentInterceptor(
+                new PrivateKeyPaymentSigner(COW_PRIVATE_KEY),
+                new PropertiesSpendGuard(5000, List.of(PAY_TO)),
+                codec,
+                5000,
+                List.of(PAY_TO),
+                List.of("127.0.0.1"),
+                ObservationRegistry.NOOP);
+        RestClient restClient = RestClient.builder()
+                .requestFactory(X402RestClients.nonRedirectingRequestFactory())
+                .requestInterceptor(interceptor)
+                .build();
+
+        assertThatThrownBy(() -> restClient
+                        .get()
+                        .uri(paidUrl)
+                        .header(X402PaymentInterceptor.IDEMPOTENCY_KEY_HEADER, "redirect-listed-1")
+                        .retrieve()
+                        .toBodilessEntity())
+                .isInstanceOf(AmbiguousPaymentException.class);
+
+        assertThat(paidRequests.get()).isEqualTo(2);
+        assertThat(signaturesSeenByTheOtherListener.get()).isZero();
+    }
 }

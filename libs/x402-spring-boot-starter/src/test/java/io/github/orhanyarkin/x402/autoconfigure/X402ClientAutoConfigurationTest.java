@@ -163,7 +163,8 @@ class X402ClientAutoConfigurationTest {
                         "x402.client.private-key=" + COW_PRIVATE_KEY,
                         "x402.client.max-amount-per-request=1000",
                         "x402.client.allowed-pay-to=" + PAY_TO,
-                        "x402.client.allowed-plaintext-hosts=seller-api")
+                        "x402.client.allowed-plaintext-hosts=seller-api",
+                        "spring.http.clients.redirects=dont-follow")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBean(X402ClientProperties.class).allowedPlaintextHosts())
@@ -175,13 +176,43 @@ class X402ClientAutoConfigurationTest {
                 .isEmpty());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"", "follow", "follow-when-possible"})
+    void aPlaintextHostWithoutDontFollowRedirectsFailsStartup(String redirects) {
+        java.util.List<String> props = new java.util.ArrayList<>(List.of(
+                "x402.client.private-key=" + COW_PRIVATE_KEY,
+                "x402.client.max-amount-per-request=1000",
+                "x402.client.allowed-pay-to=" + PAY_TO,
+                "x402.client.allowed-plaintext-hosts=seller-api"));
+        if (!redirects.isEmpty()) {
+            props.add("spring.http.clients.redirects=" + redirects);
+        }
+        runner.withPropertyValues(props.toArray(String[]::new)).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure())
+                    .hasRootCauseInstanceOf(IllegalStateException.class)
+                    .hasStackTraceContaining("spring.http.clients.redirects=dont-follow")
+                    .satisfies(e -> assertThat(rootCauseMessage(e)).doesNotContain(COW_PRIVATE_KEY));
+        });
+    }
+
+    @Test
+    void anEmptyPlaintextListNeedsNoRedirectSetting() {
+        runner.withPropertyValues(
+                        "x402.client.private-key=" + COW_PRIVATE_KEY,
+                        "x402.client.max-amount-per-request=1000",
+                        "x402.client.allowed-pay-to=" + PAY_TO)
+                .run(context -> assertThat(context).hasNotFailed());
+    }
+
     @Test
     void aWildcardPlaintextHostFailsStartupWithoutEchoingIt() {
         runner.withPropertyValues(
                         "x402.client.private-key=" + COW_PRIVATE_KEY,
                         "x402.client.max-amount-per-request=1000",
                         "x402.client.allowed-pay-to=" + PAY_TO,
-                        "x402.client.allowed-plaintext-hosts=*.internal")
+                        "x402.client.allowed-plaintext-hosts=*.internal",
+                        "spring.http.clients.redirects=dont-follow")
                 .run(context -> {
                     assertThat(context).hasFailed();
                     assertThat(context.getStartupFailure())
