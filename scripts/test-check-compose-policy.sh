@@ -89,6 +89,62 @@ else
   echo "PASS: Makefile: only the payTo address is read from the env file"
 fi
 
+# --- scripts/secrets-from-dotenv.sh and ensure-secret-files.sh (placeholder values only) ---
+sfd_dir="${work_dir}/sfd"
+mkdir -p "${sfd_dir}"
+placeholder="sk-placeholder-NOT-A-REAL-KEY-0123456789"
+printf '%s\n' "# comment" "OTHER=leave-me-out" "export OPENAI_API_KEY=\"${placeholder}\"  # trailing" >"${sfd_dir}/good.env"
+printf '%s\n' "OPENAI_API_KEY=has spaces inside-${placeholder}" >"${sfd_dir}/spaces.env"
+printf '%s\n' "OPENAI_API_KEY=" >"${sfd_dir}/empty.env"
+
+no_leak() { # description, then checks that out/err never contain the placeholder
+  if grep -qF "${placeholder}" "${out_file}" "${err_file}"; then
+    echo "FAIL: $1: the value appeared in stdout/stderr" >&2
+    failures=$((failures + 1))
+  else
+    echo "PASS: $1 (value not printed)"
+  fi
+}
+
+expect_exit "secrets-from-dotenv: writes the key" 0 env ENV_FILE="${sfd_dir}/good.env" SECRETS_DIR="${sfd_dir}/s" scripts/secrets-from-dotenv.sh
+no_leak "secrets-from-dotenv: success output"
+if [[ "$(cat "${sfd_dir}/s/openai_api_key")" == "${placeholder}" && "$(stat -c %a "${sfd_dir}/s/openai_api_key")" == "600" && "$(stat -c %a "${sfd_dir}/s")" == "700" ]] \
+  && grep -q "written (${#placeholder} bytes)" "${out_file}"; then
+  echo "PASS: secrets-from-dotenv: trimmed value, mode 0600/0700, only the byte count printed"
+else
+  echo "FAIL: secrets-from-dotenv: unexpected file content, mode or output" >&2
+  failures=$((failures + 1))
+fi
+expect_exit "secrets-from-dotenv: refuses to overwrite without FORCE" 1 env ENV_FILE="${sfd_dir}/good.env" SECRETS_DIR="${sfd_dir}/s" scripts/secrets-from-dotenv.sh
+no_leak "secrets-from-dotenv: overwrite refusal"
+expect_exit "secrets-from-dotenv: FORCE=1 overwrites" 0 env FORCE=1 ENV_FILE="${sfd_dir}/good.env" SECRETS_DIR="${sfd_dir}/s" scripts/secrets-from-dotenv.sh
+expect_exit "secrets-from-dotenv: value with whitespace is rejected" 1 env ENV_FILE="${sfd_dir}/spaces.env" SECRETS_DIR="${sfd_dir}/s2" scripts/secrets-from-dotenv.sh
+no_leak "secrets-from-dotenv: whitespace rejection"
+if [[ -e "${sfd_dir}/s2/openai_api_key" ]] || compgen -G "${sfd_dir}/s2/.openai_api_key.*" >/dev/null; then
+  echo "FAIL: secrets-from-dotenv: rejected run left a file behind" >&2
+  failures=$((failures + 1))
+else
+  echo "PASS: secrets-from-dotenv: rejected run leaves no file"
+fi
+expect_exit "secrets-from-dotenv: empty value is rejected" 1 env ENV_FILE="${sfd_dir}/empty.env" SECRETS_DIR="${sfd_dir}/s3" scripts/secrets-from-dotenv.sh
+expect_exit "secrets-from-dotenv: missing env file is rejected" 1 env ENV_FILE="${sfd_dir}/absent.env" SECRETS_DIR="${sfd_dir}/s4" scripts/secrets-from-dotenv.sh
+
+esf_dir="${sfd_dir}/e"
+expect_exit "ensure-secret-files: creates missing files" 0 env SECRETS_DIR="${esf_dir}" scripts/ensure-secret-files.sh
+printf 'keep' >"${esf_dir}/mkk_credentials"
+expect_exit "ensure-secret-files: second run is a no-op" 0 env SECRETS_DIR="${esf_dir}" scripts/ensure-secret-files.sh
+if [[ ! -s "${esf_dir}/openai_api_key" && "$(stat -c %a "${esf_dir}/openai_api_key")" == "600" && "$(cat "${esf_dir}/mkk_credentials")" == "keep" && ! -s "${out_file}" ]]; then
+  echo "PASS: ensure-secret-files: empty 0600 files, never overwrites existing content"
+else
+  echo "FAIL: ensure-secret-files: unexpected state after second run" >&2
+  failures=$((failures + 1))
+fi
+expect_exit "secrets-check: reports without contents" 0 env SECRETS_DIR="${esf_dir}" scripts/secrets-check.sh
+if grep -q "keep" "${out_file}"; then
+  echo "FAIL: secrets-check printed file contents" >&2
+  failures=$((failures + 1))
+fi
+
 if [[ "${failures}" -ne 0 ]]; then
   echo "test-check-compose-policy: ${failures} check(s) FAILED" >&2
   exit 1

@@ -6,3 +6,4 @@
 - [worktree stale relative to task branch](worktree_stale_relative_to_task_branch.md) — worktree HEAD can lag the named task branch; Read (not Write/Edit) can still read the main checkout's absolute path for missing required-reading files
 - [compose per-service override of x-app-common](compose_per_service_override_of_x_app_common.md) — double-anchor merge-key pattern to extend (not replace) x-app-common's environment/depends_on for one service
 - [compose config path existence and profile wildcard](compose_config_path_existence_and_profile_wildcard.md) — env_file needs a real file for `docker compose config`, secrets:/configs:/bind-mount sources don't; `--profile '*'` scans every service regardless of profile
+- [worktree bash command complexity](worktree_bash_command_complexity.md) — compound Bash calls get refused in worktrees; use Write/Edit, one plain command per call

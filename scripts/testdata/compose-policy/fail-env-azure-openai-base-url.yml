@@ -1,0 +1,11 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# AZURE_OPENAI_BASE_URL defined in a service environment (the key must arrive only as a secret file).
+name: cptest-fail-env-azure-openai-base-url
+services:
+  ledger:
+    image: busybox:1
+    environment:
+      AZURE_OPENAI_BASE_URL: "x"
+secrets:
+  unused:
+    file: ../../secrets/unused

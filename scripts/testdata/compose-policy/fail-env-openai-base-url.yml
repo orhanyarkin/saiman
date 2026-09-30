@@ -1,0 +1,11 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# OPENAI_BASE_URL defined in a service environment (the key must arrive only as a secret file).
+name: cptest-fail-env-openai-base-url
+services:
+  ledger:
+    image: busybox:1
+    environment:
+      OPENAI_BASE_URL: "x"
+secrets:
+  unused:
+    file: ../../secrets/unused

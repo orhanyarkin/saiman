@@ -1,0 +1,11 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# OPENAI_LOG defined in a service environment (the key must arrive only as a secret file).
+name: cptest-fail-env-openai-log
+services:
+  ledger:
+    image: busybox:1
+    environment:
+      OPENAI_LOG: "x"
+secrets:
+  unused:
+    file: ../../secrets/unused

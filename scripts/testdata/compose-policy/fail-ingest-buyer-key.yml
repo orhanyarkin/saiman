@@ -1,0 +1,14 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# ingest asking for the buyer key (only orchestrator may).
+name: cptest-fail-ingest-buyer-key
+services:
+  ingest:
+    image: busybox:1
+    secrets: [mkk_credentials, buyer_key]
+secrets:
+  buyer_key:
+    file: ../../secrets/buyer.key
+  mkk_credentials:
+    file: ../../secrets/mkk_credentials
+  openai_api_key:
+    file: ../../secrets/openai_api_key
