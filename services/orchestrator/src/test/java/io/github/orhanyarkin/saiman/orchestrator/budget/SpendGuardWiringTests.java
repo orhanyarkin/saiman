@@ -83,6 +83,14 @@ class SpendGuardWiringTests {
     }
 
     @Test
+    void theShippedApprovalThresholdIsBelowThePerRequestMaximum() {
+        SpendProperties spend = context.getBean(SpendProperties.class);
+        assertThat(spend.approvalThresholdAtomic()).isEqualTo(10_000);
+        assertThat(BudgetSpendGuard.approvalThresholdWarning(spend.approvalThresholdAtomic(), 20_000))
+                .isNull();
+    }
+
+    @Test
     void aThrowingSignedHookReleasesTheReservationAndSendsNothing() {
         doThrow(new IllegalStateException("database unavailable")).when(guard).signed(any(), any());
         UUID run = UUID.randomUUID();

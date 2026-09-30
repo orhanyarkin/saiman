@@ -5,8 +5,9 @@ import org.springframework.http.HttpMethod;
 
 /**
  * The seller-api's paid endpoints. The path templates are code; callers only supply the template
- * variables, which are strictly percent-encoded (a {@code /} or {@code ..} in a value can never
- * change the path). No caller ever supplies a URL.
+ * variables, which {@link PaymentIntentService#create} restricts to an allowed shape (a ticker is
+ * {@code ^[A-Z0-9]{3,6}$}) before percent-encoding them. Encoding alone would not do: it leaves
+ * {@code .} as is, so a value of {@code ..} would change the path. No caller ever supplies a URL.
  */
 // HttpMethod is effectively immutable and the variable lists are List.of(...).
 @SuppressWarnings("ImmutableEnumChecker")

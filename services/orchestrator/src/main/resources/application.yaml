@@ -33,7 +33,9 @@ saiman:
       daily-cap-atomic: 1000000
       default-run-budget-atomic: 50000
       max-run-budget-atomic: 200000
-      approval-threshold-atomic: 20000 # strictly above this, a payment waits for a human
+      # Strictly above this, a payment waits for a human. Must stay below x402.client.max-amount-per-request
+      # (20000), else nothing ever needs approval (startup logs a WARN).
+      approval-threshold-atomic: 10000
       approval-timeout: 5m
       max-paid-calls-per-run: 4
       max-tool-calls-per-run: 6

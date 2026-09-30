@@ -9,10 +9,12 @@ import java.sql.Types;
 import java.time.LocalDate;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -31,6 +33,9 @@ import org.springframework.web.util.UriComponentsBuilder;
 public class PaymentIntentService {
 
     private static final int IDEMPOTENCY_KEY_BYTES = 16; // 128 bits
+    /** The allowed shape of every template variable any {@link SellerEndpoint} uses. */
+    private static final Map<String, Pattern> VARIABLE_SHAPES = Map.of("ticker", Pattern.compile("[A-Z0-9]{3,6}"));
+
     private static final String COLUMNS = "id, run_id, tool, args_hash, resource, status, amount_atomic, pay_to,"
             + " network, asset, reserved_day, tx_hash, deny_reason";
 
@@ -49,14 +54,17 @@ public class PaymentIntentService {
      *
      * @param tool the research tool name (for dedupe and the run's audit trail)
      * @param argsHash a hash of the validated, code-rendered arguments
-     * @param uriVariables exactly the endpoint's template variables; values are strictly encoded
-     * @throws IllegalArgumentException if the variables don't match the endpoint's template
+     * @param uriVariables exactly the endpoint's template variables, each of its allowed shape (a
+     *     ticker is {@code ^[A-Z0-9]{3,6}$})
+     * @throws IllegalArgumentException if the variables don't match the endpoint's template or a
+     *     value is not of its allowed shape; nothing is inserted then
      */
     public PaymentIntentHandle create(
             UUID runId, String tool, String argsHash, SellerEndpoint endpoint, Map<String, String> uriVariables) {
         if (!new HashSet<>(endpoint.variables()).equals(uriVariables.keySet())) {
             throw new IllegalArgumentException("uri variables must be exactly the endpoint's template variables");
         }
+        uriVariables.forEach(PaymentIntentService::requireAllowedValue);
         URI resource = resolve(endpoint, uriVariables);
         UUID id = UUID.randomUUID();
         String key = newIdempotencyKey();
@@ -256,6 +264,26 @@ public class PaymentIntentService {
                         """).param("id", id).update() == 1;
     }
 
+    /** Locks every RESERVED intent, in id order (startup crash recovery). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public List<PaymentIntentView> lockAllReserved() {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM payment_intent WHERE status = 'RESERVED' ORDER BY id FOR UPDATE")
+                .query(PaymentIntentService::map)
+                .list();
+    }
+
+    /**
+     * Every SIGNED -> HELD (startup crash recovery): the signature may have left the process, so
+     * the amount keeps counting until M4 reconciles it.
+     *
+     * @return how many intents were held
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int holdAllSigned() {
+        return jdbc.sql("UPDATE payment_intent SET status = 'HELD', updated_at = now() WHERE status = 'SIGNED'")
+                .update();
+    }
+
     /** PENDING -> RELEASED: the call ended before any payment was asked for or reserved. */
     public boolean closeUnsent(UUID id) {
         return jdbc.sql("""
@@ -266,8 +294,10 @@ public class PaymentIntentService {
 
     private URI resolve(SellerEndpoint endpoint, Map<String, String> uriVariables) {
         URI base = seller.baseUrl();
-        // encode() before expansion: template-and-values mode, so variable values are fully
-        // percent-encoded ("/", "?", "#" and ".." can't escape the path segment).
+        // create() has already restricted every value to its allowed shape; this is the second
+        // layer. encode() before expansion (template-and-values mode) percent-encodes "/", "?" and
+        // "#" in a value but NOT ".": a value of ".." would survive, and the seller would normalise
+        // /v1/disclosures/../summary to /v1/summary. So the allowed shape, not encoding, is the control.
         URI resource = UriComponentsBuilder.newInstance()
                 .scheme(base.getScheme())
                 .host(base.getHost())
@@ -280,6 +310,25 @@ public class PaymentIntentService {
             throw new IllegalStateException("resolved resource left the configured seller");
         }
         return resource;
+    }
+
+    /**
+     * Allowed-shape check for one template variable. An unknown variable name is refused (fail
+     * closed); dot segments, empty values and anything containing {@code /} are refused explicitly
+     * before the pattern, so the rule still holds if a pattern is widened later.
+     */
+    private static void requireAllowedValue(String name, String value) {
+        Pattern shape = VARIABLE_SHAPES.get(name);
+        if (shape == null) {
+            throw new IllegalArgumentException("uri variable has no allowed shape");
+        }
+        if (value.isEmpty()
+                || value.equals(".")
+                || value.equals("..")
+                || value.indexOf('/') >= 0
+                || !shape.matcher(value).matches()) {
+            throw new IllegalArgumentException("uri variable value is not of the allowed shape");
+        }
     }
 
     private String newIdempotencyKey() {

@@ -15,7 +15,10 @@ import io.github.orhanyarkin.x402.client.SpendReservation;
 import io.github.orhanyarkin.x402.client.X402ClientProperties;
 import io.github.orhanyarkin.x402.core.AssetAmount;
 import io.github.orhanyarkin.x402.core.Eip3009Authorization;
+import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.SettlementResponse;
+import io.github.orhanyarkin.x402.core.TestnetAssets;
+import io.github.orhanyarkin.x402.core.UnsupportedPaymentException;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.LocalDate;
 import java.util.Locale;
@@ -25,6 +28,8 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -41,12 +46,14 @@ import org.springframework.transaction.support.TransactionTemplate;
  *   <li>lock the {@code payment_intent} row by idempotency key; an unknown key, or one that is not
  *       PENDING/APPROVED, is refused ({@code UNKNOWN_INTENT}), so only requests created by code can
  *       be paid and a key is never paid twice;
- *   <li>the resource must be the one the intent was created for; payee on the allowlist; amount at
- *       most the per-request maximum;
+ *   <li>the offer must be payable (the one supported testnet network/asset, a positive amount),
+ *       else {@code OFFER_NOT_PAYABLE}; the resource must be the one the intent was created for;
+ *       payee on the allowlist; amount at most the per-request maximum;
  *   <li>lock the {@code run} row, then the UTC {@code spend_day} row (fixed order: no deadlock);
  *       {@code reserved + committed + amount <= budget} for both (a DB CHECK backs the run's);
- *   <li>strictly above the approval threshold without an APPROVED approval that matches the offer,
- *       the intent goes AWAITING_APPROVAL and the payment is refused for now;
+ *   <li>strictly above the approval threshold without an APPROVED approval, the intent goes
+ *       AWAITING_APPROVAL and the payment is refused for now; an APPROVED intent whose fresh offer
+ *       differs from what the human approved is refused ({@code APPROVAL_MISMATCH});
  *   <li>otherwise the amount is added to both reserved counters and the intent becomes RESERVED.
  * </ol>
  *
@@ -60,6 +67,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Component
 public class BudgetSpendGuard implements SpendGuard {
 
+    private static final Logger LOG = LoggerFactory.getLogger(BudgetSpendGuard.class);
     private static final Pattern ADDRESS = Pattern.compile("0x[0-9a-fA-F]{40}");
     private static final String DECISIONS_METRIC = "saiman.spend.decisions";
 
@@ -91,6 +99,24 @@ public class BudgetSpendGuard implements SpendGuard {
         // without it anyway once a signing key is configured.
         this.maxAmountPerRequest = max == null ? 0 : max;
         this.meters = meters;
+        String warning = approvalThresholdWarning(spend.approvalThresholdAtomic(), maxAmountPerRequest);
+        if (warning != null) {
+            LOG.warn(warning);
+        }
+    }
+
+    /**
+     * A warning if no payment can ever need a human: the per-request maximum refuses everything above
+     * it, so a threshold at or above that maximum never triggers. Not fatal: the limits still hold,
+     * the approval queue is just unused.
+     */
+    static @Nullable String approvalThresholdWarning(long approvalThresholdAtomic, long maxAmountPerRequest) {
+        if (approvalThresholdAtomic < maxAmountPerRequest) {
+            return null;
+        }
+        return "saiman.orchestrator.spend.approval-threshold-atomic (" + approvalThresholdAtomic
+                + ") is not below x402.client.max-amount-per-request (" + maxAmountPerRequest
+                + "): no payment can ever need a human approval";
     }
 
     @Override
@@ -160,17 +186,26 @@ public class BudgetSpendGuard implements SpendGuard {
         tx.executeWithoutResult(status -> {
             PaymentIntentView view = intents.lockByIdempotencyKey(reservation.idempotencyKey())
                     .orElseThrow(() -> new IllegalStateException("unknown payment intent"));
-            if (view.status() != PaymentIntentStatus.RESERVED) {
-                throw new IllegalStateException("only an unsent reservation can be released");
-            }
-            long amount = Objects.requireNonNull(view.amountAtomic());
-            LocalDate day = Objects.requireNonNull(view.reservedDay());
-            lockRun(view.runId());
-            lockDay(day);
-            moveRun(view.runId(), amount, false);
-            moveDay(day, amount, false);
-            intents.markReleased(view.id());
+            releaseLocked(view);
         });
+    }
+
+    /**
+     * RESERVED -> RELEASED for an intent the caller has locked, in the caller's transaction: takes
+     * the amount out of the run's and the day's reserved counters. Also used by {@link
+     * SpendRecovery} at startup.
+     */
+    void releaseLocked(PaymentIntentView view) {
+        if (view.status() != PaymentIntentStatus.RESERVED) {
+            throw new IllegalStateException("only an unsent reservation can be released");
+        }
+        long amount = Objects.requireNonNull(view.amountAtomic());
+        LocalDate day = Objects.requireNonNull(view.reservedDay());
+        lockRun(view.runId());
+        lockDay(day);
+        moveRun(view.runId(), amount, false);
+        moveDay(day, amount, false);
+        intents.markReleased(view.id());
     }
 
     private Decision decide(PaymentIntent intent) {
@@ -181,15 +216,10 @@ public class BudgetSpendGuard implements SpendGuard {
             // Unknown or already-used key: nothing to record on (or overwrite of) another intent.
             return Decision.denied(DenyReason.UNKNOWN_INTENT);
         }
-        OfferedPayment offer;
-        try {
-            offer = new OfferedPayment(
-                    parseAmount(intent.requirements().amount()),
-                    intent.requirements().payTo().toLowerCase(Locale.ROOT),
-                    intent.requirements().network(),
-                    intent.requirements().asset());
-        } catch (SpendDeniedException e) {
-            return deny(view, DenyReason.OVER_PER_REQUEST_MAX, null);
+        OfferedPayment offer = payableOffer(intent);
+        if (offer == null) {
+            // Nothing from an unpayable offer is recorded (an amount of 0 would not even fit the row).
+            return deny(view, DenyReason.OFFER_NOT_PAYABLE, null);
         }
         if (!view.resource().equals(intent.resource().toString())) {
             return deny(view, DenyReason.UNKNOWN_INTENT, offer);
@@ -223,7 +253,7 @@ public class BudgetSpendGuard implements SpendGuard {
                     || approval.amountAtomic() != offer.amountAtomic()
                     || !approval.payTo().equals(offer.payTo())
                     || !approval.resource().equals(view.resource())) {
-                return deny(view, DenyReason.UNKNOWN_INTENT, offer);
+                return deny(view, DenyReason.APPROVAL_MISMATCH, offer);
             }
         } else if (offer.amountAtomic() > spend.approvalThresholdAtomic()) {
             intents.markAwaitingApproval(view.id(), offer);
@@ -259,6 +289,28 @@ public class BudgetSpendGuard implements SpendGuard {
         }
         intents.markReserved(view.id(), offer, day);
         return Decision.granted();
+    }
+
+    /**
+     * The offer as the guard records it, or null if it can't be paid at all: not the one supported
+     * scheme/network/asset ({@link TestnetAssets#requireSupported}), or an amount that is malformed
+     * or not positive. The interceptor checks the same before calling the guard; this is the guard's
+     * own, independent check.
+     */
+    private static @Nullable OfferedPayment payableOffer(PaymentIntent intent) {
+        PaymentRequirements requirements = intent.requirements();
+        long amount;
+        try {
+            TestnetAssets.requireSupported(requirements);
+            amount = AssetAmount.parse(requirements.amount()).atomicUnits();
+        } catch (UnsupportedPaymentException | IllegalArgumentException e) {
+            return null;
+        }
+        if (amount <= 0) {
+            return null;
+        }
+        return new OfferedPayment(
+                amount, requirements.payTo().toLowerCase(Locale.ROOT), requirements.network(), requirements.asset());
     }
 
     private Decision deny(PaymentIntentView view, DenyReason reason, @Nullable OfferedPayment offer) {
