@@ -8,6 +8,7 @@ import io.github.orhanyarkin.saiman.modelrouter.testing.FakeEmbeddingModel;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,16 +45,18 @@ class DefaultModelRouterTests {
         return RouterPropertiesBinder.bind(new MockEnvironment());
     }
 
-    private static RouterProperties withCap(RouterProperties p, long cap) {
-        return new RouterProperties(p.routes(), p.embedding(), cap, p.prices(), p.openai());
-    }
-
     private static InMemoryCostGuard guard(long cap) {
         return new InMemoryCostGuard(cap, new MutableClock(Instant.parse("2026-09-29T10:00:00Z")));
     }
 
+    private static RouterProperties withRoute(RouterProperties p, Tier tier, RouterProperties.Route route) {
+        var routes = new EnumMap<>(p.routes());
+        routes.put(tier, route);
+        return new RouterProperties(routes, p.embedding(), p.dailyCapUsdMicros(), p.prices(), p.openai(), null);
+    }
+
     @Test
-    void defaultsCarryAllTiersPricesAndTheCap() {
+    void defaultsCarryAllTiersPricesTheCapAndClientLimits() {
         RouterProperties p = defaults();
 
         assertThat(p.routes()).containsKeys(Tier.values());
@@ -66,6 +69,42 @@ class DefaultModelRouterTests {
         assertThat(p.prices().get("text-embedding-3-small")).isEqualTo(new RouterProperties.Price(20_000, 0));
         assertThat(p.prices().get(p.routes().get(Tier.TIER0).model()).inputUsdMicrosPerMtok())
                 .isEqualTo(TIER0_INPUT_MTOK_PRICE);
+        assertThat(p.openai().maxRetries()).isEqualTo(1);
+        assertThat(p.openai().timeout()).hasSeconds(30);
+    }
+
+    @Test
+    void everyRouteHasMaxCompletionTokens() {
+        RouterProperties p = defaults();
+        for (Tier tier : Tier.values()) {
+            assertThat(p.routes().get(tier).maxCompletionTokens())
+                    .as("%s", tier)
+                    .isPositive();
+        }
+        assertThat(p.routes().get(Tier.TIER0).maxCompletionTokens()).isEqualTo(500);
+
+        for (Tier tier : Tier.values()) {
+            var route = p.routes().get(tier);
+            var broken = withRoute(
+                    p,
+                    tier,
+                    new RouterProperties.Route(
+                            route.provider(), route.model(), 0, route.allowedDataClasses(), route.region()));
+            assertThatThrownBy(() ->
+                            new DefaultModelRouter(broken, new FakeFactory(1, 1), guard(1_000), RouterMetrics.NOOP))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("max-completion-tokens");
+        }
+    }
+
+    @Test
+    void aMissingMaxCompletionTokensInConfigurationFailsStartup() {
+        var env = new MockEnvironment().withProperty("saiman.router.routes.tier1.max-completion-tokens", "0");
+
+        assertThatThrownBy(() -> new DefaultModelRouter(
+                        RouterPropertiesBinder.bind(env), new FakeFactory(1, 1), guard(1_000), RouterMetrics.NOOP))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("tier1.max-completion-tokens");
     }
 
     @Test
@@ -81,6 +120,7 @@ class DefaultModelRouterTests {
         assertThat(p.dailyCapUsdMicros()).isEqualTo(123);
         assertThat(p.routes().get(Tier.TIER1).model()).isEqualTo("custom-model");
         assertThat(p.routes().get(Tier.TIER1).provider()).isEqualTo("openai"); // untouched default keys survive
+        assertThat(p.routes().get(Tier.TIER1).maxCompletionTokens()).isEqualTo(1500);
         assertThat(p.routes()).containsKey(Tier.TIER0);
         assertThat(p.prices().get("custom-model")).isEqualTo(new RouterProperties.Price(5, 6));
         assertThat(p.prices()).containsKey("gpt-5-nano");
@@ -108,13 +148,12 @@ class DefaultModelRouterTests {
     @Test
     void routeThatDoesNotAllowInternalRefusesItButStillServesPublic() {
         RouterProperties base = defaults();
-        var routes = new java.util.EnumMap<>(base.routes());
-        var tier2 = routes.get(Tier.TIER2);
-        routes.put(
+        var tier2 = base.routes().get(Tier.TIER2);
+        var props = withRoute(
+                base,
                 Tier.TIER2,
-                new RouterProperties.Route(tier2.provider(), tier2.model(), Set.of(DataClass.PUBLIC), tier2.region()));
-        var props =
-                new RouterProperties(routes, base.embedding(), base.dailyCapUsdMicros(), base.prices(), base.openai());
+                new RouterProperties.Route(
+                        tier2.provider(), tier2.model(), tier2.maxCompletionTokens(), Set.of(DataClass.PUBLIC), "us"));
         var factory = new FakeFactory(10, 10);
         var router = new DefaultModelRouter(props, factory, guard(1_000_000), RouterMetrics.NOOP);
 
@@ -138,16 +177,74 @@ class DefaultModelRouterTests {
     }
 
     @Test
-    void dailyCapAllowsCallsUnderItAndRefusesOnceReachedWithoutCallingTheModel() {
-        // 1_000_000 prompt tokens on tier0 cost exactly 100_000 micro-dollars per call
+    void emptyAllowedSetRefusesEveryClass() {
+        RouterProperties base = defaults();
+        var tier0 = base.routes().get(Tier.TIER0);
+        var props = withRoute(
+                base,
+                Tier.TIER0,
+                new RouterProperties.Route(
+                        tier0.provider(), tier0.model(), tier0.maxCompletionTokens(), Set.of(), "us"));
+        var factory = new FakeFactory(1, 1);
+        var router = new DefaultModelRouter(props, factory, guard(1_000_000), RouterMetrics.NOOP);
+
+        for (DataClass dataClass : DataClass.values()) {
+            assertThatThrownBy(() -> router.chatClient(Tier.TIER0, dataClass))
+                    .isInstanceOf(DataClassViolationException.class);
+        }
+        assertThat(factory.chat.callCount()).isZero();
+    }
+
+    @Test
+    void aRouteThatAllowsSensitiveFailsStartup() {
+        RouterProperties base = defaults();
+        var tier1 = base.routes().get(Tier.TIER1);
+        var props = withRoute(
+                base,
+                Tier.TIER1,
+                new RouterProperties.Route(
+                        tier1.provider(),
+                        tier1.model(),
+                        tier1.maxCompletionTokens(),
+                        Set.of(DataClass.PUBLIC, DataClass.SENSITIVE),
+                        "us"));
+
+        assertThatThrownBy(() -> new DefaultModelRouter(props, new FakeFactory(1, 1), guard(1), RouterMetrics.NOOP))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("SENSITIVE");
+
+        var embedding = base.embedding();
+        var badEmbedding = new RouterProperties(
+                base.routes(),
+                new RouterProperties.Embedding(
+                        embedding.provider(),
+                        embedding.model(),
+                        embedding.dimensions(),
+                        Set.of(DataClass.SENSITIVE),
+                        "us"),
+                base.dailyCapUsdMicros(),
+                base.prices(),
+                base.openai(),
+                null);
+        assertThatThrownBy(
+                        () -> new DefaultModelRouter(badEmbedding, new FakeFactory(1, 1), guard(1), RouterMetrics.NOOP))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("SENSITIVE");
+    }
+
+    @Test
+    void dailyCapAllowsCallsWhoseReservationFitsAndRefusesOnceItWouldNotWithoutCallingTheModel() {
+        // 1_000_000 prompt tokens on tier0 cost exactly 100_000 micro-dollars per call; the reservation
+        // for a tiny prompt is 502 (worst case: 500 completion tokens, one retry)
         var factory = new FakeFactory(1_000_000, 0);
         var guard = guard(250_000);
-        var router = new DefaultModelRouter(withCap(defaults(), 250_000), factory, guard, RouterMetrics.NOOP);
+        var router =
+                new DefaultModelRouter(defaults().withDailyCapUsdMicros(250_000), factory, guard, RouterMetrics.NOOP);
         var client = router.chatClient(Tier.TIER0, DataClass.PUBLIC);
 
-        client.prompt().user("1").call().content(); // total 100_000
-        client.prompt().user("2").call().content(); // total 200_000 < cap
-        client.prompt().user("3").call().content(); // total 300_000 >= cap
+        client.prompt().user("1").call().content(); // settled at 100_000
+        client.prompt().user("2").call().content(); // 200_000
+        client.prompt().user("3").call().content(); // reserved at 200_502 <= cap, settled at 300_000
         assertThat(guard.todayTotal()).isEqualTo(Money.usdMicros(300_000));
 
         assertThatThrownBy(() -> client.prompt().user("4").call().content())
@@ -157,25 +254,26 @@ class DefaultModelRouterTests {
     }
 
     @Test
-    void embeddingCallsAreCappedAndPricedToo() {
+    void embeddingCallsAreReservedAndPricedToo() {
         var factory = new FakeFactory(1, 1);
-        var guard = guard(10);
-        var router = new DefaultModelRouter(withCap(defaults(), 10), factory, guard, RouterMetrics.NOOP);
+        var guard = guard(12);
+        var router = new DefaultModelRouter(defaults().withDailyCapUsdMicros(12), factory, guard, RouterMetrics.NOOP);
         EmbeddingModel embeddings = router.embeddingModel(DataClass.PUBLIC);
 
         assertThat(embeddings.dimensions()).isEqualTo(1536);
-        // 400 chars -> 100 tokens -> 100 * 20_000 / 1_000_000 = 2 micro-dollars
+        // 400 chars: reserved 8 (200 tokens, one retry), actual 100 tokens = 2 micro-dollars
         assertThat(embeddings.embed(List.of("x".repeat(400))).get(0)).hasSize(1536);
         assertThat(guard.todayTotal()).isEqualTo(Money.usdMicros(2));
 
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 2; i++) {
             embeddings.embed(List.of("x".repeat(400)));
         }
-        assertThat(guard.todayTotal()).isEqualTo(Money.usdMicros(10));
-        int callsAtCap = factory.embedding.callCount();
+        assertThat(guard.todayTotal()).isEqualTo(Money.usdMicros(6));
+        int callsSoFar = factory.embedding.callCount();
 
-        assertThatThrownBy(() -> embeddings.embed(List.of("more"))).isInstanceOf(DailyCapExceededException.class);
-        assertThat(factory.embedding.callCount()).isEqualTo(callsAtCap);
+        assertThatThrownBy(() -> embeddings.embed(List.of("x".repeat(400))))
+                .isInstanceOf(DailyCapExceededException.class);
+        assertThat(factory.embedding.callCount()).isEqualTo(callsSoFar);
     }
 
     @Test
@@ -183,7 +281,10 @@ class DefaultModelRouterTests {
         var registry = new SimpleMeterRegistry();
         var factory = new FakeFactory(1_000_000, 500_000);
         var router = new DefaultModelRouter(
-                withCap(defaults(), 200_000), factory, guard(200_000), new MicrometerRouterMetrics(registry));
+                defaults().withDailyCapUsdMicros(200_000),
+                factory,
+                guard(200_000),
+                new MicrometerRouterMetrics(registry));
         var client = router.chatClient(Tier.TIER0, DataClass.PUBLIC);
 
         client.prompt().user("very secret prompt text").call().content(); // 100_000 + 250_000
@@ -231,7 +332,7 @@ class DefaultModelRouterTests {
     void startupFailsClearlyWhenARouteHasNoPrice() {
         RouterProperties base = defaults();
         var props = new RouterProperties(
-                base.routes(), base.embedding(), base.dailyCapUsdMicros(), Map.of(), base.openai());
+                base.routes(), base.embedding(), base.dailyCapUsdMicros(), Map.of(), base.openai(), null);
 
         assertThatThrownBy(() -> new DefaultModelRouter(props, new FakeFactory(1, 1), guard(1), RouterMetrics.NOOP))
                 .isInstanceOf(IllegalStateException.class)

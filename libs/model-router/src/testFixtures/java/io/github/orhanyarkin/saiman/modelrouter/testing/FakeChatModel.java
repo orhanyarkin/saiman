@@ -50,7 +50,6 @@ public final class FakeChatModel implements ChatModel {
         return ChatResponse.builder()
                 .generations(List.of(new Generation(new AssistantMessage(answer))))
                 .metadata(ChatResponseMetadata.builder()
-                        .model("fake-chat")
                         .usage(new DefaultUsage(promptTokens, completionTokens))
                         .build())
                 .build();

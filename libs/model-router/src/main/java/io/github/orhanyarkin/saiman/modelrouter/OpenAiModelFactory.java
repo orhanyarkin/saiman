@@ -24,44 +24,82 @@ import reactor.core.publisher.Flux;
  */
 final class OpenAiModelFactory implements ModelFactory {
 
+    /**
+     * Fixed on purpose, on both options: without it Spring AI's OpenAI setup falls back to the {@code
+     * OPENAI_BASE_URL} / {@code AZURE_OPENAI_BASE_URL} environment variables and would send the API
+     * key and prompts wherever they point. There is no property to change it.
+     */
+    static final String BASE_URL = "https://api.openai.com/v1";
+
     private final RouterProperties.OpenAi credentials;
+    private final String baseUrl;
 
     OpenAiModelFactory(RouterProperties.OpenAi credentials) {
+        this(credentials, BASE_URL);
+    }
+
+    /** Tests point this at a local stub; production code always uses {@link #BASE_URL}. */
+    OpenAiModelFactory(RouterProperties.OpenAi credentials, String baseUrl) {
         this.credentials = credentials;
+        this.baseUrl = baseUrl;
     }
 
     @Override
     public ChatModel chatModel(RouterProperties.Route route) {
-        return new LazyChatModel(() -> {
-            OpenAiChatOptions options = OpenAiChatOptions.builder()
-                    .model(route.model())
-                    .apiKey(requireApiKey())
-                    // explicit: streamed responses must carry token usage or the cost cannot be counted
-                    .streamUsage(true)
-                    .build();
-            return OpenAiChatModel.builder().options(options).build();
-        });
+        return new LazyChatModel(
+                () -> OpenAiChatModel.builder().options(chatOptions(route)).build());
     }
 
     @Override
     public EmbeddingModel embeddingModel(RouterProperties.Embedding route) {
-        return new LazyEmbeddingModel(route.dimensions(), () -> {
-            OpenAiEmbeddingOptions options = OpenAiEmbeddingOptions.builder()
-                    .model(route.model())
-                    .dimensions(route.dimensions())
-                    .apiKey(requireApiKey())
-                    .build();
-            return OpenAiEmbeddingModel.builder().options(options).build();
-        });
+        return new LazyEmbeddingModel(
+                route.dimensions(),
+                () -> OpenAiEmbeddingModel.builder()
+                        .options(embeddingOptions(route))
+                        .build());
     }
 
+    OpenAiChatOptions chatOptions(RouterProperties.Route route) {
+        return OpenAiChatOptions.builder()
+                .baseUrl(baseUrl)
+                .model(route.model())
+                .apiKey(requireApiKey())
+                .maxCompletionTokens(route.maxCompletionTokens())
+                .maxRetries(credentials.maxRetries())
+                .timeout(credentials.timeout())
+                // explicit: streamed responses must carry token usage or the cost cannot be counted
+                .streamUsage(true)
+                .build();
+    }
+
+    OpenAiEmbeddingOptions embeddingOptions(RouterProperties.Embedding route) {
+        return OpenAiEmbeddingOptions.builder()
+                .baseUrl(baseUrl)
+                .model(route.model())
+                .dimensions(route.dimensions())
+                .apiKey(requireApiKey())
+                .maxRetries(credentials.maxRetries())
+                .timeout(credentials.timeout())
+                .build();
+    }
+
+    /** The key with surrounding whitespace removed (a hand-made secret file ends in a newline). */
     private String requireApiKey() {
         String key = credentials.apiKey();
         if (key == null || key.isBlank()) {
-            throw new IllegalStateException("OpenAI API key is not configured: set the 'openai_api_key' property"
+            throw new RequestNotSentException("OpenAI API key is not configured: set the 'openai_api_key' property"
                     + " (configtree file) or 'saiman.router.openai.api-key'");
         }
-        return key;
+        return key.strip();
+    }
+
+    /** Forces usage reporting on streams even if the caller supplied its own OpenAI options. */
+    static Prompt withStreamUsage(Prompt prompt) {
+        if (prompt.getOptions() instanceof OpenAiChatOptions options) {
+            return new Prompt(
+                    prompt.getInstructions(), options.mutate().streamUsage(true).build());
+        }
+        return prompt;
     }
 
     /** Memoising holder; the supplier runs at most once successfully. */
@@ -102,7 +140,7 @@ final class OpenAiModelFactory implements ModelFactory {
 
         @Override
         public Flux<ChatResponse> stream(Prompt prompt) {
-            return Flux.defer(() -> delegate.get().stream(prompt));
+            return Flux.defer(() -> delegate.get().stream(withStreamUsage(prompt)));
         }
     }
 

@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.modelrouter;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -19,7 +20,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param embedding the embedding route
  * @param dailyCapUsdMicros global daily cap in USD micro-dollars (700000 = $0.70)
  * @param prices price per model id
- * @param openai provider credentials
+ * @param openai provider credentials and client limits
+ * @param costGuard {@code memory} to accept a per-process daily cap when no Valkey is configured;
+ *     absent otherwise (see {@link ModelRouterAutoConfiguration})
  */
 @ConfigurationProperties(prefix = "saiman.router")
 public record RouterProperties(
@@ -27,7 +30,8 @@ public record RouterProperties(
         @Nullable Embedding embedding,
         @DefaultValue("700000") long dailyCapUsdMicros,
         Map<String, Price> prices,
-        OpenAi openai) {
+        OpenAi openai,
+        @Nullable String costGuard) {
 
     /** The library defaults only (no application overrides): for tests and fixtures. */
     public static RouterProperties defaults() {
@@ -36,13 +40,13 @@ public record RouterProperties(
 
     /** A copy with a different daily cap. */
     public RouterProperties withDailyCapUsdMicros(long cap) {
-        return new RouterProperties(routes, embedding, cap, prices, openai);
+        return new RouterProperties(routes, embedding, cap, prices, openai, costGuard);
     }
 
     public RouterProperties {
         routes = routes == null ? Map.of() : Map.copyOf(routes);
         prices = prices == null ? Map.of() : Map.copyOf(prices);
-        openai = openai == null ? new OpenAi(null) : openai;
+        openai = openai == null ? new OpenAi(null, 1, Duration.ofSeconds(30)) : openai;
     }
 
     /**
@@ -50,10 +54,13 @@ public record RouterProperties(
      *
      * @param provider provider key; only {@code openai} exists in M2
      * @param model provider model id
+     * @param maxCompletionTokens hard output limit sent with every request; required, {@code > 0},
+     *     and the basis of the worst-case cost reserved before each call
      * @param allowedDataClasses data classes the provider may see (ADR-0003)
      * @param region hosting region, informational
      */
-    public record Route(String provider, String model, Set<DataClass> allowedDataClasses, String region) {
+    public record Route(
+            String provider, String model, int maxCompletionTokens, Set<DataClass> allowedDataClasses, String region) {
         public Route {
             allowedDataClasses = allowedDataClasses == null ? Set.of() : Set.copyOf(allowedDataClasses);
         }
@@ -80,21 +87,36 @@ public record RouterProperties(
     public record Price(long inputUsdMicrosPerMtok, long outputUsdMicrosPerMtok) {}
 
     /**
-     * OpenAI credentials.
+     * OpenAI credentials and client limits.
      *
      * @param apiKey the key; {@code null} or blank means "not configured" and the first call fails
      *     closed
+     * @param maxRetries SDK retries per call; every retry can be billed, so the worst-case estimate
+     *     multiplies by {@code 1 + maxRetries}
+     * @param timeout request timeout
      */
-    public record OpenAi(@Nullable String apiKey) {
+    public record OpenAi(
+            @Nullable String apiKey,
+            @DefaultValue("1") int maxRetries,
+            @DefaultValue("30s") Duration timeout) {
+
+        public OpenAi {
+            timeout = timeout == null ? Duration.ofSeconds(30) : timeout;
+        }
 
         public boolean hasApiKey() {
             return apiKey != null && !apiKey.isBlank();
         }
 
+        OpenAi withApiKey(@Nullable String key) {
+            return new OpenAi(key, maxRetries, timeout);
+        }
+
         /** Redacts the key: never let a debug or bind-failure report print it. */
         @Override
         public String toString() {
-            return "OpenAi[apiKey=" + (hasApiKey() ? "REDACTED" : "unset") + "]";
+            return "OpenAi[apiKey=" + (hasApiKey() ? "REDACTED" : "unset") + ", maxRetries=" + maxRetries + ", timeout="
+                    + timeout + "]";
         }
     }
 }

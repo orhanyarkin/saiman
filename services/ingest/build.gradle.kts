@@ -9,6 +9,8 @@ dependencies {
 
     implementation(libs.spring.boot.starter.webmvc)
     implementation(libs.spring.boot.starter.restclient)
+    // Valkey holds the model router's daily USD cap (ADR-0011); the router refuses to start without a shared guard.
+    implementation(libs.spring.boot.starter.data.redis)
     implementation(libs.spring.boot.starter.jdbc)
     implementation(libs.spring.boot.starter.flyway)
     implementation(libs.flyway.database.postgresql)
