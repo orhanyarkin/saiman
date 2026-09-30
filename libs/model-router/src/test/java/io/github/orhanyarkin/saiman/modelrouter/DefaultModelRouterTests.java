@@ -81,7 +81,7 @@ class DefaultModelRouterTests {
                     .as("%s", tier)
                     .isPositive();
         }
-        assertThat(p.routes().get(Tier.TIER0).maxCompletionTokens()).isEqualTo(500);
+        assertThat(p.routes().get(Tier.TIER0).maxCompletionTokens()).isEqualTo(2000);
 
         for (Tier tier : Tier.values()) {
             var route = p.routes().get(tier);
@@ -120,7 +120,7 @@ class DefaultModelRouterTests {
         assertThat(p.dailyCapUsdMicros()).isEqualTo(123);
         assertThat(p.routes().get(Tier.TIER1).model()).isEqualTo("custom-model");
         assertThat(p.routes().get(Tier.TIER1).provider()).isEqualTo("openai"); // untouched default keys survive
-        assertThat(p.routes().get(Tier.TIER1).maxCompletionTokens()).isEqualTo(1500);
+        assertThat(p.routes().get(Tier.TIER1).maxCompletionTokens()).isEqualTo(3000);
         assertThat(p.routes()).containsKey(Tier.TIER0);
         assertThat(p.prices().get("custom-model")).isEqualTo(new RouterProperties.Price(5, 6));
         assertThat(p.prices()).containsKey("gpt-5-nano");
@@ -235,7 +235,7 @@ class DefaultModelRouterTests {
     @Test
     void dailyCapAllowsCallsWhoseReservationFitsAndRefusesOnceItWouldNotWithoutCallingTheModel() {
         // 1_000_000 prompt tokens on tier0 cost exactly 100_000 micro-dollars per call; the reservation
-        // for a tiny prompt is 502 (worst case: 500 completion tokens, one retry)
+        // for a tiny prompt is 2_002 (worst case: 2000 completion tokens, one retry)
         var factory = new FakeFactory(1_000_000, 0);
         var guard = guard(250_000);
         var router =
@@ -244,7 +244,7 @@ class DefaultModelRouterTests {
 
         client.prompt().user("1").call().content(); // settled at 100_000
         client.prompt().user("2").call().content(); // 200_000
-        client.prompt().user("3").call().content(); // reserved at 200_502 <= cap, settled at 300_000
+        client.prompt().user("3").call().content(); // reserved at 202_002 <= cap, settled at 300_000
         assertThat(guard.todayTotal()).isEqualTo(Money.usdMicros(300_000));
 
         assertThatThrownBy(() -> client.prompt().user("4").call().content())
