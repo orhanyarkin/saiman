@@ -42,17 +42,22 @@ class MkkClientTests {
     }
 
     private static MkkClient client(String credentials, int attempts) {
+        return client(credentials, attempts, 600_000);
+    }
+
+    private static MkkClient client(String credentials, int attempts, int ratePerMinute) {
         IngestProperties.Mkk config = new IngestProperties.Mkk(
                 server.baseUrl(),
                 credentials,
-                600_000,
+                ratePerMinute,
                 2000,
                 Duration.ofSeconds(2),
                 Duration.ofSeconds(5),
                 attempts,
                 Duration.ofMillis(1),
                 Duration.ofSeconds(5),
-                Duration.ofSeconds(30));
+                Duration.ofSeconds(30),
+                Duration.ofMillis(200));
         RestClient rest = MkkClient.configure(RestClient.builder(), config, "test")
                 .requestFactory(ClientHttpRequestFactoryBuilder.detect()
                         .build(HttpClientSettings.defaults()
@@ -158,6 +163,7 @@ class MkkClientTests {
                         1,
                         Duration.ZERO,
                         Duration.ZERO,
+                        Duration.ZERO,
                         Duration.ZERO)
                 .toString();
 
@@ -170,5 +176,48 @@ class MkkClientTests {
         assertThat(properties).doesNotContain(marker).contains("<redacted>");
         assertThat(output.getAll()).doesNotContain(marker).doesNotContain(SyntheticKap.CREDENTIALS);
         assertThat(Set.copyOf(server.requests()).toString()).doesNotContain(marker);
+    }
+
+    @Test
+    void rateLimiterGrantsOnePermitPerIntervalNotABurst() {
+        // 600 per minute = one permit every 100 ms: five sequential calls need four refills
+        MkkClient client = client(SyntheticKap.CREDENTIALS, 1, 600);
+        long started = System.nanoTime();
+
+        for (int i = 0; i < 5; i++) {
+            client.lastDisclosureIndex();
+        }
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isGreaterThanOrEqualTo(Duration.ofMillis(350));
+    }
+
+    @Test
+    void retriesConsumeRateLimiterPermitsToo() {
+        server.enqueue("/lastDisclosureIndex", Reply.status(500));
+        MkkClient client = client(SyntheticKap.CREDENTIALS, 3, 600);
+        long started = System.nanoTime();
+
+        client.lastDisclosureIndex(); // 500 then 200: two permits, the second after a refill
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isGreaterThanOrEqualTo(Duration.ofMillis(80));
+    }
+
+    @Test
+    void retryAfterInHttpDateFormOrNegativeFallsBackToTheBackoff() {
+        assertThat(MkkClient.parseRetryAfter("Wed, 21 Oct 2099 07:28:00 GMT")).isNull();
+        assertThat(MkkClient.parseRetryAfter("-5")).isNull();
+        assertThat(MkkClient.parseRetryAfter("garbage")).isNull();
+        assertThat(MkkClient.parseRetryAfter(null)).isNull();
+        assertThat(MkkClient.parseRetryAfter(" 3 ")).isEqualTo(Duration.ofSeconds(3));
+
+        server.enqueue(
+                "/members", new Reply(429, "{}", java.util.Map.of("Retry-After", "Wed, 21 Oct 2099 07:28:00 GMT")));
+        server.enqueue("/members", new Reply(429, "{}", java.util.Map.of("Retry-After", "-1")));
+        long started = System.nanoTime();
+
+        assertThat(client(SyntheticKap.CREDENTIALS, 4).members()).isNotEmpty();
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(2));
+        assertThat(server.countRequests("/members")).isEqualTo(3);
     }
 }

@@ -17,14 +17,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
  * One resumable ingest run over the configured tickers. A Postgres session-level advisory lock
- * (held on a dedicated connection for the whole run) keeps two runs, in this or another process,
+ * (held on a dedicated, non-pooled connection for the whole run: closing that connection always
+ * ends the session and so releases the lock, even if the explicit unlock fails) keeps two runs, in this or another process,
  * from working at the same time.
  */
 @Component
@@ -36,24 +36,24 @@ public class IngestJob {
     private final MkkClient mkk;
     private final CompanyIngester companies;
     private final DocumentRepository documents;
-    private final DataSource dataSource;
+    private final LockConnectionFactory lockConnections;
     private final IngestProperties properties;
 
     public IngestJob(
             MkkClient mkk,
             CompanyIngester companies,
             DocumentRepository documents,
-            DataSource dataSource,
+            LockConnectionFactory lockConnections,
             IngestProperties properties) {
         this.mkk = mkk;
         this.companies = companies;
         this.documents = documents;
-        this.dataSource = dataSource;
+        this.lockConnections = lockConnections;
         this.properties = properties;
     }
 
     public RunReport run() {
-        try (Connection lockConnection = dataSource.getConnection()) {
+        try (Connection lockConnection = lockConnections.open()) {
             if (!tryLock(lockConnection)) {
                 log.info("Another ingest run holds the lock; skipping");
                 return RunReport.busy();
@@ -65,6 +65,22 @@ public class IngestJob {
             }
         } catch (SQLException e) {
             throw new IllegalStateException("Could not take the ingest advisory lock", e);
+        }
+    }
+
+    /**
+     * Whether another run currently holds the lock (a probe: it takes and releases the lock at
+     * once). Used by the admin endpoint to answer 409 instead of starting a second run.
+     */
+    public boolean isRunning() {
+        try (Connection probe = lockConnections.open()) {
+            if (tryLock(probe)) {
+                unlock(probe);
+                return false;
+            }
+            return true;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Could not probe the ingest advisory lock", e);
         }
     }
 

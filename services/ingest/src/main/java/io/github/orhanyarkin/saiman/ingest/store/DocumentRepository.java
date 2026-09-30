@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.ingest.store;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
@@ -136,13 +137,84 @@ public class DocumentRepository {
 
     /** KAP blocked the disclosure (personal-data removal): delete its chunks and never index it again. */
     public void markBlocked(String documentId) {
+        if (find(documentId).map(d -> d.status() == DocumentStatus.BLOCKED).orElse(true)) {
+            return; // unknown, or already purged: nothing to change
+        }
         jdbc.sql("DELETE FROM chunk WHERE document_id = :id")
                 .param("id", documentId)
                 .update();
-        jdbc.sql("UPDATE source_document SET status = 'BLOCKED', content_hash = NULL, chunk_count = 0,"
-                        + " updated_at = now() WHERE id = :id")
+        // Personal-data removals: keep nothing but the public KAP link (source_url) and the status.
+        jdbc.sql("UPDATE source_document SET status = 'BLOCKED', title = '[blocked]', content_hash = NULL,"
+                        + " chunk_count = 0, updated_at = now() WHERE id = :id")
                 .param("id", documentId)
                 .update();
+    }
+
+    private record Node(String id, String reason, DocumentStatus status, long index, String relatedId) {}
+
+    private List<Node> family(String documentId) {
+        java.util.Map<String, Node> seen = new java.util.LinkedHashMap<>();
+        java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>(List.of(documentId));
+        while (!queue.isEmpty()) {
+            String id = queue.poll();
+            if (seen.containsKey(id)) {
+                continue;
+            }
+            Optional<Node> node = jdbc.sql(
+                            "SELECT id, reason, status, external_id, related_index FROM source_document WHERE id = :id")
+                    .param("id", id)
+                    .query((rs, n) -> new Node(
+                            rs.getString("id"),
+                            rs.getString("reason"),
+                            DocumentStatus.valueOf(rs.getString("status")),
+                            Long.parseLong(rs.getString("external_id")),
+                            rs.getString("related_index") == null ? "" : SOURCE + ":" + rs.getString("related_index")))
+                    .optional();
+            if (node.isEmpty()) {
+                continue;
+            }
+            seen.put(id, node.get());
+            if (!node.get().relatedId().isEmpty()) {
+                queue.add(node.get().relatedId());
+            }
+            queue.addAll(jdbc.sql("SELECT id FROM source_document WHERE related_index = :ext")
+                    .param("ext", id.substring(id.indexOf(':') + 1))
+                    .query((rs, n) -> rs.getString(1))
+                    .list());
+        }
+        return new ArrayList<>(seen.values());
+    }
+
+    /**
+     * A correction, update or cancellation {@code byIndex} replaces everything older in its chain:
+     * the original and any earlier correction pointing at it (or at each other). Transitive, and
+     * it also reaches documents that are still {@code PENDING}/{@code FAILED}, so a later retry
+     * can never index a stale version next to its correction.
+     */
+    public void supersedeFamily(String relatedId, long byIndex) {
+        List<String> stale = family(relatedId).stream()
+                .filter(n -> n.index() < byIndex && n.status() != DocumentStatus.BLOCKED)
+                .map(Node::id)
+                .toList();
+        if (!stale.isEmpty()) {
+            jdbc.sql("UPDATE source_document SET status = 'SUPERSEDED', updated_at = now() WHERE id IN (:ids)"
+                            + " AND status <> 'SUPERSEDED'")
+                    .param("ids", stale)
+                    .update();
+        }
+    }
+
+    /**
+     * True if a later correction/update/cancellation that was itself processed exists in this
+     * document's chain, i.e. this document is already stale when it gets finalized (out-of-order
+     * processing after a DLQ retry).
+     */
+    public boolean hasLaterCorrection(String documentId) {
+        long own = Long.parseLong(documentId.substring(documentId.indexOf(':') + 1));
+        return family(documentId).stream()
+                .anyMatch(n -> n.index() > own
+                        && List.of("CORR", "UPD", "CANC").contains(n.reason())
+                        && (n.status() == DocumentStatus.INDEXED || n.status() == DocumentStatus.SUPERSEDED));
     }
 
     /** Counts a failed attempt; parks the document as {@code FAILED} once {@code maxAttempts} is reached. */

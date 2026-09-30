@@ -1,6 +1,8 @@
 package io.github.orhanyarkin.saiman.ingest.dlq;
 
+import io.github.orhanyarkin.saiman.ingest.mkk.MkkException;
 import io.github.orhanyarkin.saiman.ingest.store.DocumentRepository;
+import java.sql.SQLException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -17,10 +19,7 @@ public class DeadLetterRepository {
     }
 
     public void park(String externalId, String stage, Throwable error, int attempts) {
-        String message = error.getMessage() == null ? "" : error.getMessage();
-        if (message.length() > MAX_MESSAGE) {
-            message = message.substring(0, MAX_MESSAGE);
-        }
+        String message = safeMessage(error);
         jdbc.sql("""
                         INSERT INTO dead_letter (source, external_id, stage, error_class, error_message, attempts)
                         VALUES (:s, :e, :stage, :cls, :msg, :attempts)
@@ -35,6 +34,24 @@ public class DeadLetterRepository {
                 .param("msg", message)
                 .param("attempts", attempts)
                 .update();
+    }
+
+    /**
+     * MKK exceptions carry status codes only, by construction. Anything else (a database
+     * constraint violation quotes the failing row, i.e. chunk text) is reduced to its SQLState.
+     */
+    static String safeMessage(Throwable error) {
+        if (error instanceof MkkException) {
+            String message = error.getMessage() == null ? "" : error.getMessage();
+            return message.length() > MAX_MESSAGE ? message.substring(0, MAX_MESSAGE) : message;
+        }
+        Throwable t = error;
+        for (int depth = 0; t != null && depth < 10; depth++, t = t.getCause()) {
+            if (t instanceof SQLException sql && sql.getSQLState() != null) {
+                return "SQLState " + sql.getSQLState();
+            }
+        }
+        return "";
     }
 
     public void clear(String externalId) {

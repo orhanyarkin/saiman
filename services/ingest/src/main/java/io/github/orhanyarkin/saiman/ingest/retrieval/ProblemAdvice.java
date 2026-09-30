@@ -24,6 +24,11 @@ class ProblemAdvice extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.NOT_FOUND, "Chunk not found");
     }
 
+    @ExceptionHandler(io.github.orhanyarkin.saiman.ingest.pipeline.IngestBusyException.class)
+    ProblemDetail ingestBusy() {
+        return problem(HttpStatus.CONFLICT, "An ingest run is in progress; retry later");
+    }
+
     @ExceptionHandler(RetrievalUnavailableException.class)
     ProblemDetail unavailable() {
         return problem(HttpStatus.SERVICE_UNAVAILABLE, "Retrieval is temporarily unavailable");

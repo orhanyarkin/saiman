@@ -11,7 +11,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.Duration;
 import java.util.List;
-import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,7 +28,7 @@ class IngestPipelineTests extends IngestIntegrationTests {
     private CursorRepository cursors;
 
     @Autowired
-    private DataSource dataSource;
+    private LockConnectionFactory locks;
 
     @Autowired
     private RestTestClient client;
@@ -250,7 +249,7 @@ class IngestPipelineTests extends IngestIntegrationTests {
 
     @Test
     void onlyOneRunAtATimeThanksToTheAdvisoryLock() throws Exception {
-        try (Connection other = dataSource.getConnection();
+        try (Connection other = locks.open();
                 PreparedStatement lock = other.prepareStatement("SELECT pg_advisory_lock(?)")) {
             lock.setLong(1, 0x5A1A_0001_0000_0001L);
             lock.execute();

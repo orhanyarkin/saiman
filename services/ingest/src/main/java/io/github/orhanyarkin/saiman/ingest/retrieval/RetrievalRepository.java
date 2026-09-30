@@ -2,8 +2,12 @@ package io.github.orhanyarkin.saiman.ingest.retrieval;
 
 import io.github.orhanyarkin.saiman.shared.retrieval.IndexedTicker;
 import io.github.orhanyarkin.saiman.shared.retrieval.RetrievedChunk;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -36,14 +40,21 @@ public class RetrievalRepository {
     }
 
     public List<String> vectorLeg(float[] embedding, List<String> tickers) {
+        // With hnsw.iterative_scan = relaxed_order the index may return rows slightly out of distance
+        // order, and RRF uses list position as rank: materialise the candidates, then sort exactly
+        // (pgvector's recommendation for relaxed_order).
         StringBuilder sql = new StringBuilder("""
-                SELECT c.id FROM chunk c JOIN source_document d ON d.id = c.document_id
-                WHERE d.status = 'INDEXED'
+                WITH nearest AS MATERIALIZED (
+                    SELECT c.id, c.embedding <=> CAST(:vec AS vector) AS distance
+                    FROM chunk c JOIN source_document d ON d.id = c.document_id
+                    WHERE d.status = 'INDEXED'
                 """);
         if (!tickers.isEmpty()) {
             sql.append(" AND c.ticker IN (:tickers)");
         }
-        sql.append(" ORDER BY c.embedding <=> CAST(:vec AS vector) LIMIT ").append(LEG_SIZE);
+        sql.append(" ORDER BY c.embedding <=> CAST(:vec AS vector) LIMIT ")
+                .append(LEG_SIZE)
+                .append(") SELECT id FROM nearest ORDER BY distance, id");
         JdbcClient.StatementSpec spec = jdbc.sql(sql.toString()).param("vec", vectorLiteral(embedding));
         if (!tickers.isEmpty()) {
             spec = spec.param("tickers", tickers);
@@ -122,6 +133,34 @@ public class RetrievalRepository {
                 .single();
     }
 
+    /**
+     * An opaque token that changes whenever the retrievable corpus changes, including purges and
+     * supersessions of old disclosures that leave the newest publication time untouched: a hash of
+     * the indexed-document count, the chunk count and the newest {@code updated_at} over all
+     * documents (every status change and insert bumps it).
+     */
+    public String corpusVersion() {
+        return jdbc.sql("""
+                        SELECT count(*) FILTER (WHERE status = 'INDEXED') AS indexed,
+                               (SELECT count(*) FROM chunk) AS chunks,
+                               coalesce((extract(epoch FROM max(updated_at)) * 1000000)::bigint, 0) AS changed
+                        FROM source_document
+                        """)
+                .query((rs, n) -> {
+                    String raw = rs.getLong("indexed") + ":" + rs.getLong("chunks") + ":" + rs.getLong("changed");
+                    return HexFormat.of().formatHex(sha256(raw)).substring(0, 16);
+                })
+                .single();
+    }
+
+    private static byte[] sha256(String value) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private static final String SELECT_CHUNK = """
             SELECT c.id, c.content, d.ticker, d.title, d.source_url, d.published_at, d.retrieved_at
             FROM chunk c JOIN source_document d ON d.id = c.document_id
@@ -161,7 +200,7 @@ public class RetrievalRepository {
         return out.toString();
     }
 
-    static String vectorLiteral(float[] embedding) {
+    public static String vectorLiteral(float[] embedding) {
         StringBuilder out = new StringBuilder("[");
         for (int i = 0; i < embedding.length; i++) {
             if (i > 0) {

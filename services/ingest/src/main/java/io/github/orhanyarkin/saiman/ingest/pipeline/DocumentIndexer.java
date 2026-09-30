@@ -49,6 +49,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  *   <li>embedding happens outside any database transaction; finalize (status, surplus chunks,
  *       supersession) is one short transaction.
  * </ol>
+ *
+ * <p>Terminal documents are never re-fetched, so a KAP document that changes at the same index is
+ * not re-indexed. That is by design for the frozen 2023 corpus (ADR-0010); corrections arrive as new
+ * disclosures and are handled by supersession.
  */
 @Component
 public class DocumentIndexer {
@@ -141,12 +145,12 @@ public class DocumentIndexer {
         Instant publishedAt = parseTime(detail.time());
 
         if (reason.equals("CANC")) {
-            if (related != null) {
-                documents.markSuperseded(related);
-            }
             documents.upsertTerminal(
                     newDoc(ticker, summary, detail, title, reason, related, publishedAt, null),
                     DocumentStatus.SUPERSEDED);
+            if (related != null) {
+                documents.supersedeFamily(related, index);
+            }
             return Outcome.CANCELLATION;
         }
 
@@ -188,7 +192,11 @@ public class DocumentIndexer {
         transactions.executeWithoutResult(status -> {
             documents.finalizeIndexed(id, chunkIds);
             if (related != null && (reason.equals("CORR") || reason.equals("UPD"))) {
-                documents.markSuperseded(related);
+                documents.supersedeFamily(related, index);
+            }
+            // Processed out of order (e.g. after a DLQ retry): a later correction may already exist.
+            if (documents.hasLaterCorrection(id)) {
+                documents.markSuperseded(id);
             }
             deadLetters.clear(Long.toString(index));
         });

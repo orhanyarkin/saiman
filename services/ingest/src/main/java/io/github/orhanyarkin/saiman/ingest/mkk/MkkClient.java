@@ -6,6 +6,7 @@ import io.github.orhanyarkin.saiman.ingest.mkk.MkkDtos.DisclosureDetail;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkDtos.DisclosureSummary;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkDtos.LastIndex;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkDtos.Member;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.core.IntervalFunction;
@@ -66,8 +67,10 @@ public class MkkClient {
                         .slidingWindowSize(10)
                         .minimumNumberOfCalls(5)
                         .failureRateThreshold(60)
-                        .waitDurationInOpenState(Duration.ofSeconds(30))
+                        .waitDurationInOpenState(config.circuitOpenWait())
                         .recordException(MkkClient::countsAsOutage)
+                        // A rate-limiter timeout or a 4xx says nothing about MKK health: neither success nor failure.
+                        .ignoreException(t -> !countsAsOutage(t))
                         .build());
         IntervalFunction backoff = IntervalFunction.ofExponentialRandomBackoff(config.retryWait(), 2.0, 0.3);
         long maxRetryAfter = config.maxRetryAfter().toMillis();
@@ -193,7 +196,7 @@ public class MkkClient {
         } catch (RequestNotPermitted e) {
             count(operation, "rate_limited");
             throw new MkkException("MKK client rate limiter timed out");
-        } catch (io.github.resilience4j.circuitbreaker.CallNotPermittedException e) {
+        } catch (CallNotPermittedException e) {
             count(operation, "circuit_open");
             throw new MkkCircuitOpenException();
         } catch (MkkHttpException e) {
