@@ -181,17 +181,17 @@ final class X402PaidResourceClient implements PaidResourceClient {
     /**
      * Why the interceptor would not pay: no allowlisted payee, else an allowlisted payee over the
      * per-request maximum, else the offer is not payable at all (unsupported network or asset,
-     * malformed header), recorded as {@code INVALID_ARGS} for lack of a closer {@link DenyReason}.
+     * malformed header or amount): {@code OFFER_NOT_PAYABLE}.
      */
     private DenyReason classifyRejectedOffer(@Nullable String paymentRequiredHeader) {
         if (paymentRequiredHeader == null) {
-            return DenyReason.INVALID_ARGS;
+            return DenyReason.OFFER_NOT_PAYABLE;
         }
         PaymentRequired offer;
         try {
             offer = codec.decodePaymentRequired(paymentRequiredHeader);
         } catch (RuntimeException e) {
-            return DenyReason.INVALID_ARGS;
+            return DenyReason.OFFER_NOT_PAYABLE;
         }
         boolean anyAllowedPayee = false;
         boolean anyAllowedPayeeOverMax = false;
@@ -211,7 +211,7 @@ final class X402PaidResourceClient implements PaidResourceClient {
         if (!anyAllowedPayee) {
             return DenyReason.PAYEE_NOT_ALLOWED;
         }
-        return anyAllowedPayeeOverMax ? DenyReason.OVER_PER_REQUEST_MAX : DenyReason.INVALID_ARGS;
+        return anyAllowedPayeeOverMax ? DenyReason.OVER_PER_REQUEST_MAX : DenyReason.OFFER_NOT_PAYABLE;
     }
 
     /** An exception whose meaning depends on how far the payment got: the intent row decides. */

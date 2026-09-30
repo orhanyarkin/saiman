@@ -93,7 +93,8 @@ class ApprovalFlowTests extends SpendTestSupport {
         assertThatThrownBy(() -> client.send(handle, null))
                 .isInstanceOfSatisfying(
                         PaymentDeniedException.class,
-                        e -> assertThat(e.reason()).isEqualTo(DenyReason.UNKNOWN_INTENT));
+                        e -> assertThat(e.reason()).isEqualTo(DenyReason.APPROVAL_MISMATCH));
+        assertThat(intents.find(handle.id()).orElseThrow().denyReason()).isEqualTo(DenyReason.APPROVAL_MISMATCH);
         assertThat(signer.calls()).isZero();
         assertThat(seller.paidRequests()).isZero();
     }
@@ -106,7 +107,10 @@ class ApprovalFlowTests extends SpendTestSupport {
         decide(run, requireApproval(handle), "APPROVE").expectStatus().isOk();
 
         seller.payTo(FakeSeller.PAY_TO_2); // allowlisted, but not what the human approved
-        assertThatThrownBy(() -> client.send(handle, null)).isInstanceOf(PaymentDeniedException.class);
+        assertThatThrownBy(() -> client.send(handle, null))
+                .isInstanceOfSatisfying(
+                        PaymentDeniedException.class,
+                        e -> assertThat(e.reason()).isEqualTo(DenyReason.APPROVAL_MISMATCH));
         assertThat(signer.calls()).isZero();
     }
 

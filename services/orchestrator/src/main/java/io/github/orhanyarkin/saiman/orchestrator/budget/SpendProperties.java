@@ -26,7 +26,7 @@ public record SpendProperties(
         @DefaultValue("1000000") long dailyCapAtomic,
         @DefaultValue("50000") long defaultRunBudgetAtomic,
         @DefaultValue("200000") long maxRunBudgetAtomic,
-        @DefaultValue("20000") long approvalThresholdAtomic,
+        @DefaultValue("10000") long approvalThresholdAtomic,
         @DefaultValue("5m") Duration approvalTimeout,
         @DefaultValue("4") int maxPaidCallsPerRun,
         @DefaultValue("6") int maxToolCallsPerRun) {

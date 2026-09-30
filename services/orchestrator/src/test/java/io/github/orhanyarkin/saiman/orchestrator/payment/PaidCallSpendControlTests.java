@@ -24,6 +24,8 @@ import java.util.concurrent.Future;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 
@@ -206,6 +208,71 @@ class PaidCallSpendControlTests extends SpendTestSupport {
 
         assertThatThrownBy(() -> guard.reserve(elsewhere)).isInstanceOf(SpendDeniedException.class);
         assertThat(intents.find(handle.id()).orElseThrow().denyReason()).isEqualTo(DenyReason.UNKNOWN_INTENT);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"zero", "malformed", "network", "asset", "scheme"})
+    void anUnpayableOfferIsRefusedAsOfferNotPayable(String defect) {
+        UUID run = createRun(50_000);
+        PaymentIntentHandle handle = newIntent(run);
+        Map<String, Object> extra = Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION);
+        PaymentRequirements unpayable = new PaymentRequirements(
+                defect.equals("scheme") ? "upto" : TestnetAssets.SCHEME_EXACT,
+                defect.equals("network") ? "eip155:8453" : TestnetAssets.NETWORK,
+                switch (defect) {
+                    case "zero" -> "0";
+                    case "malformed" -> "1.5";
+                    default -> "10000";
+                },
+                defect.equals("asset") ? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" : TestnetAssets.USDC_ADDRESS,
+                FakeSeller.PAY_TO,
+                60,
+                extra);
+
+        assertThatThrownBy(() -> guard.reserve(
+                        new PaymentIntent(PaymentTestAccess.idempotencyKey(handle), handle.resource(), unpayable)))
+                .isInstanceOf(SpendDeniedException.class);
+
+        assertThat(intents.find(handle.id()).orElseThrow())
+                .extracting(PaymentIntentView::status, PaymentIntentView::denyReason, PaymentIntentView::amountAtomic)
+                .containsExactly(PaymentIntentStatus.DENIED, DenyReason.OFFER_NOT_PAYABLE, null);
+        assertThat(run(run)).isEqualTo(new RunCounters(50_000, 0, 0));
+        assertThat(today()).isEqualTo(new RunCounters(0, 0, 0));
+    }
+
+    @Test
+    void aZeroPriceFromTheSellerIsNeverSigned() {
+        UUID run = createRun(50_000);
+        seller.price(0);
+        PaymentIntentHandle handle = newIntent(run);
+
+        assertThatThrownBy(() -> client.send(handle, null))
+                .isInstanceOfSatisfying(
+                        PaymentDeniedException.class,
+                        e -> assertThat(e.reason()).isEqualTo(DenyReason.OFFER_NOT_PAYABLE));
+        assertThat(signer.calls()).isZero();
+        assertThat(seller.paidRequests()).isZero();
+        assertThat(run(run)).isEqualTo(new RunCounters(50_000, 0, 0));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"..", ".", "", "A/B", "THY/../X", "thyao", "TOOLONGX", "AB", "TH%2F", "THY?A", "THY#A"})
+    void aPathVariableOutsideTheTickerShapeIsRefusedAndNothingIsInserted(String ticker) {
+        UUID run = createRun(50_000);
+
+        assertThatThrownBy(() -> intents.create(
+                        run, "disclosureSummary", "args", SellerEndpoint.DISCLOSURE_SUMMARY, Map.of("ticker", ticker)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(jdbc.sql("SELECT count(*) FROM payment_intent")
+                        .query(Integer.class)
+                        .single())
+                .isZero();
+    }
+
+    @Test
+    void aValidTickerResolvesToTheTemplatePath() {
+        PaymentIntentHandle handle = newIntent(createRun(50_000));
+        assertThat(handle.resource().getRawPath()).isEqualTo("/v1/disclosures/THYAO/summary");
     }
 
     @Test
