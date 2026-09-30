@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.modelrouter;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import java.time.Clock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,6 +10,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -55,8 +57,19 @@ public class ModelRouterAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(ModelRouter.class)
     ModelRouter modelRouter(
-            RouterProperties properties, ModelFactory factory, CostGuard costGuard, RouterMetrics metrics) {
-        return new DefaultModelRouter(properties, factory, costGuard, metrics);
+            RouterProperties properties,
+            ModelFactory factory,
+            CostGuard costGuard,
+            RouterMetrics metrics,
+            ObjectProvider<ScopedCostGuard> scopedGuard,
+            ObjectProvider<ObservationRegistry> observations) {
+        return new DefaultModelRouter(
+                properties,
+                factory,
+                costGuard,
+                metrics,
+                scopedGuard.getIfAvailable(),
+                observations.getIfAvailable(() -> ObservationRegistry.NOOP));
     }
 
     @Configuration(proxyBeanMethods = false)
@@ -70,6 +83,13 @@ public class ModelRouterAutoConfiguration {
                 StringRedisTemplate redisTemplate, RouterProperties properties, ObjectProvider<Clock> clock) {
             return new ValkeyCostGuard(
                     redisTemplate, properties.dailyCapUsdMicros(), clock.getIfAvailable(Clock::systemUTC));
+        }
+
+        @Bean
+        @ConditionalOnMissingBean(ScopedCostGuard.class)
+        @ConditionalOnBean(StringRedisTemplate.class)
+        ScopedCostGuard valkeyScopedCostGuard(StringRedisTemplate redisTemplate) {
+            return new ValkeyScopedCostGuard(redisTemplate);
         }
     }
 
@@ -96,6 +116,14 @@ public class ModelRouterAutoConfiguration {
         log.warn("saiman.router.cost-guard=memory: the daily cost cap is counted in memory, per process,"
                 + " and is not shared between services.");
         return new InMemoryCostGuard(properties.dailyCapUsdMicros(), clock.getIfAvailable(Clock::systemUTC));
+    }
+
+    /** Per-process run budgets, only together with the per-process daily guard (tests, demos). */
+    @Bean
+    @ConditionalOnMissingBean(ScopedCostGuard.class)
+    @ConditionalOnProperty(name = "saiman.router.cost-guard", havingValue = "memory")
+    ScopedCostGuard inMemoryScopedCostGuard() {
+        return new InMemoryScopedCostGuard();
     }
 
     @Bean

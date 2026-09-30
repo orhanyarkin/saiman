@@ -9,7 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.openai.OpenAiChatOptions;
 
 /**
  * Cost arithmetic of one route: the worst-case estimate reserved before a call, and the actual cost
@@ -19,6 +18,9 @@ import org.springframework.ai.openai.OpenAiChatOptions;
  * maxRetries)}. Characters, not tokens, are counted (two characters per token is a conservative
  * ratio for Turkish and English text); tool schemas and other request parts are not seen, which is
  * the estimate's error and the reason the provider-side limit stays the last resort.
+ *
+ * <p>With a fallback route the estimate is the larger of the two routes' estimates (one of them is
+ * billed), and a response that reports the fallback's model is settled at the fallback's price.
  *
  * <p>Callers may override the model per request. The estimate and the settlement then use the
  * override's price (from the table, else the highest configured price), and never less than the
@@ -37,6 +39,7 @@ final class RouteCosting {
     private final int maxCompletionTokens;
     private final int maxRetries;
     private final Map<String, RouterProperties.Price> prices;
+    private @Nullable RouteCosting fallback;
 
     RouteCosting(
             String label,
@@ -60,6 +63,16 @@ final class RouteCosting {
         return label;
     }
 
+    String model() {
+        return routeModel;
+    }
+
+    /** Prices the fallback route into this one; see the class comment. */
+    RouteCosting withFallback(RouteCosting fallbackCosting) {
+        this.fallback = fallbackCosting;
+        return this;
+    }
+
     /** Worst case for a chat call. */
     Money estimate(Prompt prompt) {
         long chars = 0;
@@ -77,7 +90,12 @@ final class RouteCosting {
                 price = atLeastRoutePrice(priceOfOtherModel(model));
             }
         }
-        return worstCase(price, chars, completion);
+        Money own = worstCase(price, chars, completion);
+        if (fallback == null) {
+            return own;
+        }
+        Money other = fallback.estimate(prompt);
+        return own.compareTo(other) >= 0 ? own : other;
     }
 
     /** Worst case for an embedding call over {@code chars} characters of input. */
@@ -94,6 +112,12 @@ final class RouteCosting {
      */
     Money actual(long inputTokens, long outputTokens, @Nullable String reportedModel) {
         RouterProperties.Price price = routePrice;
+        if (fallback != null
+                && reportedModel != null
+                && !matchesRoute(reportedModel)
+                && fallback.matchesRoute(reportedModel)) {
+            return fallback.actual(inputTokens, outputTokens, reportedModel);
+        }
         if (reportedModel != null && !reportedModel.isBlank() && !matchesRoute(reportedModel)) {
             price = atLeastRoutePrice(priceOfOtherModel(reportedModel));
             log.warn(
@@ -116,9 +140,6 @@ final class RouteCosting {
         Integer maxTokens = options.getMaxTokens();
         if (maxTokens != null) {
             requested = maxTokens;
-        }
-        if (options instanceof OpenAiChatOptions openAi && openAi.getMaxCompletionTokens() != null) {
-            requested = Math.max(requested, openAi.getMaxCompletionTokens());
         }
         return requested;
     }

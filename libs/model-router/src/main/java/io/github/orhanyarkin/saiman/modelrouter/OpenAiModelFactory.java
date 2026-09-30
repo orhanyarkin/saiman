@@ -1,5 +1,7 @@
 package io.github.orhanyarkin.saiman.modelrouter;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.model.ChatModel;
@@ -36,6 +38,7 @@ final class OpenAiModelFactory implements ModelFactory {
 
     private final RouterProperties.OpenAi credentials;
     private final String baseUrl;
+    private final CircuitBreakerRegistry breakers;
 
     OpenAiModelFactory(RouterProperties.OpenAi credentials) {
         this(credentials, BASE_URL);
@@ -43,12 +46,28 @@ final class OpenAiModelFactory implements ModelFactory {
 
     /** Tests point this at a local stub; production code always uses {@link #BASE_URL}. */
     OpenAiModelFactory(RouterProperties.OpenAi credentials, String baseUrl) {
+        this(credentials, baseUrl, OpenAiFailoverChatModel.defaultBreakerConfig());
+    }
+
+    OpenAiModelFactory(RouterProperties.OpenAi credentials, String baseUrl, CircuitBreakerConfig breakerConfig) {
         this.credentials = credentials;
         this.baseUrl = baseUrl;
+        this.breakers = CircuitBreakerRegistry.of(breakerConfig);
     }
 
     @Override
     public ChatModel chatModel(RouterProperties.Route route) {
+        ChatModel primary = single(route);
+        RouterProperties.Route backup = route.fallbackRoute();
+        if (backup == null) {
+            return primary;
+        }
+        // one breaker per route (primary -> backup pair), created with the model so its state lives as long as it
+        var breaker = breakers.circuitBreaker(route.model() + "->" + backup.model());
+        return new OpenAiFailoverChatModel(primary, single(backup), breaker);
+    }
+
+    private ChatModel single(RouterProperties.Route route) {
         return new LazyChatModel(
                 () -> OpenAiChatModel.builder().options(chatOptions(route)).build());
     }
@@ -135,6 +154,15 @@ final class OpenAiModelFactory implements ModelFactory {
 
         LazyChatModel(Supplier<ChatModel> supplier) {
             this.delegate = new Lazy<>(supplier);
+        }
+
+        /**
+         * The route's OpenAI options. Spring AI builds every request from {@code getOptions().mutate()}; the
+         * default (plain {@code ChatOptions}) would silently drop the tool callbacks of a tool-calling run.
+         */
+        @Override
+        public ChatOptions getOptions() {
+            return delegate.get().getOptions();
         }
 
         @Override

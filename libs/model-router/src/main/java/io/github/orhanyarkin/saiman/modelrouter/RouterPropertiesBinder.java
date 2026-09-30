@@ -57,13 +57,7 @@ final class RouterPropertiesBinder {
         if (!bound.openai().hasApiKey()) {
             String fromConfigTree = environment.getProperty(OPENAI_KEY_PROPERTY);
             if (fromConfigTree != null && !fromConfigTree.isBlank()) {
-                return new RouterProperties(
-                        bound.routes(),
-                        bound.embedding(),
-                        bound.dailyCapUsdMicros(),
-                        bound.prices(),
-                        bound.openai().withApiKey(fromConfigTree),
-                        bound.costGuard());
+                return bound.withOpenai(bound.openai().withApiKey(fromConfigTree));
             }
         }
         return bound;
