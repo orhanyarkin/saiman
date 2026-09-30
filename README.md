@@ -43,12 +43,14 @@ drops volumes.
 `ingest` needs the MKK API credential and an OpenAI key; `seller-api` needs the OpenAI key.
 Both live as files under the ignored `secrets/` directory and reach only those containers as
 compose secrets (ADR-0009); they are never environment variables. `make up` creates missing
-files as empty ones (the apps then fail closed when they need them).
+files as empty ones (the apps then fail closed when they need them). The two mounted files
+are mode 0644 inside the 0700 `secrets/` directory: the container user's uid differs from
+yours, so 0600 would be unreadable in the container. The directory mode is the protection.
 
 ```bash
 mkdir -p secrets && chmod 700 secrets
-read -rs MKK && printf '%s' "$MKK" > secrets/mkk_credentials && unset MKK && chmod 600 secrets/mkk_credentials   # paste the portal's base64 value
-make secrets-from-dotenv        # copies only OPENAI_API_KEY from .env to secrets/openai_api_key (0600); FORCE=1 to overwrite
+read -rs MKK && printf '%s' "$MKK" > secrets/mkk_credentials && unset MKK && chmod 644 secrets/mkk_credentials   # paste the portal's base64 value
+make secrets-from-dotenv        # copies only OPENAI_API_KEY from .env to secrets/openai_api_key (0644); FORCE=1 to overwrite
 make secrets-check              # present / empty / absent + file mode per secret, never contents
 ```
 

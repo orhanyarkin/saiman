@@ -1,0 +1,12 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: environment defines SPRING_APPLICATION_JSON
+# SPRING_APPLICATION_JSON can inject any property.
+name: cptest-fail-env-spring-application-json
+services:
+  ledger:
+    image: busybox:1
+    environment:
+      SPRING_APPLICATION_JSON: "{}"
+secrets:
+  unused:
+    file: ../../secrets/unused

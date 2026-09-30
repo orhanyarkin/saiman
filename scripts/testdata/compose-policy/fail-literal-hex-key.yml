@@ -1,4 +1,5 @@
 # Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: environment entry looks like a private key
 # An environment value that is a bare 0x-prefixed 32-byte hex literal — the shape of a
 # private key — under an innocuous-looking variable name.
 name: cptest-literal-hex-key

@@ -1,4 +1,5 @@
 # Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: environment defines OPENAI_BASE_URL
 # OPENAI_BASE_URL defined in a service environment (the key must arrive only as a secret file).
 name: cptest-fail-env-openai-base-url
 services:

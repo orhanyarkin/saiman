@@ -1,4 +1,5 @@
 # Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: environment entry looks like a private key
 # A plain environment entry naming the buyer key, on orchestrator itself. ADR-0009's
 # only sanctioned path for the buyer key to reach orchestrator is a compose `secrets:`
 # mount (from M3); a bare environment entry is not exempt just because the service is

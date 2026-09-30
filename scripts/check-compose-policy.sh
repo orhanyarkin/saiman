@@ -33,6 +33,10 @@ config_json=$(docker compose -f "${COMPOSE_FILE}" --profile '*' config --no-inte
 
 violations=0
 
+# Where compose resolves `file: ../../secrets/<name>` for this compose file (symlinks are
+# not resolved by compose, so neither are they here).
+secrets_dir=$(realpath -ms "$(dirname "${COMPOSE_FILE}")/../../secrets")
+
 # 1. Every published port on every service must bind to 127.0.0.1 only (never 0.0.0.0
 #    or an unset host_ip, which Docker treats as "all interfaces").
 bad_ports=$(jq -r '
@@ -104,10 +108,10 @@ fi
 #        PRIVATE_?KEY case-insensitively, a path under secrets/, a *.key/*.pem file, or a
 #        bare 0x-prefixed 32-byte hex literal) -- including on orchestrator itself, since
 #        before its M3 secrets: mount lands it has no business holding one either.
-bad_key_material=$(jq -r '
+bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
   . as $root
   | def allowed: {"ingest": ["mkk_credentials", "openai_api_key"], "seller-api": ["openai_api_key"], "orchestrator": ["buyer_key"]};
-    def forbidden_env: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_BASE_URL", "OPENAI_LOG"];
+    def forbidden_env: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_BASE_URL", "OPENAI_LOG", "SPRING_APPLICATION_JSON", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS"];
     def keyish: test("(?i)(PRIVATE_?KEY|/secrets(/|$)|\\.key$|\\.pem$)|0x[0-9a-fA-F]{64}");
     $root.services | to_entries[] | .key as $svc | .value as $s
   | ( if ($s.env_file // []) | length > 0
@@ -120,10 +124,12 @@ bad_key_material=$(jq -r '
       | "\($svc): mounts secret \"\($src)\" (allowed: \((allowed[$svc] // []) | join(", ") | if . == "" then "none" else . end); ADR-0009)" ),
     ( ($s.secrets // [])[]? | .source as $src | select(($src == "mkk_credentials" or $src == "openai_api_key"))
       | ($root.secrets // {})[$src] as $def
-      | select((($def.file // "") | test("/secrets/" + $src + "$")) | not)
-      | "\($svc): secret \"\($src)\" must be file-sourced from secrets/\($src) (not environment or another path)" ),
-    ( ($s.environment // {}) | keys[] | select(. as $k | forbidden_env | index($k))
-      | "\($svc): environment defines \(.) (the OpenAI key must arrive only as a secret file; OPENAI_BASE_URL would redirect the key, OPENAI_LOG=debug dumps prompts)" ),
+      | select(($def.file // "") != ($secrets_dir + "/" + $src))
+      | "\($svc): secret \"\($src)\" must be file-sourced from the repo secrets/\($src) (not environment or another path)" ),
+    ( ($s.environment // {}) | keys[] | select(. as $k | (forbidden_env | index($k)) != null or ($k | test("^SPRING_AI_OPENAI_")))
+      | "\($svc): environment defines \(.) (the OpenAI key must arrive only as a secret file; OPENAI_BASE_URL / SPRING_AI_OPENAI_* would redirect the key, OPENAI_LOG=debug dumps prompts, SPRING_APPLICATION_JSON / *JAVA_OPTIONS can inject any property)" ),
+    ( ($s.environment // {}) | keys[] | select(contains("$"))
+      | "\($svc): environment key \"\(.)\" contains $ (interpolated names would bypass this check)" ),
     ( ($s.configs // [])[]? | .source as $src | (($root.configs // {})[$src] // {})
       | select((.environment // "") + (.file // "") | keyish)
       | "\($svc): config \"\($src)\" is sourced from what looks like a key" ),

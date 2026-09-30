@@ -1,0 +1,12 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: contains $
+# An environment key built with interpolation would bypass the name checks.
+name: cptest-fail-env-interpolated-key
+services:
+  ledger:
+    image: busybox:1
+    environment:
+      "${SOME_NAME}": "x"
+secrets:
+  unused:
+    file: ../../secrets/unused

@@ -38,6 +38,17 @@ expect_exit() {
 for fixture in "${FIXTURES_DIR}"/fail-*.yml; do
   name="$(basename "${fixture}" .yml)"
   expect_exit "check-compose-policy: ${name}" 1 env COMPOSE_FILE="${fixture}" scripts/check-compose-policy.sh
+  # Every fail fixture names the violation it must trigger ("# expect: <substring>"), so a
+  # fixture can't pass for an unrelated reason (e.g. a YAML error).
+  expected="$(sed -n 's/^# expect: //p' "${fixture}")"
+  if [[ -z "${expected}" ]]; then
+    echo "FAIL: ${name}: fixture has no '# expect:' line" >&2
+    failures=$((failures + 1))
+  elif ! grep -qF -- "${expected}" "${err_file}"; then
+    echo "FAIL: ${name}: output lacks the expected violation \"${expected}\"" >&2
+    sed 's/^/  /' "${err_file}" >&2
+    failures=$((failures + 1))
+  fi
 done
 
 # --- scripts/check-compose-policy.sh: fixtures that must PASS ---
@@ -108,9 +119,9 @@ no_leak() { # description, then checks that out/err never contain the placeholde
 
 expect_exit "secrets-from-dotenv: writes the key" 0 env ENV_FILE="${sfd_dir}/good.env" SECRETS_DIR="${sfd_dir}/s" scripts/secrets-from-dotenv.sh
 no_leak "secrets-from-dotenv: success output"
-if [[ "$(cat "${sfd_dir}/s/openai_api_key")" == "${placeholder}" && "$(stat -c %a "${sfd_dir}/s/openai_api_key")" == "600" && "$(stat -c %a "${sfd_dir}/s")" == "700" ]] \
+if [[ "$(cat "${sfd_dir}/s/openai_api_key")" == "${placeholder}" && "$(stat -c %a "${sfd_dir}/s/openai_api_key")" == "644" && "$(stat -c %a "${sfd_dir}/s")" == "700" ]] \
   && grep -q "written (${#placeholder} bytes)" "${out_file}"; then
-  echo "PASS: secrets-from-dotenv: trimmed value, mode 0600/0700, only the byte count printed"
+  echo "PASS: secrets-from-dotenv: trimmed value, mode 0644/0700, only the byte count printed"
 else
   echo "FAIL: secrets-from-dotenv: unexpected file content, mode or output" >&2
   failures=$((failures + 1))
@@ -133,8 +144,8 @@ esf_dir="${sfd_dir}/e"
 expect_exit "ensure-secret-files: creates missing files" 0 env SECRETS_DIR="${esf_dir}" scripts/ensure-secret-files.sh
 printf 'keep' >"${esf_dir}/mkk_credentials"
 expect_exit "ensure-secret-files: second run is a no-op" 0 env SECRETS_DIR="${esf_dir}" scripts/ensure-secret-files.sh
-if [[ ! -s "${esf_dir}/openai_api_key" && "$(stat -c %a "${esf_dir}/openai_api_key")" == "600" && "$(cat "${esf_dir}/mkk_credentials")" == "keep" && ! -s "${out_file}" ]]; then
-  echo "PASS: ensure-secret-files: empty 0600 files, never overwrites existing content"
+if [[ ! -s "${esf_dir}/openai_api_key" && "$(stat -c %a "${esf_dir}/openai_api_key")" == "644" && "$(cat "${esf_dir}/mkk_credentials")" == "keep" && ! -s "${out_file}" ]]; then
+  echo "PASS: ensure-secret-files: empty 0644 files, never overwrites existing content"
 else
   echo "FAIL: ensure-secret-files: unexpected state after second run" >&2
   failures=$((failures + 1))

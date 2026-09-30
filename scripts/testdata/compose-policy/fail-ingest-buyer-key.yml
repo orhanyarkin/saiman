@@ -1,4 +1,5 @@
 # Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: mounts secret "buyer_key"
 # ingest asking for the buyer key (only orchestrator may).
 name: cptest-fail-ingest-buyer-key
 services:
