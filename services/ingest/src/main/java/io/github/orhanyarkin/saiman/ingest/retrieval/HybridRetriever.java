@@ -82,7 +82,10 @@ public class HybridRetriever {
                             hit.lexicalRank()));
                 }
             }
-            return new RetrieveResponse(chunks, repository.corpusWatermark());
+            return new RetrieveResponse(
+                    chunks,
+                    repository.corpusWatermark(),
+                    repository.corpusWatermark().toString()) /* TODO(T2 fixes): real corpus version */;
         });
     }
 }
