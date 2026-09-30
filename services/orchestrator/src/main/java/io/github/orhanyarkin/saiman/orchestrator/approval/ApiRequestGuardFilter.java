@@ -16,17 +16,26 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Protects {@code /api/**}, which has no authentication yet (orchestrator auth is M6 hardening),
- * from a web page in the operator's browser. Same pattern as ingest's {@code
- * InternalRequestGuardFilter}, stricter on writes:
+ * Protects the orchestrator, whose {@code /api/**} has no authentication yet (orchestrator auth is
+ * M6 hardening), from a web page in the operator's browser. Applied to <em>every</em> request, not
+ * only to paths that look like {@code /api/}: Spring MVC matches handlers on the decoded path with
+ * {@code ;} parameters removed, so a prefix check on the raw URI ({@code /api;x=1/...}, {@code
+ * /%61pi/...}) would let a request reach a handler unguarded.
  *
- * <ul>
+ * <ol>
+ *   <li><b>Path form:</b> a raw request URI containing {@code ;}, {@code %}, {@code \} or {@code
+ *       //}, or one that differs from the container's normalised path (dot segments), gets a 400.
+ *       After this check the raw path and the path the handler mapping sees are the same string.
  *   <li><b>DNS rebinding:</b> the {@code Host} header must be in {@code
- *       saiman.orchestrator.api.allowed-hosts}, else 400.
- *   <li><b>CSRF:</b> a state-changing request (POST/PUT/PATCH/DELETE) must carry <em>both</em>
- *       {@code Content-Type: application/json} and {@code X-Saiman-Csrf: 1}, else 403. A cross-site
- *       page can't send either without a CORS preflight, which is never answered (no CORS config).
- * </ul>
+ *       saiman.orchestrator.api.allowed-hosts}, else 400. The only exemption is a read of {@code
+ *       /actuator/health} and its probe sub-paths, which container health checks call.
+ *   <li><b>CSRF:</b> a state-changing request (POST/PUT/PATCH/DELETE), on any path, must carry
+ *       <em>both</em> {@code Content-Type: application/json} and {@code X-Saiman-Csrf: 1}, else
+ *       403. A cross-site page can't send either without a CORS preflight, which is never answered
+ *       (no CORS config).
+ * </ol>
+ *
+ * Error bodies are fixed text: nothing from the request is echoed.
  */
 @Component
 @EnableConfigurationProperties(ApiGuardProperties.class)
@@ -34,6 +43,7 @@ public class ApiRequestGuardFilter extends OncePerRequestFilter {
 
     public static final String CSRF_HEADER = "X-Saiman-Csrf";
     private static final Set<String> STATE_CHANGING = Set.of("POST", "PUT", "PATCH", "DELETE");
+    private static final String HEALTH = "/actuator/health";
 
     private final List<String> allowedHosts;
 
@@ -44,20 +54,20 @@ public class ApiRequestGuardFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        return !(path.equals("/api") || path.startsWith("/api/"));
-    }
-
-    @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        if (!hostAllowed(request.getHeader(HttpHeaders.HOST))) {
+        String path = canonicalPath(request);
+        if (path == null) {
+            reject(response, HttpServletResponse.SC_BAD_REQUEST, "Request path is not in canonical form");
+            return;
+        }
+        boolean stateChanging = STATE_CHANGING.contains(request.getMethod());
+        boolean healthProbe = !stateChanging && (path.equals(HEALTH) || path.startsWith(HEALTH + "/"));
+        if (!healthProbe && !hostAllowed(request.getHeader(HttpHeaders.HOST))) {
             reject(response, HttpServletResponse.SC_BAD_REQUEST, "Host not allowed");
             return;
         }
-        if (STATE_CHANGING.contains(request.getMethod())
-                && !("1".equals(request.getHeader(CSRF_HEADER)) && isJson(request.getContentType()))) {
+        if (stateChanging && !("1".equals(request.getHeader(CSRF_HEADER)) && isJson(request.getContentType()))) {
             reject(
                     response,
                     HttpServletResponse.SC_FORBIDDEN,
@@ -65,6 +75,32 @@ public class ApiRequestGuardFilter extends OncePerRequestFilter {
             return;
         }
         chain.doFilter(request, response);
+    }
+
+    /**
+     * The request path within the application if the raw URI is already canonical, else null.
+     * Canonical means no path parameters, no percent-encoding, no backslash, no empty segment, and
+     * equal to the container's decoded and normalised {@code servletPath + pathInfo} (so no dot
+     * segments either).
+     */
+    private static @Nullable String canonicalPath(HttpServletRequest request) {
+        String raw = request.getRequestURI();
+        if (raw == null
+                || !raw.startsWith("/")
+                || raw.indexOf(';') >= 0
+                || raw.indexOf('%') >= 0
+                || raw.indexOf('\\') >= 0
+                || raw.contains("//")) {
+            return null;
+        }
+        String contextPath = request.getContextPath();
+        if (!raw.startsWith(contextPath)) {
+            return null;
+        }
+        String rawPath = raw.substring(contextPath.length());
+        String pathInfo = request.getPathInfo();
+        String normalised = request.getServletPath() + (pathInfo == null ? "" : pathInfo);
+        return rawPath.equals(normalised) ? rawPath : null;
     }
 
     private boolean hostAllowed(@Nullable String hostHeader) {
