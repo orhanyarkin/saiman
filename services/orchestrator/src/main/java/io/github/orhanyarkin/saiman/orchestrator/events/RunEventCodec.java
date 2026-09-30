@@ -26,7 +26,10 @@ public class RunEventCodec {
     private final JsonMapper json;
 
     public RunEventCodec(JsonMapper json) {
-        this.json = json;
+        // Idempotent if Boot's mapper already carries the mixin; makes the codec correct on its own.
+        this.json = json.rebuild()
+                .addMixIn(io.github.orhanyarkin.saiman.shared.money.Money.class, MoneyJsonMixin.class)
+                .build();
     }
 
     /** The payload class of a type; total over {@link RunEventType}. */
