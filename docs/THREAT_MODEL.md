@@ -162,6 +162,9 @@ These are checked mechanically, not just by review:
   the cost). Mitigation is **not yet built**: a per-payer/IP limit on unsettled attempts (M3,
   Valkey) and, for expensive handlers (LLM calls from M2 on), an opt-in settle-before-serve mode
   need their own ADR before M2/M3 land.
+- **Per-request deadline.** A per-request deadline is min(deadline, validBefore - now -
+  settleMargin); a refusal for lack of time is per-request and never negative-cached; settleMargin
+  includes the facilitator connect timeout.
 
 ## Client payment (`client/`)
 
@@ -190,6 +193,10 @@ These are checked mechanically, not just by review:
   `http://seller-api@evil.com` is `evil.com`), and a non-empty list fails startup on any network
   other than Base Sepolia. Tests cover sibling (`seller-api2`), suffix (`seller-api.evil.com`),
   prefix (`evilseller-api`) and userinfo tricks.
+- **The plaintext allowlist checks the first hop only.** Redirects, JVM proxies and single-label DNS
+  outside compose are the operator's responsibility; the non-testnet check in
+  `PlaintextHostAllowlist` is unreachable while the network is hard-coded (testnet-only is
+  enforced by `TestnetAssets`).
 - **`SpendGuard.signed` is the last fail-closed gate.** It runs after signing and before the paid
   retry is sent (never given the signature itself); if it throws, the signed authorization is
   dropped unsent, the reservation is released and the exception rethrown. A real-socket test proves
@@ -288,6 +295,7 @@ These are checked mechanically, not just by review:
 | A handler declared with a wide return type (e.g. `Object`) that returns an async value at runtime bypasses the startup rejection of async handlers | The startup check only inspects the *declared* return type; Spring MVC picks the async handling path from the runtime value | Before M2's handlers grow return types wider than a concrete record: register `CallableProcessingInterceptor`/`DeferredResultProcessingInterceptor` to catch every async path regardless of declared type |
 | One circuit breaker instance is shared by `/verify` and `/settle`, and counts a facilitator rejection (`FacilitatorClientErrorException`, including 429) as a breaker failure | A flood of unfunded-wallet signatures rate-limited by x402.org could open the breaker and short-circuit `/settle` for requests that already ran their (paid-for) handler | M3, alongside the per-payer/IP rate limit above: separate breakers for verify and settle, and don't count 4xx (or at least not 429) as a breaker failure |
 | The starter's client interceptor still follows redirects on Spring Boot's defaults; only the console-buyer *sample* pins `spring.http.clients.redirects=dont-follow` | `X402RestClients.nonRedirectingRequestFactory()` exists but isn't applied automatically | The M2/M3 orchestrator's paying `RestClient` must use it explicitly, with its own real-socket test (same shape as the sample's) |
+| `PaymentSigner` bean + pass-through can bypass the SpendGuard | unchanged starter design | M6 hardening |
 | Valkey (the nonce store) is reachable from every app container, not only seller-api | Compose gives every service the same `SPRING_DATA_REDIS_URL`; a future service with an unrelated vulnerability (e.g. an SSRF-exposed fetcher in `ingest`) could reach it too | Same remediation as the no-auth gap above: scope network/credentials to the services that actually need it |
 
 ## How to re-verify
