@@ -20,7 +20,8 @@ export X402_SELLER_PAYTO_ADDRESS
 
 .PHONY: help images check-x402-env infra-up up down clean ps logs test lint format web-dev verify-trace \
 	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check \
-	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask
+	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask \
+	research-run research-approve research-status
 
 help: ## Show this help.
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -136,3 +137,39 @@ rag-ask: x402-publish-local ## PAY for a RAG question (test USDC). Override RAG_
 	mkdir -p $(CURDIR)/libs/x402-spring-boot-starter/samples/console-buyer/build
 	jq -n --arg q "$$RAG_QUESTION" '{question:$$q}' > $(CURDIR)/libs/x402-spring-boot-starter/samples/console-buyer/build/rag-question.json
 	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer bootRun --args="buy --url=$(RAG_URL) --method=POST --json-file=$(CURDIR)/libs/x402-spring-boot-starter/samples/console-buyer/build/rag-question.json"
+
+# M3 orchestrator runs (docs/design/m3-orchestrator.md "Orchestrator HTTP"). These spend test
+# USDC through the orchestrator's own wallet; the spend limits live in the orchestrator, not
+# here. Needs `make up` with a filled secrets/x402_buyer_private_key and secrets/openai_api_key.
+
+ORCH_URL ?= http://localhost:8080
+RUN_QUESTION ?=
+RUN_BUDGET_ATOMIC ?=
+RUN_ID ?=
+APPROVAL_ID ?=
+DECISION ?=
+export RUN_QUESTION RUN_BUDGET_ATOMIC DECISION
+
+research-run: ## Start a research run and stream its events. Usage: make research-run RUN_QUESTION='...' [RUN_BUDGET_ATOMIC=50000]
+	@command -v jq >/dev/null 2>&1 || { echo "research-run needs jq to build the request body; install jq." >&2; exit 1; }
+	@[ -n "$$RUN_QUESTION" ] || { echo "Set RUN_QUESTION (3..500 chars), e.g. make research-run RUN_QUESTION='THYAO 2023 ozel durum aciklamalari neler?'" >&2; exit 1; }
+	@resp=$$(jq -n --arg q "$$RUN_QUESTION" --arg b "$$RUN_BUDGET_ATOMIC" 'if $$b == "" then {question:$$q} else {question:$$q, budgetAtomic:($$b|tonumber)} end' \
+		| curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' -H 'X-Saiman-Csrf: 1' --data @- $(ORCH_URL)/api/v1/runs) || { echo "$$resp" >&2; exit 1; }; \
+	printf '%s\n' "$$resp" | jq .; \
+	url=$$(printf '%s' "$$resp" | jq -r '.eventsUrl'); \
+	case "$$url" in /*) url="$(ORCH_URL)$$url";; esac; \
+	echo "--- streaming $$url (ends with the run's terminal event; approve with make research-approve) ---"; \
+	curl -sS -N -H 'Accept: text/event-stream' "$$url"
+
+research-approve: ## Decide a pending approval. Usage: make research-approve RUN_ID=<id> APPROVAL_ID=<id> DECISION=APPROVE|REJECT
+	@command -v jq >/dev/null 2>&1 || { echo "research-approve needs jq to build the request body; install jq." >&2; exit 1; }
+	@[ -n "$(RUN_ID)" ] && [ -n "$(APPROVAL_ID)" ] || { echo "Set RUN_ID and APPROVAL_ID." >&2; exit 1; }
+	@case "$$DECISION" in APPROVE|REJECT) ;; *) echo "Set DECISION=APPROVE or DECISION=REJECT." >&2; exit 1;; esac
+	@jq -n --arg d "$$DECISION" '{decision:$$d}' \
+		| curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' -H 'X-Saiman-Csrf: 1' --data @- $(ORCH_URL)/api/v1/runs/$(RUN_ID)/approvals/$(APPROVAL_ID) \
+		| jq .
+
+research-status: ## Show a run's summary (status, cost). Usage: make research-status RUN_ID=<id>
+	@command -v jq >/dev/null 2>&1 || { echo "research-status needs jq; install jq." >&2; exit 1; }
+	@[ -n "$(RUN_ID)" ] || { echo "Set RUN_ID." >&2; exit 1; }
+	@curl -sS --fail-with-body $(ORCH_URL)/api/v1/runs/$(RUN_ID) | jq .
