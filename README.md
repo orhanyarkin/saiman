@@ -92,6 +92,11 @@ See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for what's guaranteed (and what
 key custody, replay and settlement, and [docs/design/m1-x402.md](docs/design/m1-x402.md) for the
 wire-level contract.
 
+## Known limits
+
+- **Unsettled-run budget (ADR-0015).** The seller verifies, serves and then settles. The RAG endpoints call a paid LLM while serving, so a burst of requests from funded wallets can use up the day's unsettled budget; until UTC midnight every payer then gets HTTP 429. Spend stays bounded (per-payer run guard, the router's daily USD cap, the provider limit); availability does not. Settle-before-serve (opt-in, with ledger credit notes) arrives in M4.
+- **Testnet only.** x402 runs on Base Sepolia with test USDC; the corpus is a frozen 2023 snapshot of the official MKK KAP API (ADR-0010).
+
 ## Stack
 
 Java 25 · Spring Boot 4.1 · Spring AI 2.0 · PostgreSQL + pgvector · Kafka (Redpanda) · Valkey · React + Vite · OpenTelemetry · Terraform (AWS ECS Fargate)

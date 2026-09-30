@@ -21,7 +21,7 @@ A user (or a scheduled job) asks a research question about a BIST company or a c
 
 - **PostgreSQL 17 + pgvector** — one instance, one schema per service (ADR-0001).
 - **Kafka API via Redpanda** (single node locally and as an ECS Fargate task in `demo-lite`; MSK in the `enterprise` Terraform profile).
-- **Valkey** — budget counters, rate limits, idempotency keys, LLM response cache.
+- **Valkey** — nonce claims, the router's daily and per-run LLM cost counters, per-payer run limits, idempotency keys, LLM response cache (M6). Payment budgets and approvals live in **Postgres** (ADR-0013).
 
 Topics (schemas in `docs/events/`): `payments.challenge-issued.v1`, `payments.authorized.v1`, `payments.settled.v1`, `payments.failed.v1`, `ledger.entry-posted.v1`, `ledger.reconciliation-mismatch.v1`, `ingest.document-indexed.v1`, `agent.run-step.v1`.
 
