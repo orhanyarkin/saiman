@@ -10,6 +10,7 @@ M2 introduces model calls outside the orchestrator: `ingest` embeds chunks and `
 - Every service that calls a model uses this library and **only** this library; a provider SDK is never called directly. The rule now reads "through the model router (`libs/model-router`)".
 - M2 builds the core with the OpenAI adapter (chat + embeddings). M3 adds the remaining adapters, fallbacks, the per-run token budget and the response cache.
 - The router starts without an API key and fails closed on the first call.
+- Callers cannot override route limits; the router rebuilds every request from the route's options and copies only allowlisted fields.
 - Provider keys are secrets (ADR-0009); prices live in config, not code.
 
 ## Alternatives
