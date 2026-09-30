@@ -16,7 +16,7 @@ import tools.jackson.databind.json.JsonMapper;
  * The sanitiser is an allowlist: property-style cases over hostile seller bodies (links, bidi,
  * {@code <tool_data>} injection, oversized fields, bad chunk ids, extra fields).
  */
-class ToolResultSanitizerTests {
+public class ToolResultSanitizerTests {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final String GOOD_URL = "https://www.kap.org.tr/tr/Bildirim/123456";
@@ -191,7 +191,7 @@ class ToolResultSanitizerTests {
     }
 
     /** A string of the given code points (built at runtime: the formatter would unescape literals). */
-    static String u(int... codePoints) {
+    public static String u(int... codePoints) {
         return new String(codePoints, 0, codePoints.length);
     }
 
