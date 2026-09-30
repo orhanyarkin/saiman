@@ -1,0 +1,12 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: environment defines SAIMAN_INGEST_MKK_BASE_URL
+# Would send the MKK Basic credential to an arbitrary host.
+name: cptest-fail-env-ingest-mkk-base-url
+services:
+  ingest:
+    image: busybox:1
+    environment:
+      SAIMAN_INGEST_MKK_BASE_URL: "x"
+secrets:
+  unused:
+    file: ../../secrets/unused

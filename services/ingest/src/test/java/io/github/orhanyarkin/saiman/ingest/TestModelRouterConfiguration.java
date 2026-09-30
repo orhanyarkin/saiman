@@ -12,6 +12,12 @@ import org.springframework.context.annotation.Bean;
 @TestConfiguration(proxyBeanMethods = false)
 public class TestModelRouterConfiguration {
 
+    /** The stub MKK server is http on localhost: only a test bean can relax the production policy. */
+    @Bean
+    io.github.orhanyarkin.saiman.ingest.mkk.MkkEndpointPolicy mkkEndpointPolicy() {
+        return baseUrl -> {};
+    }
+
     @Bean
     RecordingEmbeddingModel recordingEmbeddingModel() {
         return new RecordingEmbeddingModel();

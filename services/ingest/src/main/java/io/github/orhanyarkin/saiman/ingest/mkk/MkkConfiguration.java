@@ -21,8 +21,11 @@ class MkkConfiguration {
             RestClient.Builder builder,
             IngestProperties properties,
             ObjectProvider<BuildProperties> build,
-            ObjectProvider<MeterRegistry> meters) {
+            ObjectProvider<MeterRegistry> meters,
+            ObjectProvider<MkkEndpointPolicy> endpointPolicy) {
         IngestProperties.Mkk mkk = properties.mkk();
+        // Fail startup before any client (and its credential header) exists for a bad target.
+        endpointPolicy.getIfAvailable(MkkEndpointPolicy::strict).check(mkk.baseUrl());
         HttpClientSettings settings = HttpClientSettings.defaults()
                 .withRedirects(HttpRedirects.DONT_FOLLOW)
                 .withConnectTimeout(mkk.connectTimeout())
