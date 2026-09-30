@@ -13,8 +13,11 @@ import java.util.function.IntSupplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.MessageType;
+import org.springframework.test.context.TestPropertySource;
 
 /** F4 (single-flight, negative cache), F6 (no paid embedding for unknown tickers), F7 (URLs), F8 (cache validation). */
+// The run slot is taken at handler entry, so concurrent single-flight waiters each hold one: lift the per-payer cap.
+@TestPropertySource(properties = "seller.llm.max-in-flight-per-payer=20")
 class GroundingHardeningEndpointTests extends RagTestBase {
 
     private static final String SUMMARY = "/v1/disclosures/THYAO/summary";

@@ -35,4 +35,40 @@ class PayerHourlyLimitEndpointTests extends RagTestBase {
         assertThat(router.modelCalls()).isEqualTo(2);
         assertThat(FACILITATOR.settleCallCount()).isEqualTo(2);
     }
+
+    @Test
+    void aPayerAtTheLimitCostsNoIngestCallsEvenWhenTheSameAuthorizationIsReplayed() {
+        INGEST.retrieves(
+                List.of(
+                        FakeIngestServer.chunk("kap:5:0000", "THYAO", "one"),
+                        FakeIngestServer.chunk("kap:5:0001", "THYAO", "two")),
+                "v-hourly");
+        router.replyWith("{\"answer\":\"Text.\",\"citedChunkIds\":[\"kap:5:0000\",\"kap:5:0001\"]}");
+        String body = "{\"question\":\"What did the board decide?\"}";
+        postPaid("/v1/disclosures/THYAO/questions", "20000", body)
+                .expectStatus()
+                .isOk();
+        postPaid("/v1/disclosures/THYAO/questions", "20000", body)
+                .expectStatus()
+                .isOk();
+        int retrievesAtLimit = INGEST.retrieveCalls();
+        int tickerLookupsAtLimit = INGEST.tickerCalls();
+
+        String replayed = payment("20000");
+        for (int i = 0; i < 3; i++) {
+            postWith("/v1/disclosures/THYAO/questions", replayed, body)
+                    .expectStatus()
+                    .isEqualTo(429);
+        }
+        client.get()
+                .uri("/v1/disclosures/THYAO/summary")
+                .header("PAYMENT-SIGNATURE", payment("10000"))
+                .exchange()
+                .expectStatus()
+                .isEqualTo(429);
+
+        assertThat(INGEST.retrieveCalls()).isEqualTo(retrievesAtLimit);
+        assertThat(INGEST.tickerCalls()).isEqualTo(tickerLookupsAtLimit);
+        assertThat(router.modelCalls()).isEqualTo(2);
+    }
 }

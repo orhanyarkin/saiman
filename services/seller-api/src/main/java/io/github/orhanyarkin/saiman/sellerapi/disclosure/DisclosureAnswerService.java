@@ -36,6 +36,12 @@ class DisclosureAnswerService {
     }
 
     DisclosureAnswerResponse answer(String ticker, String question, Deadline deadline) {
+        // The payer's run slot is taken before the first ingest call: a payer at their limit (or an
+        // unavailable guard) must cost nothing, not an embedding per replayed authorization.
+        return generator.withRunSlot(() -> answerWithSlot(ticker, question, deadline));
+    }
+
+    private DisclosureAnswerResponse answerWithSlot(String ticker, String question, Deadline deadline) {
         boolean indexed = ingest.tickers().stream().anyMatch(t -> ticker.equals(t.ticker()));
         if (!indexed) {
             throw new TickerNotFoundException(ticker);
@@ -57,9 +63,9 @@ class DisclosureAnswerService {
                 .map(chunk -> new DisclosureAnswerResponse.Citation(
                         chunk.chunkId(),
                         chunk.sourceUrl(),
-                        chunk.title(),
+                        GroundedGenerator.scrubLinks(chunk.title()),
                         chunk.publishedAt(),
-                        excerptOf(chunk.text())))
+                        GroundedGenerator.scrubLinks(excerptOf(chunk.text()))))
                 .toList();
         return new DisclosureAnswerResponse(
                 ticker,
