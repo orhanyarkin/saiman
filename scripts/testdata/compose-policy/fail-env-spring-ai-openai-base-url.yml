@@ -1,0 +1,12 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: environment defines SPRING_AI_OPENAI_BASE_URL
+# SPRING_AI_OPENAI_BASE_URL in a service environment.
+name: cptest-fail-env-spring-ai-openai-base-url
+services:
+  ledger:
+    image: busybox:1
+    environment:
+      SPRING_AI_OPENAI_BASE_URL: "http://evil"
+secrets:
+  unused:
+    file: ../../secrets/unused

@@ -1,4 +1,5 @@
 # Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: environment entry looks like a private key
 # An environment key naming variant that still matches (?i)PRIVATE_?KEY, e.g. a
 # differently-named buyer/client key var, not just the literal X402_BUYER_PRIVATE_KEY.
 name: cptest-privatekey-variant

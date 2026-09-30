@@ -57,7 +57,7 @@ Base package `io.github.orhanyarkin.saiman.ingest`, feature packages `mkk` (clie
 
 ## `deploy`, Makefile, CI (T5, infra)
 - Compose: `ingest` gets `secrets: [mkk_credentials, openai_api_key]`, `seller-api` gets `secrets: [openai_api_key]` (top-level `secrets:` from `../../secrets/...`, `file:` sources), `SAIMAN_SECRETS_DIR` default, `SELLER_INGEST_BASE_URL=http://ingest:8083`, `depends_on` postgres/valkey healthy; `ingest` reaches Postgres schema `ingest` (own role is a later hardening item). `scripts/check-compose-policy.sh` allows exactly those secrets (ADR-0009 amendment) and keeps failing everything else; extend `scripts/test-check-compose-policy.sh` fixtures accordingly.
-- Make targets: `ingest-backfill` (runs the ingest service locally against the compose Postgres with `--saiman.ingest.backfill.enabled=true`, secrets dir `./secrets`), `ingest-status` (tickers and counts via the internal API), `ingest-verify-rerun` (runs the backfill twice against a small ticker set and asserts counts are unchanged), `ingest-retry-dlq`, `rag-ask` (pays for a question with the console buyer). A one-off `make secrets-check` reports which of `secrets/mkk_credentials` and `secrets/openai_api_key` exist, without reading them.
+- Make targets: `ingest-backfill` (runs the ingest service locally against the compose Postgres with `--saiman.ingest.backfill.enabled=true`, secrets dir `./secrets`), `ingest-status` (tickers and counts via the internal API), `ingest-retry-dlq`, `rag-ask` (pays for a question with the console buyer). A one-off `make secrets-check` reports which of `secrets/mkk_credentials` and `secrets/openai_api_key` exist, without reading them.
 - CI: no outbound calls to MKK or OpenAI, no keys; Testcontainers Postgres for ingest tests.
 
 ## Not in M2

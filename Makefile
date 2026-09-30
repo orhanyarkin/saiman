@@ -110,8 +110,8 @@ x402-testnet-check: x402-publish-local ## Read-only /verify call against x402.or
 
 INGEST_URL ?= http://127.0.0.1:8083
 RAG_URL ?= http://localhost:8081/v1/disclosures/THYAO/questions
-RAG_QUESTION_JSON ?= {"question":"THYAO 2023 yilinda hangi onemli ozel durum aciklamalarini yapti?"}
-export RAG_QUESTION_JSON
+RAG_QUESTION ?= THYAO 2023 yılında hangi önemli özel durum açıklamalarını yaptı?
+export RAG_QUESTION
 
 secrets-check: ## Report present/empty/absent + file mode of the credential files (never contents).
 	scripts/secrets-check.sh
@@ -121,13 +121,17 @@ secrets-from-dotenv: ## HUMAN ONLY: copy OPENAI_API_KEY from .env into secrets/o
 
 ingest-backfill: ## Run ingest locally in backfill mode against `make infra-up` (needs secrets/mkk_credentials + openai_api_key).
 	@(exec 3<>/dev/tcp/127.0.0.1/5432) 2>/dev/null || { echo "Postgres is not reachable on 127.0.0.1:5432; run 'make infra-up' first." >&2; exit 1; }
-	SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=saiman SPRING_DATASOURCE_PASSWORD=saiman SPRING_DATA_REDIS_URL=redis://localhost:$${VALKEY_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=./secrets/"
+	SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=saiman SPRING_DATASOURCE_PASSWORD=saiman SPRING_DATA_REDIS_URL=redis://localhost:$${VALKEY_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=$(CURDIR)/secrets/"
 
 ingest-status: ## Show per-ticker ingest status from the running ingest container (loopback only).
-	@curl -sf $(INGEST_URL)/internal/v1/tickers | { command -v jq >/dev/null 2>&1 && jq . || cat; }
+	@out=$$(curl -sf $(INGEST_URL)/internal/v1/tickers) || { echo "ingest not reachable on $(INGEST_URL) (is 'make up' running?)" >&2; exit 1; }; \
+	if command -v jq >/dev/null 2>&1; then printf '%s\n' "$$out" | jq .; else printf '%s\n' "$$out"; fi
 
 ingest-retry-dlq: ## Re-drive dead-lettered ingest documents (POST /internal/v1/admin/retry-dlq).
 	curl -sf -X POST $(INGEST_URL)/internal/v1/admin/retry-dlq
 
-rag-ask: x402-publish-local ## PAY for a RAG question (test USDC); needs console-buyer --method/--json flags. Override RAG_URL / RAG_QUESTION_JSON.
-	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer bootRun --args="buy --url=$(RAG_URL) --method=POST --json='$$RAG_QUESTION_JSON'"
+rag-ask: x402-publish-local ## PAY for a RAG question (test USDC). Override RAG_URL / RAG_QUESTION. Needs the console buyer's --method/--json-file flags (seller-api task).
+	@command -v jq >/dev/null 2>&1 || { echo "rag-ask needs jq to build the request body; install jq." >&2; exit 1; }
+	mkdir -p $(CURDIR)/build
+	jq -n --arg q "$$RAG_QUESTION" '{question:$$q}' > $(CURDIR)/build/rag-question.json
+	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer bootRun --args="buy --url=$(RAG_URL) --method=POST --json-file=$(CURDIR)/build/rag-question.json"

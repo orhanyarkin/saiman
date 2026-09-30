@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # For the HUMAN to run (`make secrets-from-dotenv`): copies exactly one variable,
-# OPENAI_API_KEY, from the repo-root .env into secrets/openai_api_key (mode 0600, atomic
+# OPENAI_API_KEY, from the repo-root .env into secrets/openai_api_key (mode 0644 in the 0700 dir, atomic
 # write) so the containers can read it as a compose secret file (ADR-0009 M2 amendment).
 # Reads only that allowlisted key; prints only "written (N bytes)" -- never the value,
 # not even in error messages (only its length or shape is ever reported).
@@ -59,7 +59,9 @@ if LC_ALL=C grep -q '[[:space:]]' "$tmp"; then
   die "${KEY} value (${bytes} bytes) contains whitespace; not written"
 fi
 
-chmod 600 "$tmp"
+# 0644 inside the 0700 dir: the container user's uid differs from the host user's, so a
+# 0600 file would be unreadable in the container (the directory mode is the protection).
+chmod 644 "$tmp"
 mv -f "$tmp" "$target"
 trap - EXIT
 echo "secrets-from-dotenv: written (${bytes} bytes)"

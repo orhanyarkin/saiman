@@ -1,4 +1,5 @@
 # Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: environment entry looks like a private key
 # A private key added alongside a YAML merge key (the same `<<: *anchor` pattern
 # deploy/compose/docker-compose.yml uses for x-app-common), so the check must scan the
 # fully-merged environment map, not just literal keys written directly in the service

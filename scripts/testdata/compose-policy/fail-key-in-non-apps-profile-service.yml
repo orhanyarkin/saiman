@@ -1,4 +1,5 @@
 # Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: environment entry looks like a private key
 # A service under a profile other than "apps" (e.g. a one-off debug service) still
 # leaks the buyer key. check-compose-policy.sh resolves with `--profile '*'` precisely
 # so a service like this isn't invisible to the scan just because it's gated behind a
