@@ -145,8 +145,13 @@ services:
     image: ghcr.io/orhanyarkin/saiman-seller-api:dev
     ports:
       - "127.0.0.1:8081:8081"
+    secrets:
+      - openai_api_key
     environment:
       <<: *app-common-env
+      # Where the RAG-backed disclosure endpoints reach ingest's internal API (M2).
+      SELLER_INGEST_BASE_URL: http://ingest:8083
+      SELLER_DISCLOSURES_SOURCE: rag
       # Public payout address only, no private key (ADR-0009). Left unset here on
       # purpose: `${X402_SELLER_PAYTO_ADDRESS:-}` keeps `docker compose config` (and
       # the `infra-up`/compose-policy paths, which never set it) working without a
@@ -160,6 +165,8 @@ services:
       <<: *app-common-depends-on
       valkey:
         condition: service_healthy
+      ingest:
+        condition: service_started
 
   ledger:
     <<: *app-common
@@ -171,7 +178,29 @@ services:
     <<: *app-common
     image: ghcr.io/orhanyarkin/saiman-ingest:dev
     ports:
+      # /internal/** has NO in-app authentication (ADR-0012): this port must stay bound to
+      # loopback and must never be published beyond 127.0.0.1 or sit behind a load balancer.
       - "127.0.0.1:8083:8083"
+    # MKK credential + OpenAI key, mounted at /run/secrets/<name> and read through
+    # `spring.config.import=optional:configtree:/run/secrets/` (ADR-0009 M2 amendment).
+    # No OPENAI_* environment variables: scripts/check-compose-policy.sh forbids them.
+    secrets:
+      - mkk_credentials
+      - openai_api_key
+    depends_on:
+      <<: *app-common-depends-on
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+# File-backed secrets under the ignored repo-root secrets/ dir. `make up` creates missing
+# ones as empty files (scripts/ensure-secret-files.sh); the apps fail closed on use.
+secrets:
+  mkk_credentials:
+    file: ../../secrets/mkk_credentials
+  openai_api_key:
+    file: ../../secrets/openai_api_key
 
 volumes:
   postgres_data:

@@ -38,6 +38,23 @@ Jaeger UI: http://localhost:16686. Valkey is published on host port **16380** (n
 `export VALKEY_HOST_PORT=<port>` before `make up`. `make down` stops everything; `make clean` also
 drops volumes.
 
+## Secrets for M2 (RAG)
+
+`ingest` needs the MKK API credential and an OpenAI key; `seller-api` needs the OpenAI key.
+Both live as files under the ignored `secrets/` directory and reach only those containers as
+compose secrets (ADR-0009); they are never environment variables. `make up` creates missing
+files as empty ones (the apps then fail closed when they need them).
+
+```bash
+mkdir -p secrets && chmod 700 secrets
+read -rs MKK && printf '%s' "$MKK" > secrets/mkk_credentials && unset MKK && chmod 600 secrets/mkk_credentials   # paste the portal's base64 value
+make secrets-from-dotenv        # copies only OPENAI_API_KEY from .env to secrets/openai_api_key (0600); FORCE=1 to overwrite
+make secrets-check              # present / empty / absent + file mode per secret, never contents
+```
+
+Then `make infra-up && make ingest-backfill` loads disclosures, `make ingest-status` shows
+per-ticker progress, and `make rag-ask` pays (test USDC) for a question.
+
 ## Quickstart (x402, Base Sepolia testnet)
 
 The x402 starter is fail-closed: `make up` refuses to start without a valid seller payout

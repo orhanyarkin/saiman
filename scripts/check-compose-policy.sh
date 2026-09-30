@@ -87,12 +87,16 @@ if [[ -n "${bad_images}" ]]; then
 fi
 
 # 4. Wallet key material must only ever reach the orchestrator, and only through
-#    compose `secrets:` (ADR-0009: the buyer key reaches only the orchestrator, from M3,
+#    compose `secrets:` (ADR-0009 + M2 amendment: exactly ingest -> {mkk_credentials,
+#    openai_api_key}, seller-api -> {openai_api_key}, orchestrator -> {buyer_key}; the M2
+#    secrets must be file-sourced from secrets/<name>; no service may set OPENAI_API_KEY,
+#    OPENAI_BASE_URL, AZURE_OPENAI_BASE_URL or OPENAI_LOG in its environment).
+#    The buyer key reaches only the orchestrator, from M3,
 #    via `secrets:` mounted at /run/secrets/, read with
 #    `spring.config.import=optional:configtree:/run/secrets/`). This scans every
 #    service, regardless of profile, for five patterns:
 #      - an env_file (per-service secrets are explicit env vars only, never a whole file)
-#      - a `secrets:` mount on anything other than orchestrator
+#      - a `secrets:` mount outside the allowlist above
 #      - a `configs:` entry sourced from a key- or path-looking value
 #      - a bind-mounted volume whose source looks like a secrets path (/secrets/, *.key,
 #        *.pem)
@@ -102,15 +106,24 @@ fi
 #        before its M3 secrets: mount lands it has no business holding one either.
 bad_key_material=$(jq -r '
   . as $root
-  | def keyish: test("(?i)(PRIVATE_?KEY|/secrets(/|$)|\\.key$|\\.pem$)|0x[0-9a-fA-F]{64}");
+  | def allowed: {"ingest": ["mkk_credentials", "openai_api_key"], "seller-api": ["openai_api_key"], "orchestrator": ["buyer_key"]};
+    def forbidden_env: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_BASE_URL", "OPENAI_LOG"];
+    def keyish: test("(?i)(PRIVATE_?KEY|/secrets(/|$)|\\.key$|\\.pem$)|0x[0-9a-fA-F]{64}");
     $root.services | to_entries[] | .key as $svc | .value as $s
   | ( if ($s.env_file // []) | length > 0
       then "\($svc): env_file is not allowed (per-service env vars only, ADR-0009)"
       else empty end ),
     ( ($s.environment // {}) | to_entries[] | "\(.key)=\(.value // "")" | select(keyish)
       | "\($svc): environment entry looks like a private key (ADR-0009: the buyer key reaches only the orchestrator, via secrets:, from M3)" ),
-    ( ($s.secrets // [])[]? | .source as $src | select($svc != "orchestrator")
-      | "\($svc): mounts secret \"\($src)\" (only orchestrator may mount a secret)" ),
+    ( ($s.secrets // [])[]? | .source as $src
+      | select(((allowed[$svc] // []) | index($src)) == null)
+      | "\($svc): mounts secret \"\($src)\" (allowed: \((allowed[$svc] // []) | join(", ") | if . == "" then "none" else . end); ADR-0009)" ),
+    ( ($s.secrets // [])[]? | .source as $src | select(($src == "mkk_credentials" or $src == "openai_api_key"))
+      | ($root.secrets // {})[$src] as $def
+      | select((($def.file // "") | test("/secrets/" + $src + "$")) | not)
+      | "\($svc): secret \"\($src)\" must be file-sourced from secrets/\($src) (not environment or another path)" ),
+    ( ($s.environment // {}) | keys[] | select(. as $k | forbidden_env | index($k))
+      | "\($svc): environment defines \(.) (the OpenAI key must arrive only as a secret file; OPENAI_BASE_URL would redirect the key, OPENAI_LOG=debug dumps prompts)" ),
     ( ($s.configs // [])[]? | .source as $src | (($root.configs // {})[$src] // {})
       | select((.environment // "") + (.file // "") | keyish)
       | "\($svc): config \"\($src)\" is sourced from what looks like a key" ),
@@ -127,4 +140,4 @@ if [[ ${violations} -ne 0 ]]; then
   exit 1
 fi
 
-echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, no key material outside orchestrator's secrets:)"
+echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, secrets: allowlist enforced, no OPENAI_* env)"

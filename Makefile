@@ -19,7 +19,8 @@ export X402_SELLER_PAYTO_ADDRESS
 .DEFAULT_GOAL := help
 
 .PHONY: help images check-x402-env infra-up up down clean ps logs test lint format web-dev verify-trace \
-	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check
+	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check \
+	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask
 
 help: ## Show this help.
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -37,8 +38,9 @@ check-x402-env: ## Verify X402_SELLER_PAYTO_ADDRESS is a valid address (required
 infra-up: ## Start postgres, redpanda, valkey, otel-collector, jaeger and wait for health.
 	$(COMPOSE) up -d --wait
 
-up: ## Verify X402_SELLER_PAYTO_ADDRESS, build images, start the full stack and wait for app health.
+up: ## Verify payTo, create empty secret files if missing, build images, start the full stack and wait for app health.
 	scripts/check-x402-env.sh
+	scripts/ensure-secret-files.sh
 	$(MAKE) images
 	$(COMPOSE) --profile apps up -d
 	scripts/wait-for-health.sh 8080 8081 8082 8083
@@ -102,3 +104,30 @@ x402-replay: x402-publish-local ## Replay the last stored payment against X402_U
 
 x402-testnet-check: x402-publish-local ## Read-only /verify call against x402.org (never calls /settle). Local only, not run in CI.
 	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer bootRun --args="testnet-check"
+
+# M2 RAG credentials and operations (docs/design/m2-rag.md, ADR-0009 amendment, ADR-0010,
+# ADR-0012). Secrets are files under the ignored secrets/ dir; nothing here prints one.
+
+INGEST_URL ?= http://127.0.0.1:8083
+RAG_URL ?= http://localhost:8081/v1/disclosures/THYAO/questions
+RAG_QUESTION_JSON ?= {"question":"THYAO 2023 yilinda hangi onemli ozel durum aciklamalarini yapti?"}
+export RAG_QUESTION_JSON
+
+secrets-check: ## Report present/empty/absent + file mode of the credential files (never contents).
+	scripts/secrets-check.sh
+
+secrets-from-dotenv: ## HUMAN ONLY: copy OPENAI_API_KEY from .env into secrets/openai_api_key (FORCE=1 to overwrite).
+	scripts/secrets-from-dotenv.sh
+
+ingest-backfill: ## Run ingest locally in backfill mode against `make infra-up` (needs secrets/mkk_credentials + openai_api_key).
+	@(exec 3<>/dev/tcp/127.0.0.1/5432) 2>/dev/null || { echo "Postgres is not reachable on 127.0.0.1:5432; run 'make infra-up' first." >&2; exit 1; }
+	SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=saiman SPRING_DATASOURCE_PASSWORD=saiman SPRING_DATA_REDIS_URL=redis://localhost:$${VALKEY_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=./secrets/"
+
+ingest-status: ## Show per-ticker ingest status from the running ingest container (loopback only).
+	@curl -sf $(INGEST_URL)/internal/v1/tickers | { command -v jq >/dev/null 2>&1 && jq . || cat; }
+
+ingest-retry-dlq: ## Re-drive dead-lettered ingest documents (POST /internal/v1/admin/retry-dlq).
+	curl -sf -X POST $(INGEST_URL)/internal/v1/admin/retry-dlq
+
+rag-ask: x402-publish-local ## PAY for a RAG question (test USDC); needs console-buyer --method/--json flags. Override RAG_URL / RAG_QUESTION_JSON.
+	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer bootRun --args="buy --url=$(RAG_URL) --method=POST --json='$$RAG_QUESTION_JSON'"
