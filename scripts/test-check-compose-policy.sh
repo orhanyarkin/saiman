@@ -60,6 +60,29 @@ done
 # --- scripts/check-compose-policy.sh: the real compose file must PASS ---
 expect_exit "check-compose-policy: deploy/compose/docker-compose.yml" 0 scripts/check-compose-policy.sh
 
+# --- scripts/prepare-ingest-secrets.sh: only the two ingest secrets, never buyer.key ---
+ingest_secrets_src="${work_dir}/secrets-src"
+ingest_secrets_dest="${work_dir}/ingest-secrets"
+mkdir -p "${ingest_secrets_src}" "${ingest_secrets_dest}"
+for f in mkk_credentials openai_api_key buyer.key other.txt; do
+  echo "placeholder" >"${ingest_secrets_src}/${f}"
+done
+echo "stale" >"${ingest_secrets_dest}/buyer.key"
+expect_exit "prepare-ingest-secrets: runs" 0 scripts/prepare-ingest-secrets.sh "${ingest_secrets_src}" "${ingest_secrets_dest}"
+listing="$(ls -A "${ingest_secrets_dest}" | sort | tr '\n' ' ')"
+if [[ "${listing}" == "mkk_credentials openai_api_key " && "$(stat -c '%a' "${ingest_secrets_dest}")" == "700" ]]; then
+  echo "PASS: prepare-ingest-secrets: exactly mkk_credentials + openai_api_key in a 0700 dir (stale entries purged)"
+else
+  echo "FAIL: prepare-ingest-secrets: unexpected directory content '${listing}'" >&2
+  failures=$((failures + 1))
+fi
+if grep -q "prepare-ingest-secrets.sh" Makefile && ! grep -E "secrets-dir=.*/secrets/?[\" ]" Makefile >/dev/null; then
+  echo "PASS: Makefile: ingest-backfill uses the per-run secrets dir"
+else
+  echo "FAIL: Makefile: ingest-backfill must not point --saiman.secrets-dir at the whole secrets/" >&2
+  failures=$((failures + 1))
+fi
+
 # --- scripts/check-x402-env.sh cases ---
 expect_exit "check-x402-env: unset" 1 env -u X402_SELLER_PAYTO_ADDRESS scripts/check-x402-env.sh
 expect_exit "check-x402-env: zero address" 1 env X402_SELLER_PAYTO_ADDRESS="0x0000000000000000000000000000000000000000" scripts/check-x402-env.sh
