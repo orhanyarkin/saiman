@@ -1,0 +1,120 @@
+package io.github.orhanyarkin.saiman.sellerapi.testsupport;
+
+import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
+import io.github.orhanyarkin.x402.core.PaymentRequirements;
+import io.github.orhanyarkin.x402.core.TestnetAssets;
+import io.github.orhanyarkin.x402.core.X402Codec;
+import io.github.orhanyarkin.x402.core.X402Headers;
+import io.github.orhanyarkin.x402.testing.FakeFacilitator;
+import io.github.orhanyarkin.x402.testing.PaymentPayloads;
+import io.github.orhanyarkin.x402.testing.TestWallets;
+import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.servlet.client.RestTestClient;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.utility.DockerImageName;
+
+/**
+ * Shared wiring for the RAG-mode endpoint tests: a real Valkey (nonce store, router cost guard is
+ * replaced by the fake router, summary cache), a {@link FakeFacilitator}, a {@link
+ * FakeIngestServer} and a {@link SwitchableRouter}. Everything is a JVM singleton started once, so
+ * Spring's context cache stays valid across test classes (a per-class {@code @Container} would be
+ * restarted on a new port under a cached context).
+ */
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        classes = SellerApiApplication.class,
+        properties = {"seller.disclosures.source=rag", "seller.ingest.retry-wait=5ms"})
+@AutoConfigureRestTestClient
+@Import(RagTestBase.RouterConfig.class)
+public abstract class RagTestBase {
+
+    public static final GenericContainer<?> VALKEY =
+            new GenericContainer<>(DockerImageName.parse("valkey/valkey:9.1.2-alpine")).withExposedPorts(6379);
+    public static final FakeFacilitator FACILITATOR = new FakeFacilitator();
+    public static final FakeIngestServer INGEST = new FakeIngestServer();
+    public static final String PAY_TO = TestWallets.OTHER_PAYER.address();
+
+    static {
+        VALKEY.start();
+    }
+
+    @DynamicPropertySource
+    static void wiring(DynamicPropertyRegistry registry) {
+        registry.add("x402.server.pay-to", () -> PAY_TO);
+        registry.add("x402.server.facilitator.url", FACILITATOR::url);
+        registry.add("seller.ingest.base-url", INGEST::url);
+        registry.add("spring.data.redis.host", VALKEY::getHost);
+        registry.add("spring.data.redis.port", () -> VALKEY.getMappedPort(6379));
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class RouterConfig {
+        @Bean
+        SwitchableRouter switchableRouter() {
+            return new SwitchableRouter();
+        }
+    }
+
+    @Autowired
+    protected RestTestClient client;
+
+    @Autowired
+    protected X402Codec codec;
+
+    @Autowired
+    protected SwitchableRouter router;
+
+    @BeforeEach
+    void resetFakes() {
+        FACILITATOR.resetInjectedFailures();
+        FACILITATOR.resetCallCounts();
+        INGEST.reset();
+        router.replyWith("{}");
+    }
+
+    protected final PaymentRequirements offer(String price) {
+        return new PaymentRequirements(
+                TestnetAssets.SCHEME_EXACT,
+                TestnetAssets.NETWORK,
+                price,
+                TestnetAssets.USDC_ADDRESS,
+                PAY_TO,
+                60,
+                Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION));
+    }
+
+    /** A fresh, validly signed {@code PAYMENT-SIGNATURE} header value for {@code price} atomic units. */
+    protected final String payment(String price) {
+        return PaymentPayloads.header(codec, PaymentPayloads.build(TestWallets.PAYER, offer(price)));
+    }
+
+    protected final RestTestClient.ResponseSpec getPaid(String uri, String price) {
+        return client.get()
+                .uri(uri)
+                .header(X402Headers.PAYMENT_SIGNATURE, payment(price))
+                .exchange();
+    }
+
+    protected final RestTestClient.ResponseSpec postPaid(String uri, String price, String json) {
+        return postWith(uri, payment(price), json);
+    }
+
+    protected final RestTestClient.ResponseSpec postWith(String uri, String paymentHeader, String json) {
+        return client.post()
+                .uri(uri)
+                .header(X402Headers.PAYMENT_SIGNATURE, paymentHeader)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(json)
+                .exchange();
+    }
+}

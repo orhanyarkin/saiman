@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Map;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,7 @@ import tools.jackson.databind.json.JsonMapper;
  * controller and response shape are unaffected (docs/design/m1-x402.md, "seller-api").
  */
 @Service
+@ConditionalOnProperty(name = "seller.disclosures.source", havingValue = "fixture", matchIfMissing = true)
 class FixtureDisclosureSummaryService implements DisclosureSummaryService {
 
     /** Every fixture summary is marked with this, never read from the fixture file itself. */

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -43,7 +44,8 @@ public class ConsoleBuyerApplication {
         ApplicationArguments arguments = new DefaultApplicationArguments(args);
         List<String> commands = arguments.getNonOptionArgs();
         if (commands.isEmpty()) {
-            System.err.println("usage: buy --url=<url> | replay --url=<url> | new-wallet | testnet-check");
+            System.err.println(
+                    "usage: buy --url=<url> [--method=GET|POST] [--json=<body> | --json-file=<path>] | replay --url=<url> | new-wallet | testnet-check");
             return 2;
         }
         String command = commands.get(0);
@@ -78,7 +80,18 @@ public class ConsoleBuyerApplication {
                 .run()) {
             return switch (command) {
                 case "buy" ->
-                    context.getBean(BuyCommand.class).run(requireUrl(arguments), System.out, System.err) ? 0 : 1;
+                    context.getBean(BuyCommand.class)
+                                    .run(
+                                            requireUrl(arguments),
+                                            optionOrDefault(arguments, "method", "GET")
+                                                    .toUpperCase(java.util.Locale.ROOT),
+                                            BuyCommand.resolveJsonBody(
+                                                    optionOrDefault(arguments, "json", null),
+                                                    optionOrDefault(arguments, "json-file", null)),
+                                            System.out,
+                                            System.err)
+                            ? 0
+                            : 1;
                 case "replay" ->
                     context.getBean(ReplayCommand.class).run(requireUrl(arguments), System.out, System.err) ? 0 : 1;
                 case "testnet-check" ->
@@ -126,6 +139,12 @@ public class ConsoleBuyerApplication {
         return value == null
                 || value.isBlank()
                 || ADDRESS_PATTERN.matcher(value.trim()).matches();
+    }
+
+    private static @Nullable String optionOrDefault(
+            ApplicationArguments arguments, String name, @Nullable String defaultValue) {
+        List<String> values = arguments.getOptionValues(name);
+        return values == null || values.isEmpty() ? defaultValue : values.get(0);
     }
 
     private static String requireUrl(ApplicationArguments arguments) {
