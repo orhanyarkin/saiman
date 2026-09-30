@@ -223,6 +223,35 @@ These are checked mechanically, not just by review:
   settlement, fail-closed startup checks) but is responsible for its own input handling — validate
   path/query input the same way, and don't log or echo it before it's validated.
 
+## Model router (`libs/model-router`, M2)
+
+- **Assets:** the OpenAI API key (cost-bearing; the provider project has a hard limit) and the daily USD cap.
+- **Trust boundaries:** the process environment (several `OPENAI_*` variables silently change the SDK's behaviour), in-process callers of `ModelRouter` (trusted; they choose the data class in code), and the provider (trusted only for usage numbers, and even those are cross-checked by an estimate).
+- **Invariants:**
+  - The key is only ever sent to `https://api.openai.com/v1`. The base URL is a constant: Spring AI would otherwise honour `OPENAI_BASE_URL` and send the key (and the prompt) wherever the variable points, which a probe confirmed. A child-JVM test proves an env-configured server receives nothing; the compose policy rejects `OPENAI_*`/`SPRING_AI_OPENAI_*`/`OPENAI_LOG` in any service environment, and the router logs a startup warning if they are set on a host run.
+  - The key reaches a container only as a mounted secret file (ADR-0009 amendment); `toString()`, exceptions, logs and metric tags never carry it (a 401-stub test asserts this).
+  - Every model call is preceded by an **atomic reservation** of its worst-case cost (estimated input + the tier's required `max-completion-tokens`, times `1 + maxRetries`) against the daily cap and settled to the real usage afterwards; when the outcome is unknown (cancelled or failed stream, missing or corrupt usage, a call that fails after being sent) the estimate stays. 200 concurrent callers never exceed the cap. A per-request model override is priced at that model's price (or the highest configured one).
+  - The data class comes from code, never from a request or an LLM; no route may allow `SENSITIVE`; the check runs before any client exists.
+  - It fails closed: Valkey down, a corrupt or negative counter, a missing key, or no shared guard at startup (unless `saiman.router.cost-guard=memory` is set explicitly) all stop calls.
+- **Residual:** the provider-side limit is the last hard stop; Valkey has no authentication (known gap); the SDK's own env-driven logging cannot be pinned from code; tool-loop usage aggregation and per-run budgets arrive with M3.
+
+## Ingest (`services/ingest`, M2)
+
+- **Source and licence:** the official MKK KAP data API, free tier = a frozen 2023 test environment (ADR-0010). The Basic credential is a mounted secret file, sent only to the configured MKK host with redirects off, a 5 calls/minute limiter, retry with jitter honouring `Retry-After`, and a circuit breaker; it is never logged (tests plant a marker and assert its absence in logs, exceptions, the request log and the DLQ). No KAP text is committed (fixtures are synthetic).
+- **Personal data:** `/blockedDisclosures` is honoured every run: blocked disclosures are never fetched, indexed chunks are deleted and the title is blanked; attachments are never fetched or redistributed.
+- **Integrity:** deterministic chunk ids, content-hash skip before any paid embedding, embedding outside the DB transaction, crash repair without duplicates, correction/cancellation chains resolved in either processing order, an advisory lock on a dedicated non-pooled connection (a pooled connection would leak it on a failed unlock), a DLQ table that stores only status codes or the SQLState — never document text.
+- **Retrieval input:** `RetrieveRequest` is bounded (query 500 chars, ≤10 tickers, topK ≤ 20); the lexical query is OR-joined words through `websearch_to_tsquery` (operators are inert); chunk ids are matched against a strict pattern before the database; all SQL is parameterised; query and chunk text never appear in logs.
+- **Residual:** `/internal/**` (retrieval, `admin/retry-dlq`) has **no in-app authentication**: it must stay on the compose network and `127.0.0.1` and must never sit behind a public load balancer (it would give paid content away for free). The corpus is a static 2023 snapshot; a changed KAP document at an already-indexed index is not re-fetched (by design).
+
+## seller-api RAG endpoints (M2)
+
+- **The exposure:** the handler calls a paid LLM **before** settlement (the verify → serve → settle order of M1), and its failures (422 no valid citations, 502 malformed output) are attacker-steerable. Left alone, a wallet holding test USDC could burn the daily cap with authorizations that never settle, then deny honest buyers.
+- **Controls (bounded, not eliminated):** a handler that has spent money calls `X402PaymentContext.markWorkDone`, after which a non-2xx answer **keeps the nonce claim** (the same authorization can not buy a second run); `UnsettledRunGuard` (Valkey, atomic, fail-closed) limits each recovered payer to 2 concurrent runs and 30 runs per hour, and the whole service to 100 *unsettled* runs per UTC day (a settled payment gives its slot back) — over any limit the answer is 429 and no model is called; LLM endpoints require an authorization valid for ≥45 s and run under a 25 s deadline (a late answer is a 503, never settled); body ≤ 4 KB is enforced before payment verification; unknown tickers cost no embedding; summary generation is single-flight with a short negative cache.
+- **Injection surface:** the question and KAP text reach only the *user* message, inside delimited blocks with `<`/`>` neutralised; the reply must be a bounded JSON object and every citation is rebuilt from the retrieved chunks (ids, titles and `www.kap.org.tr` URLs are never taken from the model); links in the model's prose are stripped; cached summaries are re-validated on read. The answer text itself is still untrusted data for any downstream agent (M3).
+- **Response hygiene:** every failure is a non-2xx with a fixed Problem Details message — no question, chunk text, exception detail or key — and a non-2xx is never settled.
+- **Ordering fact:** `RequiresPaymentInterceptor` claims the nonce and calls `/verify` before argument resolution and body validation; a 400/404 then releases the claim and costs one facilitator `/verify`, while 422/502/503 after model work keep it.
+- **Residual:** an attacker with many funded wallets can still use up the day's unsettled budget and get 429s for everyone until midnight UTC: the spend is bounded, availability is not. The real fix is settle-before-serve (ADR in M3). An x402 payment does not bind the request body, so a signature can be spent once on a different question.
+
 ## Known gaps (tracked, not yet closed)
 
 | Gap | Why it's open | Revisit |
@@ -231,6 +260,9 @@ These are checked mechanically, not just by review:
 | No per-run budget / daily cap in the M1 `SpendGuard` | `CLAUDE.md` rule 3's full spend-control plane is M3 scope | M3 — don't wire the client into agent-driven loops before then |
 | No per-payer/IP rate limit on unsettled `/verify` attempts | Would need Valkey-backed counters, M3 scope | M3, alongside the budget plane |
 | Handler side effects happen before settlement succeeds | Verify-then-serve-then-settle is the only order that keeps the resource unpaid-for on failure, but it means a drained/expiring-key attacker gets one free handler run | M2/M3 ADR: an opt-in settle-before-serve mode for expensive (LLM-backed) handlers |
+| Unpaid LLM runs can exhaust the per-day unsettled budget (many funded wallets) → 429 for everyone until UTC midnight | Bounded spend (guard + router cap + provider limit), but availability depends on the guard, not on payment | M3 ADR: settle-before-serve for LLM endpoints, per-buyer credit |
+| ingest `/internal/**` (retrieval, admin/retry-dlq) has no authentication | Compose network + loopback only; adding a shared secret is straightforward | Before any deployment where another workload shares the network (M6) |
+| ingest/seller-api metrics: no cache hit/miss or 422-rate counters, breaker state not bound to Micrometer | Router cost metrics exist; the rest is observability polish | M3 |
 | A resource's ticker/path reaches the third-party facilitator as part of the standard `/verify`/`/settle` call | Inherent to x402 — the facilitator has to know what it's authorizing; not PII here (public stock symbols) | Revisit if a future paid resource's identifier is sensitive |
 | No test drives a genuine 5xx from inside a real `@RequiresPayment` handler (only the starter's synthetic fixtures) | Coverage gap, not a known defect | Add when the next paid handler lands |
 | A handler declared with a wide return type (e.g. `Object`) that returns an async value at runtime bypasses the startup rejection of async handlers | The startup check only inspects the *declared* return type; Spring MVC picks the async handling path from the runtime value | Before M2's handlers grow return types wider than a concrete record: register `CallableProcessingInterceptor`/`DeferredResultProcessingInterceptor` to catch every async path regardless of declared type |
