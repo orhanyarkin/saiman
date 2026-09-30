@@ -19,15 +19,16 @@ Each milestone ends with something demo-able and a short write-up in `docs/PROGR
 - `ingest` (Spring AI `PgVectorStore`): the official MKK KAP data API (free tier = test environment, a frozen 2023 snapshot; ADR-0010) into pgvector for ~20 BIST tickers, idempotent, DLQ, blocked disclosures honoured. News ingestion is dropped (no source with an aligned time window).
 - `libs/model-router` (ADR-0011): tiers, data-class policy, daily USD cap and metrics; embeddings and answers go through it.
 - Hybrid retrieval (vector + Turkish full-text, RRF) exposed to seller-api over an internal API (ADR-0012); answers cite chunk ids.
-- Paid endpoints use RAG: the disclosure summary and a new questions endpoint. MCP tools move to M3 (paid MCP needs x402's MCP transport and its only client is M3's orchestrator).
+- Paid endpoints use RAG: the disclosure summary and a new questions endpoint. MCP tools were moved to M3 and then to Stretch (paid MCP needs x402's MCP transport on both sides and is not on M3's acceptance path).
 
 **Accept:** ≥5k chunks indexed; a question returns an answer with ≥2 valid citations; re-running ingest creates no duplicates.
 
 ## M3 — Orchestrator, model router, spend control (1–1.5 weeks)
 - Agents: planner → researcher (calls paid tools) → risk → final synthesis.
-- Model router with tiers, provider fallbacks, data-classification policy, cost metrics.
+- Model router: per-run cost scopes, fallback inside OpenAI, cost observations (other providers and the response cache move to M6, ADR-0011 amendment).
 - Spend control: per-run budget, daily cap, payee allowlist, idempotency, human approval above threshold.
-- SSE stream of run steps.
+- SSE stream of run steps (`agent.run-step.v1`).
+- Design contract: `docs/design/m3-orchestrator.md`; ADRs 0013 (spend control), 0014 (runtime), 0015 (settle-before-serve, implemented in M4).
 
 **Accept:** a research run completes end to end with ≥2 paid calls; exceeding the budget blocks payment *before* signing (test proves it); a prompt-injection document cannot raise a budget (test proves it); per-run USD cost visible in traces.
 
@@ -51,4 +52,4 @@ Each milestone ends with something demo-able and a short write-up in `docs/PROGR
 **Accept:** public replay URL live and honest about being recorded; `terraform plan` output and Infracost estimate in the README; `make eval` report published in the repo; README has architecture diagram, cost table, eval table, and "how I'd scale this" section.
 
 ## Stretch (only after M6)
-- Terraform `enterprise` profile (EKS + MSK + Helm charts); `upto` scheme; MPP adapter; mock DTL (programmable payment) adapter; ERC-8004 identity/reputation registration for seller agents; AWS AgentCore Payments comparison write-up.
+- MCP tools on seller-api (`@McpTool`) with x402's MCP transport (`_meta["x402/payment"]`) on both server and client, added as a new `ResearchTool` implementation; Terraform `enterprise` profile (EKS + MSK + Helm charts); `upto` scheme; MPP adapter; mock DTL (programmable payment) adapter; ERC-8004 identity/reputation registration for seller agents; AWS AgentCore Payments comparison write-up.

@@ -1,12 +1,17 @@
 # Progress
 
 ## Current milestone
-M2 — Ingest + RAG: **done on branch `m2-rag`, awaiting the human's go to push and open the PR.** Acceptance met live (2026-09-30): 5810 chunks indexed (>= 5k); a paid question returns an answer with 6-8 valid citations; a re-run of the ingest creates no duplicates and makes no embedding calls. Milestone-end security audit (opus): no Critical/High; the two Mediums and the cheap Lows are fixed (see the log), the rest is recorded in `docs/THREAT_MODEL.md`.
-Carried to M3: settle-before-serve ADR (removes the unpaid-LLM-run availability gap and lets the deadline derive from the authorization's `validBefore`), per-run budget and spend-control plane, provider fallback and non-OpenAI adapters, Resilience4j/observation on the router's OpenAI client, MCP tools, a cheap `GET /internal/v1/corpus-version` on ingest (a cache hit still pays a query embedding), cache/422-rate metrics. Unverified route model ids: `gpt-5-nano`, `gpt-5`, `gpt-5-chat` (`gpt-5-mini` is verified live). Summary-flow cache hits now consume one hourly run slot of the payer (accepted).
-M1 (x402 starter + first paid endpoint) is done and merged (PR #10).
+M3 — Orchestrator, spend control, router scopes: **in progress** on branch `m3-orchestrator` (not pushed). Architect pass done 2026-09-30; human decisions: MCP tools -> Stretch, provider fallback inside OpenAI only (Gemini/DeepSeek adapters and the LLM cache -> M6, ADR-0011 amendment), settle-before-serve = ADR-0015 now, implementation in M4. Standing rules from the human: tool and provider interfaces stay abstract, the known 429 limit is documented (THREAT_MODEL, README), the plaintext allowlist is exact-host and closed on mainnet, the $0.70 daily LLM cap is pinned in code (`HARD_CEILING_USD_MICROS`).
+Contract: `docs/design/m3-orchestrator.md`; ADR-0013/0014/0015. Waves: T0 (contracts, done) -> T1 starter+seller (payments-engineer, opus) || T2 router (agent-engineer) -> T3 spend control || T5 compose -> T4 agents+SSE -> T6 live runs -> T7 audit.
+**Human action needed before T6:** create `secrets/x402_buyer_private_key` (a copy of the buyer key, 0644 inside the 0700 directory) and confirm a monthly spend limit on the OpenAI project.
+M2 (ingest + RAG) is done and merged (PR #12).
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
+
+### 2026-09-30 — M3 T0: contracts and ADRs
+- `libs/shared` `run` package: `RunEvent`, `RunEventType`, `RunEventData` (sealed payloads), `AgentStep`, `DenyReason`, `RunCost` (+ tests); `docs/events/agent.run-step.v1.md`; `docs/design/m3-orchestrator.md`; ADR-0013 spend-control plane, ADR-0014 agent runtime and run events, ADR-0015 settle-before-serve; amendments to ADR-0011 (cost scopes, OpenAI-only fallback, pinned cap) and ADR-0009 (orchestrator secrets, exact-host plaintext allowlist); PLAN/ARCHITECTURE wording; the 429 limit in THREAT_MODEL and README.
+- Verified: `:libs:shared:check`. Next: T1 and T2 in parallel.
 
 ### 2026-09-30 — M2 closing: milestone-end security audit and fixes
 - **Audit (opus, read-only):** no Critical/High. Medium: (1) a prompt already carrying `OpenAiChatOptions` bypassed the route's token limit, `n`, extra body and headers (Spring AI 2.0.1 does not merge request options with defaults); (2) the MKK base URL was unpinned, so an env var could send the Basic credential to any host. Low: run guard ran after the paid retrieval embedding (free replay of one signature); citation title/excerpt not link-scrubbed; `ingest-backfill` mounted the whole `secrets/` dir (buyer key in the ingest JVM); `/internal/**` open to CSRF/DNS rebinding from the developer's browser; deadline not derived from `validBefore`.
