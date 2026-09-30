@@ -1,0 +1,9 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: orchestrator: environment entry looks like a private key
+# The buyer key handed to the orchestrator as the property's env form instead of the secret file.
+name: cptest-fail-buyer-key-env-on-orchestrator
+services:
+  orchestrator:
+    image: busybox:1
+    environment:
+      X402_CLIENT_PRIVATE_KEY: "placeholder"

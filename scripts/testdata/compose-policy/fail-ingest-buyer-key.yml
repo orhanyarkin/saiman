@@ -1,14 +1,14 @@
 # Fixture for scripts/test-check-compose-policy.sh: must FAIL.
-# expect: mounts secret "buyer_key"
+# expect: mounts secret "x402_buyer_private_key"
 # ingest asking for the buyer key (only orchestrator may).
 name: cptest-fail-ingest-buyer-key
 services:
   ingest:
     image: busybox:1
-    secrets: [mkk_credentials, buyer_key]
+    secrets: [mkk_credentials, x402_buyer_private_key]
 secrets:
-  buyer_key:
-    file: ../../secrets/buyer.key
+  x402_buyer_private_key:
+    file: ../../secrets/x402_buyer_private_key
   mkk_credentials:
     file: ../../secrets/mkk_credentials
   openai_api_key:

@@ -1,0 +1,9 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS must be exactly "seller-api"
+# A wildcard (or any value other than the exact host) in the plaintext-payment allowlist.
+name: cptest-fail-plaintext-hosts-wildcard
+services:
+  orchestrator:
+    image: busybox:1
+    environment:
+      X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS: "*"
