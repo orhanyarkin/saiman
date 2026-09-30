@@ -42,6 +42,7 @@ public class ModelRouterAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(RouterProperties.class)
     RouterProperties routerProperties(Environment environment) {
+        warnAboutRiskyEnvironment(environment);
         return RouterPropertiesBinder.bind(environment);
     }
 
@@ -87,8 +88,13 @@ public class ModelRouterAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(CostGuard.class)
     CostGuard inMemoryCostGuard(RouterProperties properties, ObjectProvider<Clock> clock) {
-        log.warn("No StringRedisTemplate bean: the model router's daily cost cap is counted in memory,"
-                + " per process. Configure Valkey to share the cap between services.");
+        if (!"memory".equals(properties.costGuard())) {
+            throw new IllegalStateException("No StringRedisTemplate bean, so the model router has no shared daily"
+                    + " cost cap. Configure Valkey (spring.data.redis.*), or set saiman.router.cost-guard=memory"
+                    + " to accept a per-process cap (tests, single-process demos only).");
+        }
+        log.warn("saiman.router.cost-guard=memory: the daily cost cap is counted in memory, per process,"
+                + " and is not shared between services.");
         return new InMemoryCostGuard(properties.dailyCapUsdMicros(), clock.getIfAvailable(Clock::systemUTC));
     }
 
@@ -96,5 +102,27 @@ public class ModelRouterAutoConfiguration {
     @ConditionalOnMissingBean(RouterMetrics.class)
     RouterMetrics noopRouterMetrics() {
         return RouterMetrics.NOOP;
+    }
+
+    /**
+     * Warns (variable names only, never values) about environment variables that change what the
+     * OpenAI SDK does: {@code OPENAI_LOG=debug} dumps request bodies with prompts, and the base-URL
+     * variables are ignored by this router but signal a misconfigured deployment.
+     */
+    static void warnAboutRiskyEnvironment(Environment environment) {
+        String sdkLog = environment.getProperty("OPENAI_LOG");
+        if (sdkLog != null && !sdkLog.isBlank()) {
+            log.warn("OPENAI_LOG is set: the OpenAI SDK may log request bodies (prompts)."
+                    + " Unset it outside local debugging.");
+        }
+        for (String name : new String[] {"OPENAI_BASE_URL", "AZURE_OPENAI_BASE_URL"}) {
+            String value = environment.getProperty(name);
+            if (value != null && !value.isBlank()) {
+                log.warn(
+                        "{} is set but ignored: the model router always talks to {}.",
+                        name,
+                        OpenAiModelFactory.BASE_URL);
+            }
+        }
     }
 }

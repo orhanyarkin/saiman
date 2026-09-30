@@ -62,7 +62,8 @@ final class RouterPropertiesBinder {
                         bound.embedding(),
                         bound.dailyCapUsdMicros(),
                         bound.prices(),
-                        new RouterProperties.OpenAi(fromConfigTree));
+                        bound.openai().withApiKey(fromConfigTree),
+                        bound.costGuard());
             }
         }
         return bound;

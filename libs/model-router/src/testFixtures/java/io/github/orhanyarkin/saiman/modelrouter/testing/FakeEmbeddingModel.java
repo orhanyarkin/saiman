@@ -55,8 +55,7 @@ public final class FakeEmbeddingModel implements EmbeddingModel {
             results.add(new Embedding(vectorFor(text), results.size()));
             tokens += (text.length() + 3) / 4;
         }
-        return new EmbeddingResponse(
-                results, new EmbeddingResponseMetadata("fake-embedding", new DefaultUsage(tokens, 0)));
+        return new EmbeddingResponse(results, new EmbeddingResponseMetadata("", new DefaultUsage(tokens, 0)));
     }
 
     @Override

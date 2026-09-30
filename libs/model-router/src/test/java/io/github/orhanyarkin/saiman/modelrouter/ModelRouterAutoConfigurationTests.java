@@ -21,8 +21,56 @@ class ModelRouterAutoConfigurationTests {
 
     private static final String PLANTED_KEY = "sk-planted-1234567890-SHOULD-NEVER-APPEAR";
 
-    private final ApplicationContextRunner runner =
+    private final ApplicationContextRunner runner = new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(ModelRouterAutoConfiguration.class))
+            .withPropertyValues("saiman.router.cost-guard=memory");
+
+    private final ApplicationContextRunner noExplicitGuard =
             new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(ModelRouterAutoConfiguration.class));
+
+    @Test
+    void withoutValkeyAndWithoutTheExplicitMemoryPropertyStartupFailsWithAClearMessage() {
+        noExplicitGuard.run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure())
+                    .rootCause()
+                    .hasMessageContaining("saiman.router.cost-guard=memory")
+                    .hasMessageContaining("spring.data.redis");
+        });
+    }
+
+    @Test
+    void withAStringRedisTemplateNoExplicitPropertyIsNeeded() {
+        var template = new StringRedisTemplate(
+                new org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory());
+        noExplicitGuard.withBean(StringRedisTemplate.class, () -> template).run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(CostGuard.class)).isInstanceOf(ValkeyCostGuard.class);
+        });
+    }
+
+    @Test
+    void riskyEnvironmentVariablesProduceWarningsWithoutValues(CapturedOutput output) {
+        runner.withPropertyValues(
+                        "OPENAI_LOG=debug",
+                        "OPENAI_BASE_URL=http://evil.example:1",
+                        "AZURE_OPENAI_BASE_URL=http://evil2.example:1")
+                .run(context -> assertThat(context).hasNotFailed());
+
+        assertThat(output)
+                .contains("OPENAI_LOG is set")
+                .contains("OPENAI_BASE_URL is set but ignored")
+                .contains("AZURE_OPENAI_BASE_URL is set but ignored")
+                .doesNotContain("evil.example")
+                .doesNotContain("evil2.example");
+    }
+
+    @Test
+    void aCleanEnvironmentProducesNoWarning(CapturedOutput output) {
+        runner.run(context -> assertThat(context).hasNotFailed());
+
+        assertThat(output).doesNotContain("OPENAI_LOG is set").doesNotContain("is set but ignored");
+    }
 
     @Test
     void routerBeanExistsWithoutAnyKeyAndFallsBackToAnInMemoryGuard(CapturedOutput output) {

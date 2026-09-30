@@ -1,5 +1,9 @@
 # Test-wide defaults, layered over src/main/resources/application.yaml.
 management:
+  health:
+    redis:
+      # No Valkey in these tests (the router's cost guard is never called: tests use their own ModelRouter).
+      enabled: false
   opentelemetry:
     # Keep a developer's exported OTEL_* variables from sending test telemetry to a collector.
     map-environment-variables: false

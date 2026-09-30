@@ -6,47 +6,86 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import java.time.Instant;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class InMemoryCostGuardTests {
 
-    @Test
-    void passesUnderTheCapAndRefusesAtAndOverIt() {
-        var guard = new InMemoryCostGuard(1_000, new MutableClock(Instant.parse("2026-09-29T10:00:00Z")));
-
-        guard.assertUnderCap();
-        assertThat(guard.record(Money.usdMicros(999))).isEqualTo(Money.usdMicros(999));
-        guard.assertUnderCap(); // 999 < 1000
-
-        guard.record(Money.usdMicros(1)); // exactly at the cap
-        assertThatThrownBy(guard::assertUnderCap).isInstanceOf(DailyCapExceededException.class);
-
-        guard.record(Money.usdMicros(500)); // over the cap
-        assertThatThrownBy(guard::assertUnderCap).isInstanceOf(DailyCapExceededException.class);
-        assertThat(guard.todayTotal()).isEqualTo(Money.usdMicros(1_500));
+    private static Money micros(long v) {
+        return Money.usdMicros(v);
     }
 
     @Test
-    void theCounterRollsOverAtUtcMidnight() {
+    void reserveRefusesWhenReservationWouldExceedCap() {
+        var guard = new InMemoryCostGuard(1_000, new MutableClock(Instant.parse("2026-09-29T10:00:00Z")));
+
+        guard.reserve(micros(600));
+        assertThatThrownBy(() -> guard.reserve(micros(401))).isInstanceOf(DailyCapExceededException.class);
+        assertThat(guard.todayTotal()).isEqualTo(micros(600)); // the refused reservation left no trace
+
+        guard.reserve(micros(400)); // exactly at the cap is allowed
+        assertThat(guard.todayTotal()).isEqualTo(micros(1_000));
+        assertThatThrownBy(() -> guard.reserve(micros(1))).isInstanceOf(DailyCapExceededException.class);
+    }
+
+    @Test
+    void reservationIsAdjustedToActualAfterTheCall() {
+        var guard = new InMemoryCostGuard(1_000, new MutableClock(Instant.parse("2026-09-29T10:00:00Z")));
+
+        var reservation = guard.reserve(micros(500));
+        guard.settle(reservation, micros(120)); // cheaper than estimated: frees the difference
+        assertThat(guard.todayTotal()).isEqualTo(micros(120));
+
+        var second = guard.reserve(micros(100));
+        guard.settle(second, micros(300)); // dearer than estimated: settled at the truth
+        assertThat(guard.todayTotal()).isEqualTo(micros(420));
+    }
+
+    @Test
+    void releaseGivesTheWholeReservationBackAndTotalsNeverGoBelowZero() {
+        var guard = new InMemoryCostGuard(1_000, new MutableClock(Instant.parse("2026-09-29T10:00:00Z")));
+        var reservation = guard.reserve(micros(300));
+
+        guard.release(reservation);
+        assertThat(guard.todayTotal()).isEqualTo(micros(0));
+
+        guard.release(reservation); // double release must not go negative
+        assertThat(guard.todayTotal()).isEqualTo(micros(0));
+    }
+
+    @Test
+    void theCounterRollsOverAtUtcMidnightAndSettlesOnTheReservedDay() {
         var clock = new MutableClock(Instant.parse("2026-09-29T23:59:59Z"));
         var guard = new InMemoryCostGuard(1_000, clock);
-        guard.record(Money.usdMicros(1_000));
-        assertThatThrownBy(guard::assertUnderCap).isInstanceOf(DailyCapExceededException.class);
+        var reservation = guard.reserve(micros(1_000));
+        assertThatThrownBy(() -> guard.reserve(micros(1))).isInstanceOf(DailyCapExceededException.class);
 
         clock.set(Instant.parse("2026-09-30T00:00:00Z"));
 
-        guard.assertUnderCap();
-        assertThat(guard.todayTotal()).isEqualTo(Money.usdMicros(0));
+        guard.reserve(micros(1)); // a new day, a fresh counter
+        assertThat(guard.todayTotal()).isEqualTo(micros(1));
+        guard.settle(reservation, micros(0)); // yesterday's reservation does not touch today
+        assertThat(guard.todayTotal()).isEqualTo(micros(1));
     }
 
     @Test
-    void concurrentRecordsDoNotLoseUpdates() {
-        var guard = new InMemoryCostGuard(Long.MAX_VALUE, new MutableClock(Instant.parse("2026-09-29T10:00:00Z")));
+    void twoHundredVirtualThreadCallersCannotOverspendTheCap() {
+        long cap = 10_000;
+        var guard = new InMemoryCostGuard(cap, new MutableClock(Instant.parse("2026-09-29T10:00:00Z")));
+        var granted = new AtomicInteger();
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (int i = 0; i < 1_000; i++) {
-                executor.execute(() -> guard.record(Money.usdMicros(7)));
+            for (int i = 0; i < 200; i++) {
+                executor.execute(() -> {
+                    try {
+                        guard.reserve(micros(100));
+                        granted.incrementAndGet();
+                    } catch (DailyCapExceededException expected) {
+                        // refused
+                    }
+                });
             }
         }
-        assertThat(guard.todayTotal()).isEqualTo(Money.usdMicros(7_000));
+        assertThat(granted.get()).isEqualTo(100);
+        assertThat(guard.todayTotal().atomicUnits()).isLessThanOrEqualTo(cap);
     }
 }

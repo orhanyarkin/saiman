@@ -31,7 +31,8 @@ class ValkeyFailClosedTests {
             var embedding = new FakeEmbeddingModel(1536);
             var router = TestRouters.over(chat, embedding, guard);
 
-            assertThatThrownBy(guard::assertUnderCap).isInstanceOf(RuntimeException.class);
+            assertThatThrownBy(() -> guard.reserve(io.github.orhanyarkin.saiman.shared.money.Money.usdMicros(1)))
+                    .isInstanceOf(RuntimeException.class);
             assertThatThrownBy(() -> router.chatClient(Tier.TIER0, DataClass.PUBLIC)
                             .prompt()
                             .user("hi")

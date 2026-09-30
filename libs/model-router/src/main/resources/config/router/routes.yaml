@@ -4,25 +4,32 @@
 saiman:
   router:
     daily-cap-usd-micros: 700000 # $0.70 per UTC day
+    openai:
+      max-retries: 1 # counted in the worst-case cost estimate of every call
+      timeout: 30s
     routes:
       tier0:
         provider: openai
         model: gpt-5-nano
+        max-completion-tokens: 500
         allowed-data-classes: [public, internal]
         region: us
       tier1:
         provider: openai
         model: gpt-5-mini
+        max-completion-tokens: 1500
         allowed-data-classes: [public, internal]
         region: us
       tier1-premium:
         provider: openai
         model: gpt-5
+        max-completion-tokens: 3000
         allowed-data-classes: [public, internal]
         region: us
       tier2:
         provider: openai
         model: gpt-5-chat
+        max-completion-tokens: 3000
         allowed-data-classes: [public, internal]
         region: us
     embedding:

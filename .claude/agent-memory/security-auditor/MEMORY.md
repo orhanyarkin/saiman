@@ -1,1 +1,2 @@
 - [Threat model baseline](threat-model-baseline.md) — x402 mitigations/open items through M1-close audit 2026-09-29 (settle null-tx fail-open, Object async bypass, shared CB, M3 carry-forwards)
+- [Model router T1 audit](model-router-t1-audit.md) — OPENAI_BASE_URL key exfil, OPENAI_LOG body dump, cancelled stream uncounted, soft-cap overshoot (2026-09-30)

@@ -10,34 +10,53 @@ import org.springframework.ai.embedding.EmbeddingModel;
 
 /**
  * The router (ADR-0011). The data-class check is plain code and runs before a client is handed
- * out, so a refused request never reaches a provider; the daily cap and metrics are advisors on the
- * returned client (and a decorator on the embedding model).
+ * out, so a refused request never reaches a provider; the daily cap (by reservation) and metrics
+ * are advisors on the returned client (and a decorator on the embedding model).
+ *
+ * <p>The constructor validates the configuration and fails startup on: an unsupported provider, a
+ * missing price, a chat route without a positive {@code max-completion-tokens}, a route that allows
+ * {@link DataClass#SENSITIVE}, a negative retry count.
  */
 public final class DefaultModelRouter implements ModelRouter {
 
     private static final String PROVIDER = "openai";
 
-    private final RouterProperties properties;
     private final CostGuard guard;
     private final RouterMetrics metrics;
     private final Map<Tier, ChatModel> chatModels = new EnumMap<>(Tier.class);
     private final Map<Tier, RouterProperties.Route> routes = new EnumMap<>(Tier.class);
+    private final Map<Tier, RouteCosting> costings = new EnumMap<>(Tier.class);
     private final RouterProperties.Embedding embeddingRoute;
     private final EmbeddingModel embeddingModel;
 
     public DefaultModelRouter(
             RouterProperties properties, ModelFactory factory, CostGuard guard, RouterMetrics metrics) {
-        this.properties = properties;
         this.guard = guard;
         this.metrics = metrics;
+        int maxRetries = properties.openai().maxRetries();
+        if (maxRetries < 0) {
+            throw new IllegalStateException("saiman.router.openai.max-retries must not be negative");
+        }
         for (Tier tier : Tier.values()) {
             RouterProperties.Route route = properties.routes().get(tier);
             if (route == null) {
                 throw new IllegalStateException("saiman.router.routes has no route for tier " + tier);
             }
             requireProvider(route.provider(), "route for tier " + tier);
-            requirePrice(route.model(), "tier " + tier);
+            requireNoSensitive(route.allowedDataClasses(), "tier " + tier);
+            if (route.maxCompletionTokens() <= 0) {
+                throw new IllegalStateException(
+                        "saiman.router.routes." + tierLabel(tier) + ".max-completion-tokens must be positive");
+            }
             routes.put(tier, route);
+            costings.put(
+                    tier,
+                    new RouteCosting(
+                            tierLabel(tier),
+                            route.model(),
+                            route.maxCompletionTokens(),
+                            maxRetries,
+                            properties.prices()));
             chatModels.put(tier, factory.chatModel(route));
         }
         RouterProperties.Embedding embedding = properties.embedding();
@@ -46,24 +65,28 @@ public final class DefaultModelRouter implements ModelRouter {
         }
         this.embeddingRoute = embedding;
         requireProvider(embedding.provider(), "embedding route");
-        requirePrice(embedding.model(), "the embedding route");
+        requireNoSensitive(embedding.allowedDataClasses(), "the embedding route");
         if (embedding.dimensions() <= 0) {
             throw new IllegalStateException("saiman.router.embedding.dimensions must be positive");
         }
+        RouteCosting embeddingCosting =
+                new RouteCosting("embedding", embedding.model(), 0, maxRetries, properties.prices());
         this.embeddingModel = new CostGuardedEmbeddingModel(
-                factory.embeddingModel(embedding), embedding.dimensions(), price(embedding.model()), guard, metrics);
+                factory.embeddingModel(embedding), embedding.dimensions(), embeddingCosting, guard, metrics);
     }
 
     @Override
     public ChatClient chatClient(Tier tier, DataClass dataClass) {
         RouterProperties.Route route = routes.get(tier);
         ChatModel model = chatModels.get(tier);
-        if (route == null || model == null) {
+        RouteCosting costing = costings.get(tier);
+        if (route == null || model == null || costing == null) {
             throw new IllegalStateException("no route for tier " + tier);
         }
         requireAllowed(route.allowedDataClasses(), dataClass, "tier " + tier);
-        CostAdvisor advisor = new CostAdvisor(tierLabel(tier), price(route.model()), guard, metrics);
-        return ChatClient.builder(model).defaultAdvisors(advisor).build();
+        return ChatClient.builder(model)
+                .defaultAdvisors(new CostAdvisor(costing, guard, metrics))
+                .build();
     }
 
     @Override
@@ -83,23 +106,15 @@ public final class DefaultModelRouter implements ModelRouter {
         }
     }
 
+    private static void requireNoSensitive(Set<DataClass> allowed, String routeName) {
+        if (allowed.contains(DataClass.SENSITIVE)) {
+            throw new IllegalStateException("SENSITIVE data must never be allowed on " + routeName + " (ADR-0003)");
+        }
+    }
+
     private static void requireProvider(String provider, String what) {
         if (!PROVIDER.equals(provider)) {
             throw new IllegalStateException("unsupported provider for " + what + ": only '" + PROVIDER + "' exists");
         }
-    }
-
-    private void requirePrice(String model, String what) {
-        if (!properties.prices().containsKey(model)) {
-            throw new IllegalStateException("saiman.router.prices has no price for the model of " + what);
-        }
-    }
-
-    private RouterProperties.Price price(String model) {
-        RouterProperties.Price price = properties.prices().get(model);
-        if (price == null) {
-            throw new IllegalStateException("saiman.router.prices has no price for a routed model");
-        }
-        return price;
     }
 }
