@@ -1,3 +1,4 @@
 - [Threat model baseline](threat-model-baseline.md) — x402 mitigations/open items through M1-close audit 2026-09-29 (settle null-tx fail-open, Object async bypass, shared CB, M3 carry-forwards)
 - [Model router T1 audit](model-router-t1-audit.md) — OPENAI_BASE_URL key exfil, OPENAI_LOG body dump, cancelled stream uncounted, soft-cap overshoot (2026-09-30)
 - [M2 T4 seller RAG audit](m2-t4-seller-rag-audit.md) — LLM-before-settle: non-2xx releases nonce (free runs to cap), 20s-window free compute, ordering facts (2026-09-30)
+- [M2 close audit](m2-close-audit.md) — router OpenAiChatOptions passthrough (no merge in Spring AI 2.0.1), MKK URL unpinned, guard after retrieval (2026-09-30)
