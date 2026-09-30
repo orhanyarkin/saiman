@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.x402.server;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.time.Instant;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -14,7 +15,7 @@ import org.jspecify.annotations.Nullable;
  * keeps the claim (outcome {@code not_charged_work_done}) so the authorization cannot be reused.
  * Nothing is settled in that case either. Without the mark, behaviour is unchanged.
  *
- * <p>Both helpers are no-ops / return {@code null} for a request that is not a verified paid
+ * <p>Every helper is a no-op / returns {@code null} for a request that is not a verified paid
  * request.
  */
 public final class X402PaymentContext {
@@ -29,6 +30,22 @@ public final class X402PaymentContext {
     public static @Nullable String payer(HttpServletRequest request) {
         X402PaymentAttempt attempt = attempt(request);
         return attempt != null && attempt.verified() ? attempt.payer() : null;
+    }
+
+    /**
+     * The verified authorization's {@code validBefore} (EIP-3009, seconds since the epoch), or
+     * {@code null} if this request has not passed payment verification. After this instant the
+     * payment can no longer be settled, so a handler that runs before settlement should finish
+     * well ahead of it (leaving room for the {@code /settle} call itself).
+     */
+    public static @Nullable Instant validBefore(HttpServletRequest request) {
+        X402PaymentAttempt attempt = attempt(request);
+        if (attempt == null || !attempt.verified()) {
+            return null;
+        }
+        // Parsed and range-checked by RequiresPaymentInterceptor before markVerified.
+        return Instant.ofEpochSecond(
+                Long.parseLong(attempt.payload().payload().authorization().validBefore()));
     }
 
     /** Records that this request's handler already consumed non-refundable resources. */

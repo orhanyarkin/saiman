@@ -638,6 +638,31 @@ class RequiresPaymentIntegrationTests {
     }
 
     @Test
+    void handlerSeesTheVerifiedValidBeforeThroughThePaymentContext() {
+        long now = Instant.now().getEpochSecond();
+        PaymentPayload payload = PaymentPayloads.sign(TestWallets.PAYER, offer(), windowOf(now, 50));
+
+        client.get()
+                .uri("/paid/valid-before")
+                .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, payload))
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody(String.class)
+                .isEqualTo(Instant.ofEpochSecond(now + 50).toString());
+
+        // No verified payment, no validBefore: an unpaid handler must not see a client's header.
+        client.get()
+                .uri("/free/valid-before")
+                .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, payload))
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody(String.class)
+                .isEqualTo("null");
+    }
+
+    @Test
     void windowShorterThanTheHandlersMinWindowIsRejectedWithoutCallingTheFacilitator() {
         long now = Instant.now().getEpochSecond();
         // 30 s is above the starter default (15 + 5) but below the handler's 45 s minimum.
@@ -800,6 +825,17 @@ class RequiresPaymentIntegrationTests {
         @RequiresPayment(price = PRICE)
         String who(jakarta.servlet.http.HttpServletRequest request) {
             return X402PaymentContext.payer(request);
+        }
+
+        @GetMapping("/paid/valid-before")
+        @RequiresPayment(price = PRICE)
+        String validBefore(jakarta.servlet.http.HttpServletRequest request) {
+            return String.valueOf(X402PaymentContext.validBefore(request));
+        }
+
+        @GetMapping("/free/valid-before")
+        String freeValidBefore(jakarta.servlet.http.HttpServletRequest request) {
+            return String.valueOf(X402PaymentContext.validBefore(request));
         }
 
         @GetMapping("/paid/strict-window")
