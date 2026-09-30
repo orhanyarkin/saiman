@@ -37,6 +37,7 @@ final class X402PaymentAttempt {
     private @Nullable String payer;
     private @Nullable String txHash;
     private boolean verified;
+    private volatile boolean workDone;
     private String outcome = "unknown";
 
     X402PaymentAttempt(Observation observation, RequiresPaymentRegistry.Entry entry) {
@@ -70,6 +71,14 @@ final class X402PaymentAttempt {
 
     boolean verified() {
         return verified;
+    }
+
+    void markWorkDone() {
+        this.workDone = true;
+    }
+
+    boolean workDone() {
+        return workDone;
     }
 
     /** @throws IllegalStateException if called before {@link #markVerified} */

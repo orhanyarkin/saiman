@@ -25,7 +25,8 @@ class IngestOutageEndpointTests extends RagTestBase {
                 .expectBody(String.class)
                 .value(body -> assertThat(body).doesNotContain(INGEST.url()));
 
-        assertThat(INGEST.retrieveCalls()).isEqualTo(2);
+        assertThat(INGEST.tickerCalls()).isEqualTo(2); // the ticker check fails first: no paid retrieval
+        assertThat(INGEST.retrieveCalls()).isZero();
         assertThat(FACILITATOR.settleCallCount()).isZero();
         assertThat(router.routerRequests()).isZero();
     }
@@ -36,7 +37,8 @@ class IngestOutageEndpointTests extends RagTestBase {
 
         getPaid("/v1/disclosures/THYAO/summary", "10000").expectStatus().isEqualTo(503);
 
-        assertThat(INGEST.retrieveCalls()).isEqualTo(2);
+        assertThat(INGEST.tickerCalls()).isEqualTo(2); // the ticker check fails first: no paid retrieval
+        assertThat(INGEST.retrieveCalls()).isZero();
         assertThat(FACILITATOR.settleCallCount()).isZero();
     }
 

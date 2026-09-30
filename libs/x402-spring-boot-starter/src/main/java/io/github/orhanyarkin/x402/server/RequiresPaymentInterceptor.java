@@ -154,7 +154,7 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
         Eip3009Authorization authorization = clientPayload.payload().authorization();
         String rejectionOutcome;
         try {
-            rejectionOutcome = validateAuthorization(entry.offer(), authorization);
+            rejectionOutcome = validateAuthorization(entry, authorization);
         } catch (RuntimeException malformedAuthorization) {
             reject(request, response, attempt, "malformed_payload", "the payment authorization is invalid");
             return false;
@@ -243,7 +243,9 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
      *
      * @return a rejection outcome tag, or {@code null} if {@code authorization} passes every check
      */
-    private @Nullable String validateAuthorization(PaymentRequirements offer, Eip3009Authorization authorization) {
+    private @Nullable String validateAuthorization(
+            RequiresPaymentRegistry.Entry entry, Eip3009Authorization authorization) {
+        PaymentRequirements offer = entry.offer();
         if (!authorization.to().equalsIgnoreCase(offer.payTo())) {
             return "requirements_mismatch";
         }
@@ -262,7 +264,9 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
         if (window > offer.maxTimeoutSeconds() + CLOCK_SKEW.toSeconds()) {
             return "window_too_large";
         }
-        long minimumWindow = properties.facilitator().readTimeout().toSeconds() + SETTLEMENT_MARGIN.toSeconds();
+        long minimumWindow = Math.max(
+                properties.facilitator().readTimeout().toSeconds() + SETTLEMENT_MARGIN.toSeconds(),
+                entry.minWindowSeconds());
         if (window < minimumWindow) {
             return "window_too_short";
         }

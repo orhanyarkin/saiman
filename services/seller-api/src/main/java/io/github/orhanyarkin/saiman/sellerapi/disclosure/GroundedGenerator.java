@@ -1,19 +1,30 @@
 package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 
+import io.github.orhanyarkin.saiman.modelrouter.DailyCapExceededException;
 import io.github.orhanyarkin.saiman.modelrouter.DataClass;
+import io.github.orhanyarkin.saiman.modelrouter.DataClassViolationException;
 import io.github.orhanyarkin.saiman.modelrouter.ModelRouter;
+import io.github.orhanyarkin.saiman.modelrouter.RequestNotSentException;
 import io.github.orhanyarkin.saiman.modelrouter.Tier;
+import io.github.orhanyarkin.saiman.sellerapi.llm.Deadline;
+import io.github.orhanyarkin.saiman.sellerapi.llm.RunGuardUnavailableException;
+import io.github.orhanyarkin.saiman.sellerapi.llm.UnsettledRunGuard;
 import io.github.orhanyarkin.saiman.shared.retrieval.RetrievedChunk;
+import io.github.orhanyarkin.x402.server.X402PaymentContext;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -45,7 +56,15 @@ class GroundedGenerator {
     static final int MAX_TEXT_CHARS = 4_000;
     private static final int MAX_CITED_IDS = 50;
     private static final int MAX_ID_CHARS = 64;
-    private static final Pattern CHUNK_ID = Pattern.compile("kap:\\d{1,10}:\\d{4}");
+    static final Pattern CHUNK_ID = Pattern.compile("kap:\\d{1,10}:\\d{4}");
+
+    /** The only source URLs a citation may carry: KAP disclosure pages. */
+    static final Pattern KAP_URL = Pattern.compile("https://www\\.kap\\.org\\.tr/tr/Bildirim/\\d+");
+
+    /** Anything that looks like a link inside model prose; citations carry the links, prose does not. */
+    private static final Pattern URL_IN_TEXT = Pattern.compile("(?i)(?:[a-z][a-z0-9+.-]*://|www\\.)\\S+");
+
+    static final String LINK_REMOVED = "[link removed]";
 
     private static final String RULES = """
             You are a research assistant for public Turkish capital-markets (KAP) disclosures.
@@ -62,10 +81,12 @@ class GroundedGenerator {
 
     private final ModelRouter router;
     private final JsonMapper jsonMapper;
+    private final UnsettledRunGuard guard;
 
-    GroundedGenerator(ModelRouter router, JsonMapper jsonMapper) {
+    GroundedGenerator(ModelRouter router, JsonMapper jsonMapper, UnsettledRunGuard guard) {
         this.router = router;
         this.jsonMapper = jsonMapper;
+        this.guard = guard;
     }
 
     /** The model's reply after schema validation; the ids are still unverified against retrieval. */
@@ -77,7 +98,11 @@ class GroundedGenerator {
      * @param textField the JSON field carrying the prose, {@code summary} or {@code answer}
      * @param taskLabel block label for the task text, e.g. {@code TASK} or {@code QUESTION}
      * @param task the task text; treated as untrusted whatever its origin
-     * @throws ModelUnavailableException if the router refused or failed
+     * @param deadline the request's time budget: no model call past it, and no answer returned after it
+     * @throws ModelUnavailableException if the router refused or failed, or the deadline passed
+     * @throws io.github.orhanyarkin.saiman.sellerapi.llm.RunLimitExceededException if the payer or the
+     *     day's unsettled-run budget is used up (no model call is made)
+     * @throws RunGuardUnavailableException if the run guard could not decide (fail closed)
      * @throws MalformedModelOutputException if the reply does not match the schema
      */
     Reply generate(
@@ -86,26 +111,70 @@ class GroundedGenerator {
             String textField,
             List<RetrievedChunk> excerpts,
             String taskLabel,
-            String task) {
-        String system = RULES + "{\"" + textField + "\": \"...\", \"citedChunkIds\": [\"kap:...\"]}";
-        String user = userMessage(excerpts, taskLabel, task);
-        @Nullable String raw;
-        try {
-            raw = router.chatClient(tier, dataClass)
-                    .prompt()
-                    .system(system)
-                    .user(user)
-                    .call()
-                    .content();
-        } catch (RuntimeException e) {
-            // Class name only: router and provider messages are never logged or returned.
-            log.warn("model call failed: {}", e.getClass().getSimpleName());
+            String task,
+            Deadline deadline) {
+        if (deadline.expired()) {
             throw new ModelUnavailableException();
         }
-        if (raw == null) {
-            throw new MalformedModelOutputException();
+        HttpServletRequest request = currentRequest();
+        String payer = X402PaymentContext.payer(request);
+        if (payer == null) {
+            throw new RunGuardUnavailableException();
         }
-        return parse(raw, textField);
+        String system = RULES + "{\"" + textField + "\": \"...\", \"citedChunkIds\": [\"kap:...\"]}";
+        String user = userMessage(excerpts, taskLabel, task);
+        guard.tryStart(payer);
+        try {
+            @Nullable String raw;
+            try {
+                raw = router.chatClient(tier, dataClass)
+                        .prompt()
+                        .system(system)
+                        .user(user)
+                        .call()
+                        .content();
+            } catch (RuntimeException e) {
+                // Class name only: router and provider messages are never logged or returned.
+                log.warn("model call failed: {}", e.getClass().getSimpleName());
+                if (!provablyNotSent(e)) {
+                    X402PaymentContext.markWorkDone(request);
+                }
+                throw new ModelUnavailableException();
+            }
+            // The model ran (and may have been billed): if this request now ends non-2xx, the starter
+            // must keep the nonce claim so the same authorization can not buy another run.
+            X402PaymentContext.markWorkDone(request);
+            if (deadline.expired()) {
+                // The payment authorization may be about to expire: never serve (and try to settle) late.
+                throw new ModelUnavailableException();
+            }
+            if (raw == null) {
+                throw new MalformedModelOutputException();
+            }
+            return parse(raw, textField);
+        } finally {
+            guard.finish(payer);
+        }
+    }
+
+    /** True when the failure proves the request never reached the provider (nothing was spent). */
+    private static boolean provablyNotSent(Throwable failure) {
+        Throwable t = failure;
+        for (int depth = 0; t != null && depth < 8; depth++, t = t.getCause()) {
+            if (t instanceof RequestNotSentException
+                    || t instanceof DailyCapExceededException
+                    || t instanceof DataClassViolationException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static HttpServletRequest currentRequest() {
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            return attributes.getRequest();
+        }
+        throw new RunGuardUnavailableException();
     }
 
     private static String userMessage(List<RetrievedChunk> excerpts, String taskLabel, String task) {
@@ -138,6 +207,15 @@ class GroundedGenerator {
         return out.toString();
     }
 
+    /**
+     * Replaces every URL-looking token in model prose with {@value #LINK_REMOVED}: the answer text is
+     * untrusted (a buyer agent must never follow a link in it); the validated citations carry the
+     * links.
+     */
+    static String scrubLinks(String text) {
+        return URL_IN_TEXT.matcher(text).replaceAll(Matcher.quoteReplacement(LINK_REMOVED));
+    }
+
     Reply parse(String raw, String textField) {
         try {
             String json = extractJsonObject(raw);
@@ -150,7 +228,7 @@ class GroundedGenerator {
             if (textNode == null || !textNode.isString() || idsNode == null || !idsNode.isArray()) {
                 throw new MalformedModelOutputException();
             }
-            String text = textNode.asString().strip();
+            String text = scrubLinks(textNode.asString().strip());
             if (text.isEmpty() || text.length() > MAX_TEXT_CHARS || idsNode.size() > MAX_CITED_IDS) {
                 throw new MalformedModelOutputException();
             }
@@ -205,6 +283,7 @@ class GroundedGenerator {
     static List<RetrievedChunk> usable(List<RetrievedChunk> retrieved, String ticker) {
         return retrieved.stream()
                 .filter(chunk -> CHUNK_ID.matcher(chunk.chunkId()).matches())
+                .filter(chunk -> KAP_URL.matcher(chunk.sourceUrl()).matches())
                 .filter(chunk -> ticker.equals(chunk.ticker()))
                 .toList();
     }

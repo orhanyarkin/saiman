@@ -32,13 +32,31 @@ seller:
   ingest:
     base-url: ${SELLER_INGEST_BASE_URL:http://ingest:8083}
     connect-timeout: 2s
-    read-timeout: 10s
-    retry-attempts: 3
+    read-timeout: 5s # end-to-end request deadline (seller.llm.deadline): keep ingest calls short
+    retry-attempts: 2 # total attempts, i.e. at most one retry
     retry-wait: 200ms
     circuit-open-wait: 30s
+  # Model runs happen BEFORE x402 settlement, so their limits and time budget are explicit (F1, F2).
+  llm:
+    max-in-flight-per-payer: 2
+    max-runs-per-payer-per-hour: 30
+    max-unsettled-per-day: 100 # runs started whose payment has not settled, all payers, per UTC day
+    deadline: 25s # end-to-end budget per request; the LLM endpoints demand a 45 s authorization window
+    single-flight-wait: 5s
+    negative-cache-ttl: 120s
+  http:
+    max-body-bytes: 4096
+    max-json-string-length: 65536
   prices:
     disclosure-summary: 10000 # 0.01 test USDC, 6 decimals (GET /v1/disclosures/{ticker}/summary)
     disclosure-answer: 20000 # 0.02 test USDC (POST /v1/disclosures/{ticker}/questions)
+
+saiman:
+  router:
+    openai:
+      # One attempt within 20 s: the request deadline is 25 s and a retried call would be billed twice.
+      timeout: 20s
+      max-retries: 0
 
 management:
   endpoints:

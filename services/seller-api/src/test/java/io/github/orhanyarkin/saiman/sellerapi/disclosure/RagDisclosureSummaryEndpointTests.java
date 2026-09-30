@@ -113,13 +113,19 @@ class RagDisclosureSummaryEndpointTests extends RagTestBase {
     }
 
     @Test
-    void aFailedGenerationIsNotCached() {
+    void aFailedGenerationIsRememberedBrieflyButNeverCachedAsASummary() {
         INGEST.retrieves(List.of(C1, C2), "v-not-cached");
         router.failWith(new IllegalStateException("boom"));
         getPaid(URI, PRICE).expectStatus().isEqualTo(503);
         assertThat(FACILITATOR.settleCallCount()).isZero();
 
+        // Same corpus version: the failure is negative-cached, so the model is not asked again.
         router.replyWith(reply("Recovered.", "kap:5:0000"));
+        getPaid(URI, PRICE).expectStatus().isEqualTo(503);
+        assertThat(router.routerRequests()).isZero();
+
+        // A new corpus version is a different key: generation works again.
+        INGEST.retrieves(List.of(C1, C2), "v-not-cached-2");
         getPaid(URI, PRICE)
                 .expectStatus()
                 .isOk()

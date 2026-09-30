@@ -119,7 +119,7 @@ class BuyCommandMethodTest {
                         .run(
                                 url(server),
                                 "POST",
-                                BuyCommand.resolveJsonBody(null, file.toString()),
+                                BuyCommand.resolveJsonBody(null, file.toString(), dir),
                                 new PrintStream(out, true, StandardCharsets.UTF_8),
                                 System.err);
                 assertThat(ok).isTrue();
@@ -142,28 +142,56 @@ class BuyCommandMethodTest {
 
         assertThat(BuyCommand.resolveJsonBody("{\"a\":1}", null)).isEqualTo("{\"a\":1}");
         assertThat(BuyCommand.resolveJsonBody(null, null)).isNull();
-        assertThat(BuyCommand.resolveJsonBody(null, fine.toString())).isEqualTo("{}");
+        assertThat(BuyCommand.resolveJsonBody(null, fine.toString(), dir)).isEqualTo("{}");
 
-        assertThatThrownBy(() -> BuyCommand.resolveJsonBody("{}", fine.toString()))
+        assertThatThrownBy(() -> BuyCommand.resolveJsonBody("{}", fine.toString(), dir))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("not both");
-        assertThatThrownBy(() -> BuyCommand.resolveJsonBody(null, "relative/body.json"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("absolute");
         assertThatThrownBy(() -> BuyCommand.resolveJsonBody(
-                        null, dir.resolve("missing.json").toString()))
+                        null, dir.resolve("missing.json").toString(), dir))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("regular file");
-        assertThatThrownBy(() -> BuyCommand.resolveJsonBody(null, dir.toString()))
+        assertThatThrownBy(() -> BuyCommand.resolveJsonBody(null, dir.toString(), dir))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("regular file");
-        assertThatThrownBy(() -> BuyCommand.resolveJsonBody(null, big.toString()))
+        assertThatThrownBy(() -> BuyCommand.resolveJsonBody(null, big.toString(), dir))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("16384")
                 .hasMessageNotContaining("FILE-CONTENT-MARKER");
-        assertThatThrownBy(() -> BuyCommand.resolveJsonBody(null, badUtf8.toString()))
+        assertThatThrownBy(() -> BuyCommand.resolveJsonBody(null, badUtf8.toString(), dir))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("UTF-8");
+    }
+
+    @Test
+    void jsonFileRefusesPathsOutsideTheWorkingDirectoryAndSensitiveNames(@TempDir Path dir, @TempDir Path outside)
+            throws IOException {
+        Files.writeString(outside.resolve("body.json"), "{}");
+        Files.createDirectories(dir.resolve("secrets"));
+        Files.writeString(dir.resolve("secrets/body.json"), "{}");
+        Files.createDirectories(dir.resolve(".hidden"));
+        Files.writeString(dir.resolve(".hidden/body.json"), "{}");
+        Files.writeString(dir.resolve(".env.json"), "{}");
+        Files.writeString(dir.resolve("buyer.key"), "{}");
+        Files.writeString(dir.resolve("cert.PEM"), "{}");
+        Files.createSymbolicLink(dir.resolve("link.json"), outside.resolve("body.json"));
+
+        for (String refused : new String[] {
+            outside.resolve("body.json").toString(),
+            "../" + outside.getFileName() + "/body.json",
+            "secrets/body.json",
+            ".hidden/body.json",
+            ".env.json",
+            "buyer.key",
+            "cert.PEM",
+            "link.json"
+        }) {
+            assertThatThrownBy(() -> BuyCommand.resolveJsonBody(null, refused, dir))
+                    .as(refused)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        Files.writeString(dir.resolve("ok.json"), "{}");
+        assertThat(BuyCommand.resolveJsonBody(null, "ok.json", dir)).isEqualTo("{}");
     }
 
     private static String url(HttpServer server) {

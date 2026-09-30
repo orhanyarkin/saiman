@@ -1,5 +1,7 @@
 package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 
+import io.github.orhanyarkin.saiman.sellerapi.llm.Deadline;
+
 /**
  * Produces a disclosure summary for a ticker, behind {@link DisclosureSummaryController}'s
  * {@code @RequiresPayment} endpoint.
@@ -15,8 +17,9 @@ public interface DisclosureSummaryService {
      * Returns the disclosure summary for {@code ticker}.
      *
      * @param ticker the BIST ticker, already validated by the controller ({@code ^[A-Z0-9]{3,6}$})
+     * @param deadline the request's time budget; implementations that call a model must respect it
      * @return the summary for {@code ticker}
      * @throws TickerNotFoundException if no summary exists for {@code ticker}
      */
-    DisclosureSummaryResponse summaryFor(String ticker);
+    DisclosureSummaryResponse summaryFor(String ticker, Deadline deadline);
 }

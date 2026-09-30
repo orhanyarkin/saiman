@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 
+import io.github.orhanyarkin.saiman.sellerapi.llm.Deadline;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -36,7 +37,7 @@ class FixtureDisclosureSummaryService implements DisclosureSummaryService {
     }
 
     @Override
-    public DisclosureSummaryResponse summaryFor(String ticker) {
+    public DisclosureSummaryResponse summaryFor(String ticker, Deadline deadline) {
         DisclosureSummaryResponse summary = summariesByTicker.get(ticker);
         if (summary == null) {
             throw new TickerNotFoundException(ticker);
