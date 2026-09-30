@@ -186,6 +186,50 @@ class OpenAiEgressTests {
         }
     }
 
+    /** ChatClient seeds requests with the model's default options; they must be OpenAI options (was a ClassCastException). */
+    @Test
+    void aChatClientCallCompletesAgainstAnOpenAiCompatibleServer() throws Exception {
+        HttpServer stub = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        stub.createContext("/", exchange -> {
+            byte[] body = ("{\"id\":\"c1\",\"object\":\"chat.completion\",\"created\":1,\"model\":\"m\","
+                            + "\"choices\":[{\"index\":0,\"finish_reason\":\"stop\","
+                            + "\"message\":{\"role\":\"assistant\",\"content\":\"pong\"}}],"
+                            + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        stub.start();
+        try {
+            String baseUrl = "http://127.0.0.1:" + stub.getAddress().getPort() + "/v1";
+            RouterProperties base = RouterProperties.defaults();
+            var props = new RouterProperties(
+                    base.routes(),
+                    base.embedding(),
+                    base.dailyCapUsdMicros(),
+                    base.prices(),
+                    credentials(KEY, 0),
+                    null);
+            var router = new DefaultModelRouter(
+                    props,
+                    new OpenAiModelFactory(props.openai(), baseUrl),
+                    new InMemoryCostGuard(1_000_000, java.time.Clock.systemUTC()),
+                    RouterMetrics.NOOP);
+
+            String answer = router.chatClient(Tier.TIER0, DataClass.PUBLIC)
+                    .prompt()
+                    .user("ping")
+                    .call()
+                    .content();
+
+            assertThat(answer).isEqualTo("pong");
+        } finally {
+            stub.stop(0);
+        }
+    }
+
     private static Throwable catchThrowable(Runnable action) {
         try {
             action.run();

@@ -34,8 +34,8 @@ import reactor.core.publisher.Flux;
 @ExtendWith(OutputCaptureExtension.class)
 class AccountingTests {
 
-    /** Reservation for a two-character prompt on tier0: (1 * 0.1 + 500 * 0.5) USD/MTok, ceil, x2 retries. */
-    private static final long TIER0_ESTIMATE = 502;
+    /** Reservation for a two-character prompt on tier0: (1 * 0.1 + 2000 * 0.5) USD/MTok, ceil, x2 retries. */
+    private static final long TIER0_ESTIMATE = 2002;
 
     private record Chunk(int in, int out, @Nullable String model, boolean hasUsage) {
         static Chunk noUsage() {

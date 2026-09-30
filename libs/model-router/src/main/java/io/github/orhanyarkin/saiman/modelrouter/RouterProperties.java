@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
@@ -58,11 +59,29 @@ public record RouterProperties(
      *     and the basis of the worst-case cost reserved before each call
      * @param allowedDataClasses data classes the provider may see (ADR-0003)
      * @param region hosting region, informational
+     * @param reasoningEffort OpenAI {@code reasoning_effort} for reasoning models ({@code minimal}, {@code low}, ...);
+     *     absent for models that do not reason. Hidden reasoning is billed and counts against the token limit.
      */
     public record Route(
-            String provider, String model, int maxCompletionTokens, Set<DataClass> allowedDataClasses, String region) {
+            String provider,
+            String model,
+            int maxCompletionTokens,
+            Set<DataClass> allowedDataClasses,
+            String region,
+            @Nullable String reasoningEffort) {
+        @ConstructorBinding
         public Route {
             allowedDataClasses = allowedDataClasses == null ? Set.of() : Set.copyOf(allowedDataClasses);
+        }
+
+        /** A route without a reasoning effort. */
+        public Route(
+                String provider,
+                String model,
+                int maxCompletionTokens,
+                Set<DataClass> allowedDataClasses,
+                String region) {
+            this(provider, model, maxCompletionTokens, allowedDataClasses, region, null);
         }
     }
 

@@ -1,6 +1,7 @@
 # Default routes (ADR-0003, ADR-0011). Override any key with saiman.router.* properties.
 # Model ids are plausible OpenAI API ids and UNVERIFIED: the docs/ARCHITECTURE.md names are display
 # names. The live smoke test fixes them.
+# Reasoning models spend completion tokens on hidden reasoning, so the limits leave room for it.
 saiman:
   router:
     daily-cap-usd-micros: 700000 # $0.70 per UTC day
@@ -11,25 +12,27 @@ saiman:
       tier0:
         provider: openai
         model: gpt-5-nano
-        max-completion-tokens: 500
+        max-completion-tokens: 2000
+        reasoning-effort: minimal
         allowed-data-classes: [public, internal]
         region: us
       tier1:
         provider: openai
         model: gpt-5-mini
-        max-completion-tokens: 1500
+        max-completion-tokens: 3000
+        reasoning-effort: low
         allowed-data-classes: [public, internal]
         region: us
       tier1-premium:
         provider: openai
         model: gpt-5
-        max-completion-tokens: 3000
+        max-completion-tokens: 6000
         allowed-data-classes: [public, internal]
         region: us
       tier2:
         provider: openai
         model: gpt-5-chat
-        max-completion-tokens: 3000
+        max-completion-tokens: 6000
         allowed-data-classes: [public, internal]
         region: us
     embedding:

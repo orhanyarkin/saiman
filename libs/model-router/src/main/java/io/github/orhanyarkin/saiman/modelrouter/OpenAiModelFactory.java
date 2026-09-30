@@ -4,6 +4,7 @@ import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -65,6 +66,7 @@ final class OpenAiModelFactory implements ModelFactory {
                 .model(route.model())
                 .apiKey(requireApiKey())
                 .maxCompletionTokens(route.maxCompletionTokens())
+                .reasoningEffort(route.reasoningEffort())
                 .maxRetries(credentials.maxRetries())
                 .timeout(credentials.timeout())
                 // explicit: streamed responses must carry token usage or the cost cannot be counted
@@ -135,12 +137,32 @@ final class OpenAiModelFactory implements ModelFactory {
 
         @Override
         public ChatResponse call(Prompt prompt) {
-            return delegate.get().call(prompt);
+            return delegate.get().call(openAiPrompt(prompt));
         }
 
         @Override
         public Flux<ChatResponse> stream(Prompt prompt) {
-            return Flux.defer(() -> delegate.get().stream(withStreamUsage(prompt)));
+            return Flux.defer(() -> delegate.get().stream(withStreamUsage(openAiPrompt(prompt))));
+        }
+
+        /**
+         * ChatClient seeds every request with generic options when it has no defaults of its own, and the OpenAI model
+         * casts request options to {@link OpenAiChatOptions}. Replace generic options with the route's options,
+         * keeping the temperature if the caller set one.
+         */
+        private Prompt openAiPrompt(Prompt prompt) {
+            ChatOptions requested = prompt.getOptions();
+            if (requested == null || requested instanceof OpenAiChatOptions) {
+                return prompt;
+            }
+            if (!(delegate.get().getOptions() instanceof OpenAiChatOptions route)) {
+                return prompt;
+            }
+            var builder = route.mutate();
+            if (requested.getTemperature() != null) {
+                builder.temperature(requested.getTemperature());
+            }
+            return new Prompt(prompt.getInstructions(), builder.build());
         }
     }
 
