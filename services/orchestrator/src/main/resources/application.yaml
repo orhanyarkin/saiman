@@ -4,6 +4,12 @@ spring:
   threads:
     virtual:
       enabled: true
+  config:
+    # Docker/compose secrets (ADR-0009): one file per secret, e.g. /run/secrets/x402.client.private-key.
+    import: "optional:configtree:${saiman.secrets-dir:/run/secrets/}"
+  mvc:
+    problemdetails:
+      enabled: true
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/saiman}
     username: ${SPRING_DATASOURCE_USERNAME:saiman}
@@ -17,6 +23,31 @@ spring:
 
 server:
   port: 8080
+
+saiman:
+  orchestrator:
+    seller:
+      base-url: ${SAIMAN_SELLER_BASE_URL:http://seller-api:8081} # config only; no tool takes a URL
+    # Spend control (ADR-0013). USDC atomic units (6 decimals): 10000 = 0.01 USDC.
+    spend:
+      daily-cap-atomic: 1000000
+      default-run-budget-atomic: 50000
+      max-run-budget-atomic: 200000
+      approval-threshold-atomic: 20000 # strictly above this, a payment waits for a human
+      approval-timeout: 5m
+      max-paid-calls-per-run: 4
+      max-tool-calls-per-run: 6
+    runs:
+      max-concurrent: 2 # the seller allows 2 in-flight runs per payer; the orchestrator is one wallet
+      llm-budget-usd-micros: 150000
+
+x402:
+  client:
+    # private-key comes only from the mounted secret file (configtree above), never from here.
+    max-amount-per-request: 20000
+    allowed-pay-to: ${X402_SELLER_PAYTO_ADDRESS:}
+    # allowed-plaintext-hosts is deliberately not defaulted here: only the compose environment sets
+    # it (X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS=seller-api), so any other deployment pays over https only.
 
 management:
   endpoints:
