@@ -61,6 +61,7 @@ public final class FakeFacilitator implements AutoCloseable {
     private final AtomicReference<@Nullable String> injectedSettleFailureReason = new AtomicReference<>();
     private final AtomicReference<Boolean> injectedSettleMissingTransaction = new AtomicReference<>(false);
     private final AtomicLong injectedSettleDelayMillis = new AtomicLong();
+    private final AtomicLong injectedVerifyDelayMillis = new AtomicLong();
     private final AtomicLong txHashCounter = new AtomicLong();
     private final AtomicLong verifyCallCount = new AtomicLong();
     private final AtomicLong settleCallCount = new AtomicLong();
@@ -113,6 +114,14 @@ public final class FakeFacilitator implements AutoCloseable {
     }
 
     /**
+     * Delays every {@code /verify} response by {@code delay}, e.g. to make a verified
+     * authorization reach the handler with less of its window left.
+     */
+    public void injectVerifyDelay(Duration delay) {
+        injectedVerifyDelayMillis.set(delay.toMillis());
+    }
+
+    /**
      * Forces the next {@code count} {@code /verify} calls to answer with a raw HTTP {@code 500}
      * (no JSON body), to exercise the client's retry-on-5xx behaviour. Each call consumes one.
      */
@@ -134,6 +143,7 @@ public final class FakeFacilitator implements AutoCloseable {
         injectedSettleFailureReason.set(null);
         injectedSettleMissingTransaction.set(false);
         injectedSettleDelayMillis.set(0);
+        injectedVerifyDelayMillis.set(0);
         injectedVerifyServerErrorCount.set(0);
         injectedVerifyClientErrorCount.set(0);
     }
@@ -228,6 +238,10 @@ public final class FakeFacilitator implements AutoCloseable {
                 return;
             }
         } else {
+            long delayMillis = injectedVerifyDelayMillis.get();
+            if (delayMillis > 0) {
+                sleepUninterruptibly(delayMillis);
+            }
             String forcedInvalid = injectedVerifyInvalidReason.get();
             if (forcedInvalid != null) {
                 writeJson(exchange, 200, codec.writeJson(verifyFailure(authorization, forcedInvalid)));
