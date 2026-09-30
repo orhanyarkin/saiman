@@ -4,6 +4,23 @@ spring:
   threads:
     virtual:
       enabled: true
+  config:
+    # Docker/compose secrets (ADR-0009): one file per secret, e.g. /run/secrets/mkk_credentials.
+    import: "optional:configtree:${saiman.secrets-dir:/run/secrets/}"
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/saiman}
+    username: ${SPRING_DATASOURCE_USERNAME:saiman}
+    password: ${SPRING_DATASOURCE_PASSWORD:saiman}
+    hikari:
+      # pgvector's type and operators live in "public"; the service's own tables in "ingest".
+      connection-init-sql: SET search_path TO ingest, public
+  flyway:
+    schemas: ingest
+    default-schema: ingest
+    create-schemas: true
+  mvc:
+    problemdetails:
+      enabled: true
 
 server:
   port: 8083
@@ -35,3 +52,19 @@ management:
 # Telemetry export is off unless the runtime turns it on, so tests and a plain `bootRun` never
 # reach for a collector. Compose sets OTEL_EXPORTER_OTLP_ENDPOINT (Boot 4.1 maps it to the
 # trace exporter) and MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED=true (ADR-0006).
+
+saiman:
+  ingest:
+    mkk:
+      base-url: https://apigwdev.mkk.com.tr/api/vyk
+      credentials: ${mkk_credentials:}
+      rate-per-minute: 5
+      empty-page-step: 5000
+    tickers: >-
+      THYAO,ASELS,GARAN,AKBNK,ISCTR,YKBNK,EREGL,KCHOL,SAHOL,BIMAS,TUPRS,SISE,FROTO,TOASO,PGSUS,TCELL,ARCLK,PETKM,SASA,KRDMD
+    classes: ODA,DG
+    chunk:
+      target-tokens: 400
+    max-attempts: 3
+    backfill:
+      enabled: false
