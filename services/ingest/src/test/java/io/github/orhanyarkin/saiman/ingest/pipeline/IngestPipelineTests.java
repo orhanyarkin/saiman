@@ -211,6 +211,7 @@ class IngestPipelineTests extends IngestIntegrationTests {
         MKK.clearAlways("/disclosureDetail/1101500");
         client.post()
                 .uri("/internal/v1/admin/retry-dlq")
+                .header("X-Saiman-Internal", "1")
                 .exchange()
                 .expectStatus()
                 .isAccepted()

@@ -167,6 +167,7 @@ class RobustnessTests extends IngestIntegrationTests {
 
             client.post()
                     .uri("/internal/v1/admin/retry-dlq")
+                    .header("X-Saiman-Internal", "1")
                     .exchange()
                     .expectStatus()
                     .isEqualTo(409)
@@ -176,12 +177,23 @@ class RobustnessTests extends IngestIntegrationTests {
 
         client.post()
                 .uri("/internal/v1/admin/retry-dlq")
+                .header("X-Saiman-Internal", "1")
                 .exchange()
                 .expectStatus()
                 .isAccepted()
                 .expectBody()
                 .jsonPath("$.reopened")
                 .isEqualTo(0);
+    }
+
+    @Test
+    void theInternalGuardIsWiredIn() {
+        client.post()
+                .uri("/internal/v1/admin/retry-dlq")
+                .contentType(MediaType.TEXT_PLAIN)
+                .exchange()
+                .expectStatus()
+                .isForbidden();
     }
 
     @Test
