@@ -7,6 +7,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.context.ApplicationEventPublisher;
@@ -124,6 +125,24 @@ public class ApprovalService {
             return approval.status();
         }
         return apply(approval, ApprovalStatus.EXPIRED).status();
+    }
+
+    /**
+     * Expires every PENDING approval of a run that has ended (T4 hook for the run lifecycle), and
+     * with it the AWAITING_APPROVAL intent: a stale approval can no longer be approved. Locks the
+     * approval rows in id order, then their intents (the usual approval -> payment_intent order).
+     *
+     * @return how many approvals were expired
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int expirePendingForRun(UUID runId) {
+        List<ApprovalView> pending = jdbc.sql("SELECT " + COLUMNS + " FROM approval"
+                        + " WHERE run_id = :runId AND status = 'PENDING' ORDER BY id FOR UPDATE")
+                .param("runId", runId)
+                .query(ApprovalService::map)
+                .list();
+        pending.forEach(approval -> apply(approval, ApprovalStatus.EXPIRED));
+        return pending.size();
     }
 
     private ApprovalView apply(ApprovalView approval, ApprovalStatus status) {

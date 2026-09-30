@@ -62,7 +62,8 @@ public abstract class SpendTestSupport {
 
     @BeforeEach
     void resetState() {
-        jdbc.sql("TRUNCATE approval, payment_intent, run_event, spend_day, run").update();
+        jdbc.sql("TRUNCATE tool_result, approval, payment_intent, run_event, spend_day, run")
+                .update();
         seller.reset();
         signer.reset();
         PaymentTestAccess.resetCircuitBreaker(client);
