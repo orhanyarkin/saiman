@@ -121,14 +121,15 @@ secrets-from-dotenv: ## HUMAN ONLY: copy OPENAI_API_KEY from .env into secrets/o
 
 ingest-backfill: ## Run ingest locally in backfill mode against `make infra-up` (needs secrets/mkk_credentials + openai_api_key).
 	@bash -c '(exec 3<>/dev/tcp/127.0.0.1/5432)' 2>/dev/null || { echo "Postgres is not reachable on 127.0.0.1:5432; run 'make infra-up' first." >&2; exit 1; }
-	SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=saiman SPRING_DATASOURCE_PASSWORD=saiman SPRING_DATA_REDIS_URL=redis://localhost:$${VALKEY_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=$(CURDIR)/secrets/"
+	scripts/prepare-ingest-secrets.sh $(CURDIR)/secrets $(CURDIR)/build/ingest-secrets
+	SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=saiman SPRING_DATASOURCE_PASSWORD=saiman SPRING_DATA_REDIS_URL=redis://localhost:$${VALKEY_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=$(CURDIR)/build/ingest-secrets/"
 
 ingest-status: ## Show per-ticker ingest status from the running ingest container (loopback only).
 	@out=$$(curl -sf $(INGEST_URL)/internal/v1/tickers) || { echo "ingest not reachable on $(INGEST_URL) (is 'make up' running?)" >&2; exit 1; }; \
 	if command -v jq >/dev/null 2>&1; then printf '%s\n' "$$out" | jq .; else printf '%s\n' "$$out"; fi
 
 ingest-retry-dlq: ## Re-drive dead-lettered ingest documents (POST /internal/v1/admin/retry-dlq).
-	curl -sf -X POST $(INGEST_URL)/internal/v1/admin/retry-dlq
+	curl -sf -X POST -H 'X-Saiman-Internal: 1' $(INGEST_URL)/internal/v1/admin/retry-dlq
 
 rag-ask: x402-publish-local ## PAY for a RAG question (test USDC). Override RAG_URL / RAG_QUESTION. Needs the console buyer's --method/--json-file flags (seller-api task).
 	@command -v jq >/dev/null 2>&1 || { echo "rag-ask needs jq to build the request body; install jq." >&2; exit 1; }
