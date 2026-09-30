@@ -14,6 +14,17 @@ M1 (x402 starter + first paid endpoint) is done and merged (PR #10).
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-09-30 — M2 T7: live backfill, idempotent re-run, paid RAG answer on Base Sepolia
+- **Corpus:** live backfill of the MKK KAP API (frozen 2023 snapshot, ADR-0010): 16 tickers, 941 documents, **5810 chunks** (acceptance: >= 5k). GARAN, AKBNK, ISCTR, YKBNK are not in MKK's company list (banks are probably a separate member type) and are reported as `unknownTickers`; the other 16 of the 20 default tickers are indexed.
+- **Idempotency (live):** a second backfill run finished with `outcomes={}`, **0 embedding calls**, and chunk count unchanged (5810). Done cursors skip indexed tickers; the content-hash check skips unchanged documents.
+- **Full stack:** `make up` (all five images, file secrets, `SELLER_DISCLOSURES_SOURCE=rag`) healthy; the containerised ingest serves the same database.
+- **Paid answer (acceptance):** `make rag-ask` paid 0.02 test USDC per question on Base Sepolia and returned HTTP 200 with grounded Turkish answers and **8 citations** (chunk ids `kap:<index>:<nnnn>`, real `kap.org.tr/tr/Bildirim/<index>` URLs). Settlement txs: `0xada610ce...5079e` (THYAO), `0x07532eda...435fd`, `0x976240db...12d7` (ASELS; the last one was re-asked only to read the citations).
+- **Bugs found only by the live smoke test (fixed, `801988e` and follow-ups):** (1) every chat call threw `ClassCastException`: `ChatClient` seeds generic `ChatOptions`, `OpenAiChatModel` casts them to `OpenAiChatOptions`; the router's lazy model now substitutes the route's options, with a regression test against a stub OpenAI server (the earlier 401-path test could not see it); (2) `gpt-5-mini` spent the 1500-token limit on hidden reasoning and returned an empty reply (502), then hit the 20 s timeout at a higher limit: routes now carry `reasoning-effort` (`minimal` tier0, `low` tier1) and limits of 2000/3000/6000 tokens. `gpt-5-mini` is verified live; `gpt-5-nano`, `gpt-5` and `gpt-5-chat` ids are still unverified.
+- **Tooling fixes:** `make rag-ask` writes its request file under the buyer's working directory (the `--json-file` restriction rejected the repo-root path); the console buyer prints paid bodies up to 8 KB instead of 200 characters; `GroundedGenerator` logs the top stack frames of a failed model call (never the message).
+- A failed paid call (503/502 before the fixes) did not settle: the claim is kept, the payer was not charged on-chain (no tx hash printed) — consistent with the T4 "work done, non-2xx" design.
+- **Next:** milestone-end security audit (opus, running), THREAT_MODEL update for findings, `make test && make lint`, ask the human before pushing, PR for `m2-rag`.
+
+
 ### 2026-09-29 — M1 closing: milestone-end security audit
 
 **What changed**
