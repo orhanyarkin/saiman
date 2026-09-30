@@ -3,3 +3,14 @@ management:
   opentelemetry:
     # Keep a developer's exported OTEL_* variables from sending test telemetry to a collector.
     map-environment-variables: false
+
+saiman:
+  ingest:
+    mkk:
+      # base-url is set per test run by IngestIntegrationTests (fake MKK server)
+      credentials: c3ludGhldGljOm1hcmtlci1OT1QtQS1TRUNSRVQ=
+      rate-per-minute: 600000
+      empty-page-step: 2000
+      retry-wait: 1ms
+      retry-attempts: 4
+    tickers: THYAO,ASELS,NOSUCH

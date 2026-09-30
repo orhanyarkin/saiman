@@ -1,3 +1,4 @@
 - [Boot 4.1 modularization gotchas](boot41-modularization-gotchas.md) — HealthEndpoint/TestRestTemplate/RestTemplateBuilder moved packages; superseded by boot4-test-standard.md
 - [Repo conventions for ai-engineer](repo-conventions.md) — never hardcode a coordinate to dodge a missing catalog entry; stray Eclipse metadata files appear on any gradle run, don't `git add -A`
 - [Boot 4 test standard](boot4-test-standard.md) — RestTestClient, Testcontainers as beans, *Tests naming; supersedes older test-client notes
+- [Ingest M2 learnings](ingest-m2-learnings.md) — ICU collation OK, search_path, OR lexical query, circuit-breaker test trap, sandbox 'github' quirk

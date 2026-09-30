@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.client.RestTestClient;
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureRestTestClient
+@org.springframework.context.annotation.Import({TestcontainersConfiguration.class, TestModelRouterConfiguration.class})
 class ActuatorEndpointsTests {
 
     @Autowired

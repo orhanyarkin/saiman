@@ -3,7 +3,26 @@ plugins {
 }
 
 dependencies {
-    implementation(libs.spring.boot.starter.webmvc)
+    implementation(platform(libs.spring.ai.bom))
+    implementation(project(":libs:shared"))
+    implementation(project(":libs:model-router"))
 
+    implementation(libs.spring.boot.starter.webmvc)
+    implementation(libs.spring.boot.starter.restclient)
+    implementation(libs.spring.boot.starter.jdbc)
+    implementation(libs.spring.boot.starter.flyway)
+    implementation(libs.flyway.database.postgresql)
+    implementation(libs.spring.ai.pgvector.store)
+    implementation(libs.jsoup)
+    implementation(libs.resilience4j.ratelimiter)
+    implementation(libs.resilience4j.retry)
+    implementation(libs.resilience4j.circuitbreaker)
+    implementation(libs.datasource.micrometer.spring.boot)
+    runtimeOnly(libs.postgresql)
+    annotationProcessor(libs.spring.boot.configuration.processor)
+
+    testImplementation(platform(libs.spring.ai.bom))
     testImplementation(libs.spring.boot.starter.webmvc.test)
+    testImplementation(libs.spring.boot.testcontainers)
+    testImplementation(libs.testcontainers.postgresql)
 }
