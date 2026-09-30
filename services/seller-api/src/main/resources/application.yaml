@@ -41,7 +41,10 @@ seller:
     max-in-flight-per-payer: 2
     max-runs-per-payer-per-hour: 30
     max-unsettled-per-day: 100 # runs started whose payment has not settled, all payers, per UTC day
-    deadline: 25s # end-to-end budget per request; the LLM endpoints demand a 45 s authorization window
+    # End-to-end budget per request, cut to (validBefore - now - facilitator read timeout - 5 s) when the
+    # authorization expires sooner. Startup fails unless deadline + read timeout (15 s) + 5 s <= 45 s,
+    # the authorization window the LLM endpoints demand.
+    deadline: 25s
     single-flight-wait: 5s
     negative-cache-ttl: 120s
   http:
@@ -55,6 +58,7 @@ saiman:
   router:
     openai:
       # One attempt within 20 s: the request deadline is 25 s and a retried call would be billed twice.
+      # A model call is not started with less than this left before the deadline (must be < deadline).
       timeout: 20s
       max-retries: 0
 

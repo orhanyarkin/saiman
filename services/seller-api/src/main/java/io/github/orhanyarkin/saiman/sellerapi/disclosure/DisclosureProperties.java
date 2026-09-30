@@ -11,8 +11,11 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *     read by {@code @ConditionalOnProperty}, kept here so it is documented in one place
  * @param summaryCacheTtl how long a generated summary stays cached; the cache key already contains
  *     the corpus version, so this only bounds staleness of the wording, not of the facts
+ * @param tickerCacheTtl how long the free {@code GET /v1/tickers} catalogue is served from memory
+ *     before ingest is asked again
  */
 @ConfigurationProperties("seller.disclosures")
 public record DisclosureProperties(
         @DefaultValue("fixture") String source,
-        @DefaultValue("6h") Duration summaryCacheTtl) {}
+        @DefaultValue("6h") Duration summaryCacheTtl,
+        @DefaultValue("60s") Duration tickerCacheTtl) {}

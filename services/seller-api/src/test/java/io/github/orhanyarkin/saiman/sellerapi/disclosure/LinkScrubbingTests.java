@@ -53,8 +53,18 @@ class LinkScrubbingTests {
 
     @Test
     void modelReplyTextIsScrubbedAtParse() {
-        GroundedGenerator generator =
-                new GroundedGenerator(null, JsonMapper.builder().build(), null);
+        GroundedGenerator generator = new GroundedGenerator(
+                null,
+                JsonMapper.builder().build(),
+                null,
+                io.github.orhanyarkin.saiman.modelrouter.RouterProperties.defaults(),
+                new io.github.orhanyarkin.saiman.sellerapi.llm.LlmRunProperties(
+                        2,
+                        30,
+                        100,
+                        java.time.Duration.ofSeconds(60),
+                        java.time.Duration.ofSeconds(5),
+                        java.time.Duration.ofSeconds(120)));
 
         GroundedGenerator.Reply reply = generator.parse(
                 "{\"answer\":\"See [x](http://evil) and //evil/pay and evil.com/pay.\",\"citedChunkIds\":[\"kap:1:0000\"]}",

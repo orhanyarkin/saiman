@@ -13,8 +13,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param maxUnsettledPerDay model runs per UTC day that started but whose payment has not settled
  *     (all payers together); a settled payment gives its slot back
  * @param deadline end-to-end time budget of one request that runs the model; the model is not
- *     called past it and a late answer is never returned. Must stay well below the smallest
- *     authorization window the LLM endpoints accept
+ *     called past it and a late answer is never returned. Cut short per request when the payer's
+ *     authorization expires sooner ({@link RequestDeadlines}); {@code deadline +
+ *     x402.server.facilitator.read-timeout + 5 s} must fit in {@link
+ *     #MIN_AUTHORIZATION_WINDOW_SECONDS} (checked at startup)
  * @param singleFlightWait how long a request that lost the summary-generation race waits for the
  *     winner's result
  * @param negativeCacheTtl how long a failed summary generation is remembered, so it is not retried
@@ -32,7 +34,7 @@ public record LlmRunProperties(
     /**
      * The smallest authorization window ({@code validBefore - now}) the LLM endpoints accept, so the
      * authorization can not expire while the handler runs: {@code deadline} (25 s) plus the settle
-     * call and margin, well inside the 60 s the endpoints offer.
+     * call (facilitator read timeout, 15 s) and a 5 s margin, inside the 60 s the endpoints offer.
      */
     public static final int MIN_AUTHORIZATION_WINDOW_SECONDS = 45;
 

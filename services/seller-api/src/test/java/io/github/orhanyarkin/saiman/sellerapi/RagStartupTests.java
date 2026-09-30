@@ -70,6 +70,41 @@ class RagStartupTests {
     }
 
     @Test
+    void aDeadlineThatNoLongerFitsTheAuthorizationWindowFailsStartup() {
+        // 26 s + the 15 s facilitator read timeout + 5 s > the 45 s window the LLM endpoints demand.
+        assertStartupFails("seller.llm.deadline", "--seller.llm.deadline=26s");
+        // Same rule from the other side: a longer settle call eats into the handler's window.
+        assertStartupFails("seller.llm.deadline", "--x402.server.facilitator.read-timeout=16s");
+    }
+
+    @Test
+    void aModelTimeoutNotShorterThanTheDeadlineFailsStartupInRagMode() {
+        assertStartupFails(
+                "saiman.router.openai.timeout",
+                "--seller.disclosures.source=rag",
+                "--seller.ingest.base-url=http://127.0.0.1:9",
+                "--seller.llm.deadline=10s",
+                "--saiman.router.openai.timeout=10s",
+                "--management.health.redis.enabled=false");
+    }
+
+    private static void assertStartupFails(String expectedMessagePart, String... extraArgs) {
+        String[] args = new String[3 + extraArgs.length];
+        args[0] = "--server.port=0";
+        args[1] = "--x402.server.facilitator.url=" + FACILITATOR.url();
+        args[2] = "--x402.server.pay-to=" + PAY_TO;
+        System.arraycopy(extraArgs, 0, args, 3, extraArgs.length);
+
+        Throwable thrown = assertThrows(RuntimeException.class, () -> app().run(args));
+
+        Throwable root = thrown;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        assertThat(root).isInstanceOf(IllegalStateException.class).hasMessageContaining(expectedMessagePart);
+    }
+
+    @Test
     void aConfigtreeFileNamedOpenaiApiKeyIsTheKeyTheRouterReads(@TempDir Path secrets) throws IOException {
         String marker = "sk-test-CONFIGTREE-MARKER";
         Files.writeString(secrets.resolve("openai_api_key"), marker);

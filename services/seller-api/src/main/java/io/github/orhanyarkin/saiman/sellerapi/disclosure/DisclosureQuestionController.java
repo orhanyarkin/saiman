@@ -1,8 +1,9 @@
 package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 
-import io.github.orhanyarkin.saiman.sellerapi.llm.Deadline;
 import io.github.orhanyarkin.saiman.sellerapi.llm.LlmRunProperties;
+import io.github.orhanyarkin.saiman.sellerapi.llm.RequestDeadlines;
 import io.github.orhanyarkin.x402.server.RequiresPayment;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -19,7 +20,8 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>The model runs before settlement, so this endpoint asks the starter for a long enough
  * authorization window ({@link LlmRunProperties#MIN_AUTHORIZATION_WINDOW_SECONDS}) and answers
- * within a deadline; see {@code UnsettledRunGuard} for the limits on unpaid runs.
+ * within a deadline derived from that authorization ({@link RequestDeadlines}); see {@code
+ * UnsettledRunGuard} for the limits on unpaid runs.
  *
  * <p>Every non-2xx outcome (400 bad ticker or question, 404 unknown ticker, 422 too few
  * citations, 502/503 model or retrieval trouble) is produced here or below, after the starter
@@ -33,11 +35,11 @@ class DisclosureQuestionController {
     private static final String TICKER_PATTERN = "^[A-Z0-9]{3,6}$";
 
     private final DisclosureAnswerService service;
-    private final LlmRunProperties llm;
+    private final RequestDeadlines deadlines;
 
-    DisclosureQuestionController(DisclosureAnswerService service, LlmRunProperties llm) {
+    DisclosureQuestionController(DisclosureAnswerService service, RequestDeadlines deadlines) {
         this.service = service;
-        this.llm = llm;
+        this.deadlines = deadlines;
     }
 
     @PostMapping("/{ticker}/questions")
@@ -47,7 +49,8 @@ class DisclosureQuestionController {
             minWindowSeconds = LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS)
     DisclosureAnswerResponse ask(
             @PathVariable @Pattern(regexp = TICKER_PATTERN) String ticker,
-            @RequestBody @Valid DisclosureQuestionRequest request) {
-        return service.answer(ticker, request.question(), Deadline.after(llm.deadline()));
+            @RequestBody @Valid DisclosureQuestionRequest request,
+            HttpServletRequest http) {
+        return service.answer(ticker, request.question(), deadlines.forRequest(http));
     }
 }

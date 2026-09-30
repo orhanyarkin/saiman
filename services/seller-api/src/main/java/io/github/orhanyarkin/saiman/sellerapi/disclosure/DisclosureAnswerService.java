@@ -42,6 +42,9 @@ class DisclosureAnswerService {
     }
 
     private DisclosureAnswerResponse answerWithSlot(String ticker, String question, Deadline deadline) {
+        // Every answer needs a model call: without time for one, refuse before retrieval spends an
+        // embedding (e.g. an authorization that reached the handler close to its validBefore).
+        generator.requireTimeForModel(deadline);
         boolean indexed = ingest.tickers().stream().anyMatch(t -> ticker.equals(t.ticker()));
         if (!indexed) {
             throw new TickerNotFoundException(ticker);
