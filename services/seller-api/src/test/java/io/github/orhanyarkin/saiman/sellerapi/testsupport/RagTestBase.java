@@ -1,14 +1,18 @@
 package io.github.orhanyarkin.saiman.sellerapi.testsupport;
 
 import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
+import io.github.orhanyarkin.x402.core.Eip3009Authorization;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
 import io.github.orhanyarkin.x402.core.X402Codec;
 import io.github.orhanyarkin.x402.core.X402Headers;
+import io.github.orhanyarkin.x402.evm.Eip3009TypedData;
 import io.github.orhanyarkin.x402.testing.FakeFacilitator;
 import io.github.orhanyarkin.x402.testing.PaymentPayloads;
 import io.github.orhanyarkin.x402.testing.TestWallets;
+import java.time.Instant;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
@@ -16,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -74,8 +79,16 @@ public abstract class RagTestBase {
     @Autowired
     protected SwitchableRouter router;
 
+    @Autowired
+    protected StringRedisTemplate redis;
+
     @BeforeEach
     void resetFakes() {
+        // Summary cache, single-flight locks, negative cache and run-guard counters: per-test state.
+        Set<String> keys = redis.keys("seller:*");
+        if (!keys.isEmpty()) {
+            redis.delete(keys);
+        }
         FACILITATOR.resetInjectedFailures();
         FACILITATOR.resetCallCounts();
         INGEST.reset();
@@ -96,6 +109,22 @@ public abstract class RagTestBase {
     /** A fresh, validly signed {@code PAYMENT-SIGNATURE} header value for {@code price} atomic units. */
     protected final String payment(String price) {
         return PaymentPayloads.header(codec, PaymentPayloads.build(TestWallets.PAYER, offer(price)));
+    }
+
+    /**
+     * A fresh, validly signed header whose authorization is valid for exactly {@code windowSeconds}
+     * more seconds (the default {@link #payment} uses the offer's 60).
+     */
+    protected final String paymentWithWindow(String price, long windowSeconds) {
+        long now = Instant.now().getEpochSecond();
+        Eip3009Authorization authorization = new Eip3009Authorization(
+                TestWallets.PAYER.address(),
+                PAY_TO,
+                price,
+                Long.toString(now - 5),
+                Long.toString(now + windowSeconds),
+                Eip3009TypedData.randomNonce());
+        return PaymentPayloads.header(codec, PaymentPayloads.sign(TestWallets.PAYER, offer(price), authorization));
     }
 
     protected final RestTestClient.ResponseSpec getPaid(String uri, String price) {

@@ -110,31 +110,46 @@ final class BuyCommand {
 
     /**
      * Picks the request body from {@code --json} or {@code --json-file} (at most one). A file body
-     * is read as UTF-8, must be an absolute path to a regular file of at most {@value
-     * #MAX_JSON_FILE_BYTES} bytes. Failure messages state the rule only, never the path's content
-     * or the file's content.
+     * must be a regular file of at most {@value #MAX_JSON_FILE_BYTES} bytes, located under the
+     * current working directory (symlinks and {@code ..} resolved first), and never a dotfile, a
+     * file below a dot-directory or a {@code secrets} directory, or a {@code *.key} / {@code *.pem}
+     * file: the file is POSTed to the target URL, so this option must not be usable to exfiltrate
+     * credentials. Failure messages state the rule only.
      *
      * @return the body, or {@code null} if neither option was given
      * @throws IllegalArgumentException if both are given or the file is not acceptable
      */
     static @Nullable String resolveJsonBody(@Nullable String inlineJson, @Nullable String jsonFile) {
+        return resolveJsonBody(inlineJson, jsonFile, Path.of("").toAbsolutePath());
+    }
+
+    static @Nullable String resolveJsonBody(
+            @Nullable String inlineJson, @Nullable String jsonFile, Path workingDirectory) {
         if (inlineJson != null && jsonFile != null) {
             throw new IllegalArgumentException("use either --json or --json-file, not both");
         }
         if (jsonFile == null) {
             return inlineJson;
         }
-        Path path = Path.of(jsonFile);
-        if (!path.isAbsolute()) {
-            throw new IllegalArgumentException("--json-file must be an absolute path");
-        }
         try {
-            if (!Files.isRegularFile(path) || Files.size(path) > MAX_JSON_FILE_BYTES) {
-                throw new IllegalArgumentException(
-                        "--json-file must be a regular file of at most " + MAX_JSON_FILE_BYTES + " bytes");
+            Path root = workingDirectory.toRealPath();
+            Path real = root.resolve(jsonFile).toRealPath();
+            if (!real.startsWith(root) || !Files.isRegularFile(real) || Files.size(real) > MAX_JSON_FILE_BYTES) {
+                throw new IllegalArgumentException("--json-file must be a regular file of at most "
+                        + MAX_JSON_FILE_BYTES
+                        + " bytes under the current working directory");
             }
-            // Strict decoding: malformed UTF-8 is an error rather than silently replaced.
-            byte[] bytes = Files.readAllBytes(path);
+            for (Path segment : root.relativize(real)) {
+                String name = segment.toString().toLowerCase(java.util.Locale.ROOT);
+                if (name.startsWith(".") || name.equals("secrets")) {
+                    throw new IllegalArgumentException("--json-file must not be a dotfile or under secrets/");
+                }
+            }
+            String fileName = real.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+            if (fileName.endsWith(".key") || fileName.endsWith(".pem")) {
+                throw new IllegalArgumentException("--json-file must not be a key or certificate file");
+            }
+            byte[] bytes = Files.readAllBytes(real);
             return StandardCharsets.UTF_8
                     .newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
@@ -142,7 +157,9 @@ final class BuyCommand {
                     .decode(ByteBuffer.wrap(bytes))
                     .toString();
         } catch (IOException e) {
-            throw new IllegalArgumentException("--json-file could not be read as UTF-8");
+            // Missing files land here too (toRealPath), as does malformed UTF-8.
+            throw new IllegalArgumentException(
+                    "--json-file must be a readable UTF-8 regular file under the current working directory");
         }
     }
 

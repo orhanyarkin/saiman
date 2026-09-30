@@ -157,6 +157,7 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
         } catch (RuntimeException | IOException | ServletException dispatchFailure) {
             attempt.outcome("dispatch_error");
             observation.error(dispatchFailure);
+            discardHandlerOutput(wrappedResponse, headerSnapshot);
             throw dispatchFailure;
         } finally {
             observation.lowCardinalityKeyValue(X402ObservationKeys.OUTCOME, attempt.outcome());
@@ -172,6 +173,24 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
             if (!request.isAsyncStarted()) {
                 wrappedResponse.copyBodyToResponse();
             }
+        }
+    }
+
+    /**
+     * A handler that fails with an exception no advice maps must not leak what it set before
+     * failing (headers, cookies, buffered body) into the container's error response: headers set on
+     * the wrapper reach the real response immediately. Best effort -- a committed response cannot
+     * be reset, and the nonce claim stays held either way.
+     */
+    private static void discardHandlerOutput(
+            ContentCachingResponseWrapper wrappedResponse, Map<String, List<String>> headerSnapshot) {
+        try {
+            if (!wrappedResponse.isCommitted()) {
+                wrappedResponse.reset();
+                restoreHeaders(wrappedResponse, headerSnapshot);
+            }
+        } catch (RuntimeException ignored) {
+            // the original failure is what the caller must see
         }
     }
 
@@ -208,6 +227,13 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
         if (status < 200 || status >= 300) {
             // The handler itself rejected the request (e.g. 404 unknown ticker) or redirected
             // (3xx): content is only ever delivered via a 2xx, so neither is charged for.
+            if (attempt.workDone()) {
+                // The handler reported (X402PaymentContext#markWorkDone) that it already spent
+                // non-refundable resources for this request: keep the claim so the same
+                // authorization cannot be replayed to buy another free run. Nothing is settled.
+                attempt.outcome("not_charged_work_done");
+                return;
+            }
             nonceStore.release(attempt.nonceKey(), attempt.claimToken());
             attempt.outcome("not_charged");
             return;

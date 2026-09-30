@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 
 import io.github.orhanyarkin.saiman.modelrouter.DataClass;
 import io.github.orhanyarkin.saiman.modelrouter.Tier;
+import io.github.orhanyarkin.saiman.sellerapi.llm.Deadline;
 import io.github.orhanyarkin.saiman.sellerapi.retrieval.IngestClient;
 import io.github.orhanyarkin.saiman.shared.retrieval.RetrieveRequest;
 import io.github.orhanyarkin.saiman.shared.retrieval.RetrieveResponse;
@@ -17,8 +18,11 @@ import org.springframework.stereotype.Service;
  * cited summary.
  *
  * <p>Retrieval runs on every call because its {@code corpusVersion} is the cache key; a cache hit
- * therefore skips the model call, not the (cheap) retrieval. Ingest or model trouble surfaces as
- * an exception mapped to a non-2xx response, never as fixture data inside a paid response.
+ * therefore skips the model call, not the (cheap) retrieval. Unknown tickers are refused before
+ * retrieval (which embeds the query and is paid). Concurrent misses for the same key share one
+ * generation and a failed generation is remembered briefly (see {@link
+ * DisclosureSummaryCache#getOrGenerate}). Ingest or model trouble surfaces as an exception mapped
+ * to a non-2xx response, never as fixture data inside a paid response.
  */
 @Service
 @ConditionalOnProperty(name = "seller.disclosures.source", havingValue = "rag")
@@ -45,23 +49,22 @@ class RagDisclosureSummaryService implements DisclosureSummaryService {
     }
 
     @Override
-    public DisclosureSummaryResponse summaryFor(String ticker) {
+    public DisclosureSummaryResponse summaryFor(String ticker, Deadline deadline) {
+        if (ingest.tickers().stream().noneMatch(t -> ticker.equals(t.ticker()))) {
+            throw new TickerNotFoundException(ticker);
+        }
         RetrieveResponse retrieved = ingest.retrieve(new RetrieveRequest(QUERY, List.of(ticker), TOP_K));
         List<RetrievedChunk> excerpts = GroundedGenerator.usable(retrieved.chunks(), ticker);
         if (excerpts.isEmpty()) {
             throw new TickerNotFoundException(ticker);
         }
-        String version = retrieved.corpusVersion();
-        return cache.get(ticker, version).orElseGet(() -> {
-            DisclosureSummaryResponse summary = generate(ticker, excerpts);
-            cache.put(ticker, version, summary);
-            return summary;
-        });
+        return cache.getOrGenerate(
+                ticker, retrieved.corpusVersion(), deadline, () -> generate(ticker, excerpts, deadline));
     }
 
-    private DisclosureSummaryResponse generate(String ticker, List<RetrievedChunk> excerpts) {
+    private DisclosureSummaryResponse generate(String ticker, List<RetrievedChunk> excerpts, Deadline deadline) {
         GroundedGenerator.Reply reply =
-                generator.generate(Tier.TIER1, DataClass.PUBLIC, "summary", excerpts, "TASK", TASK);
+                generator.generate(Tier.TIER1, DataClass.PUBLIC, "summary", excerpts, "TASK", TASK, deadline);
         List<RetrievedChunk> cited = GroundedGenerator.validCitations(excerpts, reply.citedChunkIds());
         if (cited.isEmpty()) {
             throw new InsufficientCitationsException();

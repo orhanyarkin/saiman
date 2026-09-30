@@ -581,6 +581,125 @@ class RequiresPaymentIntegrationTests {
         assertThat(RecordingEventListener.failed.get(0).errorReason()).isEqualTo("insufficient_funds");
     }
 
+    @Test
+    void workDone422KeepsTheClaimSoTheSameAuthorizationCannotBeReplayed() {
+        PaymentPayload payload = PaymentPayloads.build(TestWallets.PAYER, offer());
+        String header = PaymentPayloads.header(codec, payload);
+        PaidTestController.workRuns.set(0);
+
+        client.get()
+                .uri("/paid/work-done-422")
+                .header(X402Headers.PAYMENT_SIGNATURE, header)
+                .exchange()
+                .expectStatus()
+                .isEqualTo(422);
+        client.get()
+                .uri("/paid/work-done-422")
+                .header(X402Headers.PAYMENT_SIGNATURE, header)
+                .exchange()
+                .expectStatus()
+                .isEqualTo(402);
+
+        assertThat(PaidTestController.workRuns.get()).isEqualTo(1);
+        assertThat(FACILITATOR.settleCallCount()).isZero();
+    }
+
+    @Test
+    void non2xxWithoutTheWorkDoneMarkStillReleasesTheClaim() {
+        PaymentPayload payload = PaymentPayloads.build(TestWallets.PAYER, offer());
+        String header = PaymentPayloads.header(codec, payload);
+
+        client.get()
+                .uri("/paid/plain-422")
+                .header(X402Headers.PAYMENT_SIGNATURE, header)
+                .exchange()
+                .expectStatus()
+                .isEqualTo(422);
+        client.get()
+                .uri("/paid/plain-422")
+                .header(X402Headers.PAYMENT_SIGNATURE, header)
+                .exchange()
+                .expectStatus()
+                .isEqualTo(422);
+    }
+
+    @Test
+    void handlerSeesTheRecoveredPayerThroughThePaymentContext() {
+        PaymentPayload payload = PaymentPayloads.build(TestWallets.PAYER, offer());
+
+        client.get()
+                .uri("/paid/who")
+                .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, payload))
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody(String.class)
+                .isEqualTo(TestWallets.PAYER.address());
+    }
+
+    @Test
+    void windowShorterThanTheHandlersMinWindowIsRejectedWithoutCallingTheFacilitator() {
+        long now = Instant.now().getEpochSecond();
+        // 30 s is above the starter default (15 + 5) but below the handler's 45 s minimum.
+        PaymentPayload shortWindow = PaymentPayloads.sign(TestWallets.PAYER, offer(), windowOf(now, 30));
+        long verifyCalls = FACILITATOR.verifyCallCount();
+
+        client.get()
+                .uri("/paid/strict-window")
+                .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, shortWindow))
+                .exchange()
+                .expectStatus()
+                .isEqualTo(402);
+        assertThat(FACILITATOR.verifyCallCount()).isEqualTo(verifyCalls);
+
+        // The same short window is fine on a handler without a minimum, and 55 s passes the strict one.
+        client.get()
+                .uri("/paid/ok")
+                .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, shortWindow))
+                .exchange()
+                .expectStatus()
+                .isOk();
+        PaymentPayload longWindow = PaymentPayloads.sign(TestWallets.PAYER, offer(), windowOf(now, 55));
+        client.get()
+                .uri("/paid/strict-window")
+                .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, longWindow))
+                .exchange()
+                .expectStatus()
+                .isOk();
+    }
+
+    @Test
+    void unmappedRuntimeExceptionFromAHandlerNeverSettlesAndLeaksNoHandlerHeaders() {
+        RecordingEventListener.settled.clear();
+        PaymentPayload payload = PaymentPayloads.build(TestWallets.PAYER, offer());
+
+        client.get()
+                .uri("/paid/boom")
+                .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, payload))
+                .exchange()
+                .expectStatus()
+                .is5xxServerError()
+                .expectHeader()
+                .doesNotExist(X402Headers.PAYMENT_RESPONSE)
+                .expectHeader()
+                .doesNotExist("X-Download-Url")
+                .expectHeader()
+                .doesNotExist("Set-Cookie");
+
+        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(RecordingEventListener.settled).isEmpty();
+    }
+
+    private Eip3009Authorization windowOf(long now, long seconds) {
+        return new Eip3009Authorization(
+                TestWallets.PAYER.address(),
+                offer().payTo(),
+                offer().amount(),
+                Long.toString(now - 5),
+                Long.toString(now + seconds),
+                Eip3009TypedData.randomNonce());
+    }
+
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration
     static class TestApplication {
@@ -659,6 +778,42 @@ class RequiresPaymentIntegrationTests {
             response.setHeader("X-Download-Url", "https://internal.example/secret-file");
             response.addCookie(new jakarta.servlet.http.Cookie("session", "leaked-session-id"));
             return "paid content";
+        }
+
+        static final AtomicInteger workRuns = new AtomicInteger();
+
+        @GetMapping("/paid/work-done-422")
+        @RequiresPayment(price = PRICE)
+        org.springframework.http.ResponseEntity<String> workDone422(jakarta.servlet.http.HttpServletRequest request) {
+            workRuns.incrementAndGet();
+            X402PaymentContext.markWorkDone(request);
+            return org.springframework.http.ResponseEntity.unprocessableEntity().body("no");
+        }
+
+        @GetMapping("/paid/plain-422")
+        @RequiresPayment(price = PRICE)
+        org.springframework.http.ResponseEntity<String> plain422() {
+            return org.springframework.http.ResponseEntity.unprocessableEntity().body("no");
+        }
+
+        @GetMapping("/paid/who")
+        @RequiresPayment(price = PRICE)
+        String who(jakarta.servlet.http.HttpServletRequest request) {
+            return X402PaymentContext.payer(request);
+        }
+
+        @GetMapping("/paid/strict-window")
+        @RequiresPayment(price = PRICE, minWindowSeconds = 45)
+        String strictWindow() {
+            return "paid content";
+        }
+
+        @GetMapping("/paid/boom")
+        @RequiresPayment(price = PRICE)
+        String boom(jakarta.servlet.http.HttpServletResponse response) {
+            response.setHeader("X-Download-Url", "https://internal.example/secret-file");
+            response.addCookie(new jakarta.servlet.http.Cookie("session", "leaked-session-id"));
+            throw new IllegalStateException("boom");
         }
 
         @GetMapping("/paid/flushing")

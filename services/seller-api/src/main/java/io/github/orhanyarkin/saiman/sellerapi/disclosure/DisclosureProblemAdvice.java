@@ -1,5 +1,7 @@
 package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 
+import io.github.orhanyarkin.saiman.sellerapi.llm.RunGuardUnavailableException;
+import io.github.orhanyarkin.saiman.sellerapi.llm.RunLimitExceededException;
 import io.github.orhanyarkin.saiman.sellerapi.retrieval.RetrievalUnavailableException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -25,6 +27,16 @@ class DisclosureProblemAdvice {
 
     @ExceptionHandler(ModelUnavailableException.class)
     ProblemDetail modelUnavailable() {
+        return problem(HttpStatus.SERVICE_UNAVAILABLE, "Answer generation is temporarily unavailable");
+    }
+
+    @ExceptionHandler(RunLimitExceededException.class)
+    ProblemDetail runLimitExceeded() {
+        return problem(HttpStatus.TOO_MANY_REQUESTS, "Too many answers requested right now; retry later");
+    }
+
+    @ExceptionHandler(RunGuardUnavailableException.class)
+    ProblemDetail runGuardUnavailable() {
         return problem(HttpStatus.SERVICE_UNAVAILABLE, "Answer generation is temporarily unavailable");
     }
 

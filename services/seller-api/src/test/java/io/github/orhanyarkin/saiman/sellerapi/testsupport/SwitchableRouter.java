@@ -6,6 +6,7 @@ import io.github.orhanyarkin.saiman.modelrouter.Tier;
 import io.github.orhanyarkin.saiman.modelrouter.testing.FakeChatModel;
 import io.github.orhanyarkin.saiman.modelrouter.testing.FakeEmbeddingModel;
 import io.github.orhanyarkin.saiman.modelrouter.testing.FakeModelRouter;
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.jspecify.annotations.Nullable;
@@ -23,20 +24,36 @@ public final class SwitchableRouter implements ModelRouter {
     private final AtomicReference<@Nullable FakeChatModel> chat = new AtomicReference<>();
     private final AtomicReference<@Nullable Tier> lastTier = new AtomicReference<>();
     private final AtomicReference<@Nullable DataClass> lastDataClass = new AtomicReference<>();
+    private final AtomicReference<@Nullable DelayingChatModel> slow = new AtomicReference<>();
     private final AtomicInteger requests = new AtomicInteger();
 
     /** The model replies with this raw text to every call. */
     public FakeChatModel replyWith(String rawReply) {
         FakeChatModel model = new FakeChatModel(rawReply);
         chat.set(model);
+        slow.set(null);
         delegate.set(new FakeModelRouter(model, new FakeEmbeddingModel(1536)));
         requests.set(0);
         return model;
     }
 
+    /** As {@link #replyWith}, but every model call takes {@code delay} (a slow provider). */
+    public FakeChatModel replyWithDelay(String rawReply, Duration delay) {
+        FakeChatModel model = replyWith(rawReply);
+        slow.set(new DelayingChatModel(model, delay));
+        return model;
+    }
+
+    /** The most model calls that ran at the same time since the last {@link #replyWithDelay}. */
+    public int maxConcurrentModelCalls() {
+        DelayingChatModel model = slow.get();
+        return model == null ? 0 : model.maxConcurrentCalls();
+    }
+
     /** Every router request fails with {@code failure}. */
     public void failWith(RuntimeException failure) {
         chat.set(null);
+        slow.set(null);
         delegate.set(FakeModelRouter.refusingWith(failure));
         requests.set(0);
     }
@@ -67,6 +84,11 @@ public final class SwitchableRouter implements ModelRouter {
         requests.incrementAndGet();
         lastTier.set(tier);
         lastDataClass.set(dataClass);
+        DelayingChatModel delayed = slow.get();
+        if (delayed != null) {
+            // Same behaviour as the fake router's client, plus a provider that takes its time.
+            return ChatClient.create(delayed);
+        }
         return delegate.get().chatClient(tier, dataClass);
     }
 

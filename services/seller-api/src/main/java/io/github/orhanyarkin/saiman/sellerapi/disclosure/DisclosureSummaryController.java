@@ -1,5 +1,7 @@
 package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 
+import io.github.orhanyarkin.saiman.sellerapi.llm.Deadline;
+import io.github.orhanyarkin.saiman.sellerapi.llm.LlmRunProperties;
 import io.github.orhanyarkin.x402.server.RequiresPayment;
 import jakarta.validation.constraints.Pattern;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,14 +33,19 @@ class DisclosureSummaryController {
     private static final String TICKER_PATTERN = "^[A-Z0-9]{3,6}$";
 
     private final DisclosureSummaryService service;
+    private final LlmRunProperties llm;
 
-    DisclosureSummaryController(DisclosureSummaryService service) {
+    DisclosureSummaryController(DisclosureSummaryService service, LlmRunProperties llm) {
         this.service = service;
+        this.llm = llm;
     }
 
     @GetMapping("/{ticker}/summary")
-    @RequiresPayment(price = "${seller.prices.disclosure-summary}", description = "BIST public disclosure summary")
+    @RequiresPayment(
+            price = "${seller.prices.disclosure-summary}",
+            description = "BIST public disclosure summary",
+            minWindowSeconds = LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS)
     DisclosureSummaryResponse summary(@PathVariable @Pattern(regexp = TICKER_PATTERN) String ticker) {
-        return service.summaryFor(ticker);
+        return service.summaryFor(ticker, Deadline.after(llm.deadline()));
     }
 }

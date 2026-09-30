@@ -155,7 +155,13 @@ public final class RequiresPaymentRegistry implements SmartInitializingSingleton
                 payTo,
                 properties.maxTimeoutSeconds(),
                 Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION));
-        return new Entry(offer, annotation.description());
+        int minWindow = annotation.minWindowSeconds();
+        if (minWindow < 0
+                || minWindow > properties.maxTimeoutSeconds() + RequiresPaymentInterceptor.CLOCK_SKEW.toSeconds()) {
+            throw new IllegalStateException("@RequiresPayment minWindowSeconds must be between 0 and"
+                    + " x402.server.max-timeout-seconds plus the clock skew allowance");
+        }
+        return new Entry(offer, annotation.description(), minWindow);
     }
 
     private String resolve(String value) {
@@ -273,6 +279,9 @@ public final class RequiresPaymentRegistry implements SmartInitializingSingleton
         }
     }
 
-    /** A resolved payment offer for one handler method, plus its human-readable description. */
-    record Entry(PaymentRequirements offer, String description) {}
+    /**
+     * A resolved payment offer for one handler method, plus its human-readable description and the
+     * handler's own minimum authorization window in seconds ({@code 0} = starter default only).
+     */
+    record Entry(PaymentRequirements offer, String description, int minWindowSeconds) {}
 }

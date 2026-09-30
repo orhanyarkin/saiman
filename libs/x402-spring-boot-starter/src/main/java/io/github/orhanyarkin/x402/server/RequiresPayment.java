@@ -36,4 +36,18 @@ public @interface RequiresPayment {
 
     /** Human-readable description of the resource, echoed in the {@code PAYMENT-REQUIRED} body. */
     String description() default "";
+
+    /**
+     * The minimum remaining validity ({@code validBefore - now}), in seconds, an authorization must
+     * have for this handler; a shorter window is rejected with {@code 402} ({@code
+     * window_too_short}) before the facilitator is called.
+     *
+     * <p>{@code 0} (the default) means the starter-wide minimum only (facilitator read timeout + 5
+     * s, so {@code /settle} cannot lose a race against the authorization's expiry). A handler whose
+     * work is slow or costly (e.g. an LLM call that runs <em>before</em> settlement) should ask for
+     * more than its worst-case runtime, so the authorization cannot expire while the handler runs.
+     * The effective minimum is the larger of the two values; a value above the upper bound the
+     * server accepts ({@code x402.server.max-timeout-seconds} + clock skew) fails startup.
+     */
+    int minWindowSeconds() default 0;
 }

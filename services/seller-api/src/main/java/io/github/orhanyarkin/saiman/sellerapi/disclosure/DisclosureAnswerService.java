@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 
 import io.github.orhanyarkin.saiman.modelrouter.DataClass;
 import io.github.orhanyarkin.saiman.modelrouter.Tier;
+import io.github.orhanyarkin.saiman.sellerapi.llm.Deadline;
 import io.github.orhanyarkin.saiman.sellerapi.retrieval.IngestClient;
 import io.github.orhanyarkin.saiman.shared.retrieval.RetrieveRequest;
 import io.github.orhanyarkin.saiman.shared.retrieval.RetrieveResponse;
@@ -34,7 +35,7 @@ class DisclosureAnswerService {
         this.generator = generator;
     }
 
-    DisclosureAnswerResponse answer(String ticker, String question) {
+    DisclosureAnswerResponse answer(String ticker, String question, Deadline deadline) {
         boolean indexed = ingest.tickers().stream().anyMatch(t -> ticker.equals(t.ticker()));
         if (!indexed) {
             throw new TickerNotFoundException(ticker);
@@ -47,7 +48,7 @@ class DisclosureAnswerService {
         }
 
         GroundedGenerator.Reply reply =
-                generator.generate(Tier.TIER1, DataClass.INTERNAL, "answer", excerpts, "QUESTION", question);
+                generator.generate(Tier.TIER1, DataClass.INTERNAL, "answer", excerpts, "QUESTION", question, deadline);
         List<RetrievedChunk> cited = GroundedGenerator.validCitations(excerpts, reply.citedChunkIds());
         if (cited.size() < MIN_CITATIONS) {
             throw new InsufficientCitationsException();
