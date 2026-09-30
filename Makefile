@@ -120,7 +120,7 @@ secrets-from-dotenv: ## HUMAN ONLY: copy OPENAI_API_KEY from .env into secrets/o
 	scripts/secrets-from-dotenv.sh
 
 ingest-backfill: ## Run ingest locally in backfill mode against `make infra-up` (needs secrets/mkk_credentials + openai_api_key).
-	@(exec 3<>/dev/tcp/127.0.0.1/5432) 2>/dev/null || { echo "Postgres is not reachable on 127.0.0.1:5432; run 'make infra-up' first." >&2; exit 1; }
+	@bash -c '(exec 3<>/dev/tcp/127.0.0.1/5432)' 2>/dev/null || { echo "Postgres is not reachable on 127.0.0.1:5432; run 'make infra-up' first." >&2; exit 1; }
 	SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=saiman SPRING_DATASOURCE_PASSWORD=saiman SPRING_DATA_REDIS_URL=redis://localhost:$${VALKEY_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=$(CURDIR)/secrets/"
 
 ingest-status: ## Show per-ticker ingest status from the running ingest container (loopback only).
