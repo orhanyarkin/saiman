@@ -177,6 +177,22 @@ class DisclosureSummaryEndpointTests {
     }
 
     @Test
+    void questionsEndpointDoesNotExistInFixtureMode() {
+        PaymentPayload payload = PaymentPayloads.build(TestWallets.PAYER, offer());
+
+        client.post()
+                .uri("/v1/disclosures/THYAO/questions")
+                .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, payload))
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .body("{\"question\":\"anything\"}")
+                .exchange()
+                .expectStatus()
+                .isNotFound();
+
+        assertThat(FACILITATOR.settleCallCount()).isZero();
+    }
+
+    @Test
     void malformedTickerWithAValidPaymentReturns400AndIsNotCharged() {
         PaymentPayload payload = PaymentPayloads.build(TestWallets.PAYER, offer());
 

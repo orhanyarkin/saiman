@@ -37,9 +37,7 @@ class DisclosureSummaryController {
     }
 
     @GetMapping("/{ticker}/summary")
-    @RequiresPayment(
-            price = "${seller.prices.disclosure-summary}",
-            description = "BIST public disclosure summary (fixture data)")
+    @RequiresPayment(price = "${seller.prices.disclosure-summary}", description = "BIST public disclosure summary")
     DisclosureSummaryResponse summary(@PathVariable @Pattern(regexp = TICKER_PATTERN) String ticker) {
         return service.summaryFor(ticker);
     }
