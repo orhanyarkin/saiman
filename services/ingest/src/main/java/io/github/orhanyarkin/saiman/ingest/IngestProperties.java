@@ -32,6 +32,7 @@ public record IngestProperties(
      * @param retryWait base wait between attempts (jittered, exponential); {@code Retry-After} wins if longer
      * @param maxRetryAfter upper bound on honouring a {@code Retry-After} header
      * @param rateLimiterTimeout how long a call may wait for a rate-limiter permit
+     * @param circuitOpenWait how long the circuit breaker stays open before probing MKK again
      */
     public record Mkk(
             @DefaultValue("https://apigwdev.mkk.com.tr/api/vyk")
@@ -45,7 +46,8 @@ public record IngestProperties(
             @DefaultValue("4") int retryAttempts,
             @DefaultValue("2s") Duration retryWait,
             @DefaultValue("2m") Duration maxRetryAfter,
-            @DefaultValue("1h") Duration rateLimiterTimeout) {
+            @DefaultValue("1h") Duration rateLimiterTimeout,
+            @DefaultValue("30s") Duration circuitOpenWait) {
 
         @Override
         public String toString() {

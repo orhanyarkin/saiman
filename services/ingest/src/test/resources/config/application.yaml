@@ -13,4 +13,5 @@ saiman:
       empty-page-step: 2000
       retry-wait: 1ms
       retry-attempts: 4
+      circuit-open-wait: 300ms
     tickers: THYAO,ASELS,NOSUCH

@@ -71,7 +71,7 @@ public class RecordingEmbeddingModel implements EmbeddingModel {
         return DIMENSIONS;
     }
 
-    static float[] vector(String text) {
+    public static float[] vector(String text) {
         float[] v = new float[DIMENSIONS];
         for (String token : text.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
             if (!token.isEmpty()) {

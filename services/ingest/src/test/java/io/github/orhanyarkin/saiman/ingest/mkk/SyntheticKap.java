@@ -140,7 +140,7 @@ public final class SyntheticKap {
                 page("Teslimat", "Radar sistemlerinin teslimatı takvime uygun tamamlandı."));
     }
 
-    private static void add(
+    public static void add(
             FakeMkkServer server,
             long companyId,
             long index,
