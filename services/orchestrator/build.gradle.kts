@@ -12,6 +12,7 @@ dependencies {
     implementation(libs.flyway.database.postgresql)
     implementation(libs.datasource.micrometer.spring.boot)
     implementation(libs.resilience4j.circuitbreaker) // breaker on the seller client, wired programmatically
+    implementation(libs.resilience4j.retry) // jittered retry on the free ticker catalogue call only (never on a paid call)
     runtimeOnly(libs.postgresql)
 
     testImplementation(libs.spring.boot.starter.webmvc.test)

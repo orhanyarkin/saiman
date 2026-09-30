@@ -21,6 +21,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -44,6 +45,12 @@ public final class FakeSeller {
         REDIRECT
     }
 
+    /** What a settled paid request answers with, unless a test sets {@link #paidBody(String)}. */
+    public static final String DEFAULT_PAID_BODY = "{\"answer\":\"ok\"}";
+
+    /** The free catalogue ({@code GET /v1/tickers}) by default. */
+    public static final List<String> DEFAULT_TICKERS = List.of("THYAO", "ASELS", "GARAN");
+
     private static final FakeSeller SHARED = new FakeSeller();
 
     private final X402Codec codec = new X402Codec();
@@ -53,6 +60,12 @@ public final class FakeSeller {
     private volatile String payTo = PAY_TO;
     private volatile PaidMode paidMode = PaidMode.SETTLE;
     private volatile boolean redirectUnpaid;
+    private volatile String paidBody = DEFAULT_PAID_BODY;
+    private volatile List<String> tickers = DEFAULT_TICKERS;
+    private volatile boolean tickersFail;
+    private final AtomicInteger tickerRequests = new AtomicInteger();
+    private final List<String> paidRequestLines = new CopyOnWriteArrayList<>();
+    private final List<String> paidRequestBodies = new CopyOnWriteArrayList<>();
     private final AtomicInteger unpaidRequests = new AtomicInteger();
     private final AtomicInteger paidRequests = new AtomicInteger();
     private final AtomicInteger invalidSignatures = new AtomicInteger();
@@ -94,6 +107,12 @@ public final class FakeSeller {
         payTo = PAY_TO;
         paidMode = PaidMode.SETTLE;
         redirectUnpaid = false;
+        paidBody = DEFAULT_PAID_BODY;
+        tickers = DEFAULT_TICKERS;
+        tickersFail = false;
+        tickerRequests.set(0);
+        paidRequestLines.clear();
+        paidRequestBodies.clear();
         unpaidRequests.set(0);
         paidRequests.set(0);
         invalidSignatures.set(0);
@@ -115,6 +134,35 @@ public final class FakeSeller {
 
     public void redirectUnpaid(boolean redirect) {
         this.redirectUnpaid = redirect;
+    }
+
+    /** The JSON body a settled paid request answers with (untrusted tool output in the tests). */
+    public void paidBody(String json) {
+        this.paidBody = json;
+    }
+
+    /** The free ticker catalogue. */
+    public void tickers(List<String> tickers) {
+        this.tickers = List.copyOf(tickers);
+    }
+
+    /** Makes {@code GET /v1/tickers} answer 503. */
+    public void tickersFail(boolean fail) {
+        this.tickersFail = fail;
+    }
+
+    public int tickerRequests() {
+        return tickerRequests.get();
+    }
+
+    /** {@code "METHOD /path"} of every request that carried a valid signature and settled, in order. */
+    public List<String> paidRequestLines() {
+        return List.copyOf(paidRequestLines);
+    }
+
+    /** The request bodies of those requests (empty for GET). */
+    public List<String> paidRequestBodies() {
+        return List.copyOf(paidRequestBodies);
     }
 
     public int unpaidRequests() {
@@ -139,6 +187,24 @@ public final class FakeSeller {
     }
 
     private void handle(HttpExchange exchange) throws IOException {
+        if ("GET".equals(exchange.getRequestMethod())
+                && "/v1/tickers".equals(exchange.getRequestURI().getRawPath())) {
+            tickerRequests.incrementAndGet();
+            if (tickersFail) {
+                write(exchange, 503, "{}");
+                return;
+            }
+            StringBuilder json = new StringBuilder("{\"tickers\":[");
+            for (int i = 0; i < tickers.size(); i++) {
+                json.append(i == 0 ? "" : ",")
+                        .append("{\"ticker\":\"")
+                        .append(tickers.get(i))
+                        .append("\",\"documents\":3}");
+            }
+            write(exchange, 200, json.append("],\"dataSource\":\"fixture\"}").toString());
+            return;
+        }
+        byte[] requestBody = exchange.getRequestBody().readAllBytes();
         String signature = exchange.getRequestHeaders().getFirst(X402Headers.PAYMENT_SIGNATURE);
         String url = baseUrl() + exchange.getRequestURI().getRawPath();
         if (signature == null) {
@@ -176,6 +242,9 @@ public final class FakeSeller {
             case FAIL_500 -> write(exchange, 500, "{}");
             case REDIRECT -> redirect(exchange);
             case SETTLE -> {
+                paidRequestLines.add(exchange.getRequestMethod() + " "
+                        + exchange.getRequestURI().getRawPath());
+                paidRequestBodies.add(new String(requestBody, StandardCharsets.UTF_8));
                 String tx = "0x" + String.format("%064x", txCounter.incrementAndGet());
                 SettlementResponse settled = new SettlementResponse(
                         true,
@@ -190,7 +259,7 @@ public final class FakeSeller {
                         null);
                 exchange.getResponseHeaders()
                         .add(X402Headers.PAYMENT_RESPONSE, codec.encodeSettlementResponse(settled));
-                write(exchange, 200, "{\"answer\":\"ok\"}");
+                write(exchange, 200, paidBody);
             }
         }
     }

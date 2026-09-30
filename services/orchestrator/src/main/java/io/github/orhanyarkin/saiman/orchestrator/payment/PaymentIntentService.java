@@ -292,6 +292,19 @@ public class PaymentIntentService {
                         """).param("id", id).update() == 1;
     }
 
+    /**
+     * Every PENDING intent of a run -> RELEASED: the run has ended, so nothing it prepared can be
+     * sent any more (T4 hook for the run lifecycle).
+     *
+     * @return how many intents were closed
+     */
+    public int closeUnsentForRun(UUID runId) {
+        return jdbc.sql("""
+                        UPDATE payment_intent SET status = 'RELEASED', updated_at = now()
+                         WHERE run_id = :runId AND status = 'PENDING'
+                        """).param("runId", runId).update();
+    }
+
     private URI resolve(SellerEndpoint endpoint, Map<String, String> uriVariables) {
         URI base = seller.baseUrl();
         // create() has already restricted every value to its allowed shape; this is the second
