@@ -62,12 +62,12 @@ public record X402ServerProperties(
      * the accessors nullable, which they are not after this compact constructor runs).
      *
      * @param url facilitator base URL; defaults to {@link #DEFAULT_FACILITATOR_URL}
-     * @param connectTimeout TCP connect timeout; defaults to 10 seconds
+     * @param connectTimeout TCP connect timeout; defaults to 3 seconds; counts towards the settle margin
      * @param readTimeout HTTP response read timeout; defaults to 15 seconds
      */
     public record Facilitator(String url, Duration connectTimeout, Duration readTimeout) {
 
-        private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(10);
+        private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(3);
         private static final Duration DEFAULT_READ_TIMEOUT = Duration.ofSeconds(15);
 
         public Facilitator {

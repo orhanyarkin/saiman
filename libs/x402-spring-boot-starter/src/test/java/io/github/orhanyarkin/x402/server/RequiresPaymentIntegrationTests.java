@@ -407,6 +407,27 @@ class RequiresPaymentIntegrationTests {
     }
 
     @Test
+    void windowBetweenTheReadTimeoutMarginAndTheMarginPlusConnectTimeoutReturns402() {
+        // Margin = connect 3s + read 15s + 5s = 23s: a 21s window passed the old read+5s = 20s
+        // check but can still lose the settle race when the connect attempt eats its full timeout.
+        long now = Instant.now().getEpochSecond();
+        Eip3009Authorization tooShort = new Eip3009Authorization(
+                TestWallets.PAYER.address(),
+                offer().payTo(),
+                offer().amount(),
+                Long.toString(now - 5),
+                Long.toString(now + 21),
+                Eip3009TypedData.randomNonce());
+        PaymentPayload payload = PaymentPayloads.sign(TestWallets.PAYER, offer(), tooShort);
+        client.get()
+                .uri("/paid/ok")
+                .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, payload))
+                .exchange()
+                .expectStatus()
+                .isEqualTo(402);
+    }
+
+    @Test
     void redirectFromAPaidHandlerIsNeverCharged() {
         PaymentPayload payload = PaymentPayloads.build(TestWallets.PAYER, offer());
 

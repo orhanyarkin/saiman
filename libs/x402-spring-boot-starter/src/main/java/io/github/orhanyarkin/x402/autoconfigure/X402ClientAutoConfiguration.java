@@ -18,7 +18,10 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.http.client.HttpRedirects;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.Environment;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -43,7 +46,8 @@ import org.springframework.web.client.RestClient;
  *       PropertiesSpendGuard} entirely — the interceptor still needs a maximum and an allowlist to
  *       pick an offer from the server). {@code x402.client.allowed-plaintext-hosts} is checked
  *       here too: exact host names only, and startup fails if the list is non-empty on any
- *       network other than the Base Sepolia testnet.
+ *       network other than the Base Sepolia testnet or while {@code
+ *       spring.http.clients.redirects} is not {@code dont-follow}.
  * </ul>
  *
  * None of the failure messages above echo the rejected value (see {@link X402ClientProperties}).
@@ -85,14 +89,17 @@ public class X402ClientAutoConfiguration {
             SpendGuard spendGuard,
             X402ClientProperties properties,
             X402Codec codec,
+            Environment environment,
             ObjectProvider<ObservationRegistry> observationRegistry) {
+        List<String> plaintextHosts = requireAllowedPlaintextHosts(properties, TestnetAssets.NETWORK);
+        requireNoRedirectsWhenPlaintextAllowed(plaintextHosts, environment);
         return new X402PaymentInterceptor(
                 signer,
                 spendGuard,
                 codec,
                 requireMaxAmountPerRequest(properties),
                 requireAllowedPayTo(properties),
-                requireAllowedPlaintextHosts(properties, TestnetAssets.NETWORK),
+                plaintextHosts,
                 observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP));
     }
 
@@ -108,6 +115,32 @@ public class X402ClientAutoConfiguration {
      */
     static List<String> requireAllowedPlaintextHosts(X402ClientProperties properties, String network) {
         return PlaintextHostAllowlist.requireValidAndNormalize(properties.allowedPlaintextHosts(), network);
+    }
+
+    /**
+     * A plaintext exception is only as good as the first hop: a followed 3xx would forward the
+     * {@code PAYMENT-SIGNATURE} header to whatever host the response names. The starter cannot see
+     * a {@code RestClient}'s request factory, so when the list is non-empty it requires the
+     * property that governs Boot's auto-configured factories, {@code
+     * spring.http.clients.redirects=dont-follow}. An application that builds its own factory must
+     * use {@link io.github.orhanyarkin.x402.client.X402RestClients#nonRedirectingRequestFactory()}
+     * and set the property anyway.
+     *
+     * @throws IllegalStateException if {@code plaintextHosts} is non-empty and the property is not
+     *     {@code dont-follow}
+     */
+    static void requireNoRedirectsWhenPlaintextAllowed(List<String> plaintextHosts, Environment environment) {
+        if (plaintextHosts.isEmpty()) {
+            return;
+        }
+        HttpRedirects redirects = Binder.get(environment)
+                .bind("spring.http.clients.redirects", HttpRedirects.class)
+                .orElse(null);
+        if (redirects != HttpRedirects.DONT_FOLLOW) {
+            throw new IllegalStateException("x402.client.allowed-plaintext-hosts requires"
+                    + " spring.http.clients.redirects=dont-follow: a followed redirect would forward the"
+                    + " PAYMENT-SIGNATURE header to another host");
+        }
     }
 
     /**
