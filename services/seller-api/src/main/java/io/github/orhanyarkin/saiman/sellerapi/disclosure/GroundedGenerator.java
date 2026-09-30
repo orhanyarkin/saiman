@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
@@ -61,8 +62,22 @@ class GroundedGenerator {
     /** The only source URLs a citation may carry: KAP disclosure pages. */
     static final Pattern KAP_URL = Pattern.compile("https://www\\.kap\\.org\\.tr/tr/Bildirim/\\d+");
 
-    /** Anything that looks like a link inside model prose; citations carry the links, prose does not. */
-    private static final Pattern URL_IN_TEXT = Pattern.compile("(?i)(?:[a-z][a-z0-9+.-]*://|www\\.)\\S+");
+    /**
+     * Anything that looks like a link inside untrusted prose: scheme URLs ({@code http://}, {@code
+     * javascript:}, {@code data:}, {@code vbscript:}), scheme-relative {@code //host}, {@code www.}
+     * hosts and bare {@code host.tld/path} forms (without a path only common TLDs count). A bare
+     * domain needs an alphabetic label of 2+ letters after a dot-separated host; dates ({@code 20.06.2016}), amounts ({@code
+     * 59.368.579,-}) and abbreviations ({@code A.Ş.}) contain no such alphabetic label of 2+ letters
+     * followed by a path, so they survive.
+     */
+    private static final Pattern URL_IN_TEXT = Pattern.compile("(?iu)(?:"
+            + "(?:[a-z][a-z0-9+.-]*://|www\\.)\\S*"
+            + "|(?<![\\p{L}\\p{N}])(?:javascript|data|vbscript):\\S+"
+            + "|(?<![\\p{L}\\p{N}:/])//\\S+"
+            + "|(?<![\\p{L}\\p{N}@.-])(?:[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]*[\\p{L}\\p{N}])?\\.)+"
+            + "(?:[a-z]{2,24}(?=[/?#:]\\S)|(?:com|net|org|io|xyz|info|biz|app|dev|top|site|online|link|click|ru|cn|tk)"
+            + "(?![\\p{L}\\p{N}]))\\S*"
+            + ")");
 
     static final String LINK_REMOVED = "[link removed]";
 
@@ -99,10 +114,9 @@ class GroundedGenerator {
      * @param taskLabel block label for the task text, e.g. {@code TASK} or {@code QUESTION}
      * @param task the task text; treated as untrusted whatever its origin
      * @param deadline the request's time budget: no model call past it, and no answer returned after it
+     *     (the caller must hold a run slot, see {@link #withRunSlot})
      * @throws ModelUnavailableException if the router refused or failed, or the deadline passed
-     * @throws io.github.orhanyarkin.saiman.sellerapi.llm.RunLimitExceededException if the payer or the
-     *     day's unsettled-run budget is used up (no model call is made)
-     * @throws RunGuardUnavailableException if the run guard could not decide (fail closed)
+     * @throws RunGuardUnavailableException if there is no current request
      * @throws MalformedModelOutputException if the reply does not match the schema
      */
     Reply generate(
@@ -117,41 +131,54 @@ class GroundedGenerator {
             throw new ModelUnavailableException();
         }
         HttpServletRequest request = currentRequest();
-        String payer = X402PaymentContext.payer(request);
+        String system = RULES + "{\"" + textField + "\": \"...\", \"citedChunkIds\": [\"kap:...\"]}";
+        String user = userMessage(excerpts, taskLabel, task);
+        @Nullable String raw;
+        try {
+            raw = router.chatClient(tier, dataClass)
+                    .prompt()
+                    .system(system)
+                    .user(user)
+                    .call()
+                    .content();
+        } catch (RuntimeException e) {
+            // Class name only: router and provider messages are never logged or returned.
+            log.warn("model call failed: {} at {}", e.getClass().getSimpleName(), topFrames(e));
+            if (!provablyNotSent(e)) {
+                X402PaymentContext.markWorkDone(request);
+            }
+            throw new ModelUnavailableException();
+        }
+        // The model ran (and may have been billed): if this request now ends non-2xx, the starter
+        // must keep the nonce claim so the same authorization can not buy another run.
+        X402PaymentContext.markWorkDone(request);
+        if (deadline.expired()) {
+            // The payment authorization may be about to expire: never serve (and try to settle) late.
+            throw new ModelUnavailableException();
+        }
+        if (raw == null) {
+            throw new MalformedModelOutputException();
+        }
+        return parse(raw, textField);
+    }
+
+    /**
+     * Runs {@code work} holding one per-payer run slot, acquired BEFORE any ingest or model call (a
+     * refused or failing request must not cost an embedding) and released in {@code finally}.
+     *
+     * @throws io.github.orhanyarkin.saiman.sellerapi.llm.RunLimitExceededException if the payer or the
+     *     day's unsettled-run budget is used up (nothing ran)
+     * @throws RunGuardUnavailableException if the payer is unknown or the guard could not decide
+     *     (fail closed)
+     */
+    <T> T withRunSlot(Supplier<T> work) {
+        String payer = X402PaymentContext.payer(currentRequest());
         if (payer == null) {
             throw new RunGuardUnavailableException();
         }
-        String system = RULES + "{\"" + textField + "\": \"...\", \"citedChunkIds\": [\"kap:...\"]}";
-        String user = userMessage(excerpts, taskLabel, task);
         guard.tryStart(payer);
         try {
-            @Nullable String raw;
-            try {
-                raw = router.chatClient(tier, dataClass)
-                        .prompt()
-                        .system(system)
-                        .user(user)
-                        .call()
-                        .content();
-            } catch (RuntimeException e) {
-                // Class name only: router and provider messages are never logged or returned.
-                log.warn("model call failed: {} at {}", e.getClass().getSimpleName(), topFrames(e));
-                if (!provablyNotSent(e)) {
-                    X402PaymentContext.markWorkDone(request);
-                }
-                throw new ModelUnavailableException();
-            }
-            // The model ran (and may have been billed): if this request now ends non-2xx, the starter
-            // must keep the nonce claim so the same authorization can not buy another run.
-            X402PaymentContext.markWorkDone(request);
-            if (deadline.expired()) {
-                // The payment authorization may be about to expire: never serve (and try to settle) late.
-                throw new ModelUnavailableException();
-            }
-            if (raw == null) {
-                throw new MalformedModelOutputException();
-            }
-            return parse(raw, textField);
+            return work.get();
         } finally {
             guard.finish(payer);
         }

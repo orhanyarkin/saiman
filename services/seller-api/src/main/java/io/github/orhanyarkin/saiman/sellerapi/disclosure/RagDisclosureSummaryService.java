@@ -50,6 +50,12 @@ class RagDisclosureSummaryService implements DisclosureSummaryService {
 
     @Override
     public DisclosureSummaryResponse summaryFor(String ticker, Deadline deadline) {
+        // Run slot first (before any ingest call), see DisclosureAnswerService#answer. A cache hit
+        // holds it briefly too; its settlement gives the unsettled slot straight back.
+        return generator.withRunSlot(() -> summaryWithSlot(ticker, deadline));
+    }
+
+    private DisclosureSummaryResponse summaryWithSlot(String ticker, Deadline deadline) {
         if (ingest.tickers().stream().noneMatch(t -> ticker.equals(t.ticker()))) {
             throw new TickerNotFoundException(ticker);
         }
