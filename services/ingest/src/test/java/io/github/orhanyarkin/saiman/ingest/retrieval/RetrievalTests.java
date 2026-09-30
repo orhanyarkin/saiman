@@ -242,7 +242,7 @@ class RetrievalTests extends IngestIntegrationTests {
     @Test
     void chunkLookupReturnsTheChunkOrNotFound() {
         client.get()
-                .uri("/internal/v1/chunks/{id}", "kap:1101500:0000")
+                .uri("/internal/v1/chunks/kap:1101500:0000")
                 .exchange()
                 .expectStatus()
                 .isOk()
@@ -252,13 +252,13 @@ class RetrievalTests extends IngestIntegrationTests {
                 .jsonPath("$.ticker")
                 .isEqualTo("THYAO");
         client.get()
-                .uri("/internal/v1/chunks/{id}", "kap:1101500:0099")
+                .uri("/internal/v1/chunks/kap:1101500:0099")
                 .exchange()
                 .expectStatus()
                 .isNotFound();
         // superseded documents are not addressable either
         client.get()
-                .uri("/internal/v1/chunks/{id}", "kap:1093000:0000")
+                .uri("/internal/v1/chunks/kap:1093000:0000")
                 .exchange()
                 .expectStatus()
                 .isNotFound();
@@ -293,7 +293,7 @@ class RetrievalTests extends IngestIntegrationTests {
     @Test
     void strictlyMalformedIdsGiveProblemDetail400() {
         client.get()
-                .uri("/internal/v1/chunks/{id}", "kap:1:12")
+                .uri("/internal/v1/chunks/kap:1:12")
                 .exchange()
                 .expectStatus()
                 .isBadRequest()
