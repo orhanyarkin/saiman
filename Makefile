@@ -132,6 +132,6 @@ ingest-retry-dlq: ## Re-drive dead-lettered ingest documents (POST /internal/v1/
 
 rag-ask: x402-publish-local ## PAY for a RAG question (test USDC). Override RAG_URL / RAG_QUESTION. Needs the console buyer's --method/--json-file flags (seller-api task).
 	@command -v jq >/dev/null 2>&1 || { echo "rag-ask needs jq to build the request body; install jq." >&2; exit 1; }
-	mkdir -p $(CURDIR)/build
-	jq -n --arg q "$$RAG_QUESTION" '{question:$$q}' > $(CURDIR)/build/rag-question.json
-	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer bootRun --args="buy --url=$(RAG_URL) --method=POST --json-file=$(CURDIR)/build/rag-question.json"
+	mkdir -p $(CURDIR)/libs/x402-spring-boot-starter/samples/console-buyer/build
+	jq -n --arg q "$$RAG_QUESTION" '{question:$$q}' > $(CURDIR)/libs/x402-spring-boot-starter/samples/console-buyer/build/rag-question.json
+	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer bootRun --args="buy --url=$(RAG_URL) --method=POST --json-file=$(CURDIR)/libs/x402-spring-boot-starter/samples/console-buyer/build/rag-question.json"

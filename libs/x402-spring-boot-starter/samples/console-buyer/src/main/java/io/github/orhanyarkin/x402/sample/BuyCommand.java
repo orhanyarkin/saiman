@@ -29,6 +29,9 @@ import org.springframework.web.client.RestClient;
 @Component
 final class BuyCommand {
 
+    /** A paid response is what the caller bought; still bounded against a hostile server. */
+    private static final int PAID_BODY_MAX_LENGTH = 8 * 1024;
+
     private static final Path LAST_PAYMENT_FILE = Path.of("build", "last-payment.txt");
     private static final Pattern TX_HASH_PATTERN = Pattern.compile("0x[0-9a-fA-F]{64}");
 
@@ -91,7 +94,7 @@ final class BuyCommand {
         ResponseEntity<String> response = request.retrieve().toEntity(String.class);
 
         out.println("status: " + response.getStatusCode().value());
-        out.println("body: " + SafePrint.of(response.getBody()));
+        out.println("body: " + SafePrint.of(response.getBody(), PAID_BODY_MAX_LENGTH));
 
         String settlementHeader = response.getHeaders().getFirst(X402Headers.PAYMENT_RESPONSE);
         if (settlementHeader != null) {
