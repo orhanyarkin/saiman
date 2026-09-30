@@ -10,6 +10,8 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
+import org.springframework.ai.model.tool.StructuredOutputChatOptions;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
@@ -145,24 +147,86 @@ final class OpenAiModelFactory implements ModelFactory {
             return Flux.defer(() -> delegate.get().stream(withStreamUsage(openAiPrompt(prompt))));
         }
 
-        /**
-         * ChatClient seeds every request with generic options when it has no defaults of its own, and the OpenAI model
-         * casts request options to {@link OpenAiChatOptions}. Replace generic options with the route's options,
-         * keeping the temperature if the caller set one.
-         */
+        /** Rebuilds the request from the route's own options; see {@link #wireOptions}. */
         private Prompt openAiPrompt(Prompt prompt) {
-            ChatOptions requested = prompt.getOptions();
-            if (requested == null || requested instanceof OpenAiChatOptions) {
-                return prompt;
-            }
             if (!(delegate.get().getOptions() instanceof OpenAiChatOptions route)) {
                 return prompt;
             }
-            var builder = route.mutate();
-            if (requested.getTemperature() != null) {
-                builder.temperature(requested.getTemperature());
+            return new Prompt(prompt.getInstructions(), wireOptions(route, prompt.getOptions()));
+        }
+    }
+
+    /**
+     * The options that go on the wire: always the route's own, plus an allowlist copied from the caller's.
+     *
+     * <p>Spring AI's OpenAI model uses a prompt's options as-is (no merge with the model defaults), so taking the
+     * caller's options would let a caller drop {@code max_completion_tokens} or the reasoning effort, ask for
+     * {@code n > 1}, add body fields or headers, or redirect the key, all of which the cost estimate does not see.
+     * The route's model, base URL, API key, limits, reasoning effort and usage reporting therefore always win.
+     *
+     * <p>Copied from the caller: temperature; tool callbacks and tool context (tool calling breaks silently
+     * without them); the output schema and response format (they only shape the answer). The completion-token
+     * limit is the caller's only if it is lower than the route's. Rejected with {@link IllegalArgumentException}:
+     * {@code n > 1}, extra body fields, custom headers, and a base URL or API key other than the route's.
+     */
+    static OpenAiChatOptions wireOptions(OpenAiChatOptions route, @Nullable ChatOptions requested) {
+        var builder = route.mutate();
+        if (requested == null) {
+            return builder.build();
+        }
+        if (requested instanceof OpenAiChatOptions openAi) {
+            rejectOverrides(route, openAi);
+            if (openAi.getResponseFormat() != null) {
+                builder.responseFormat(openAi.getResponseFormat());
             }
-            return new Prompt(prompt.getInstructions(), builder.build());
+        }
+        if (requested.getTemperature() != null) {
+            builder.temperature(requested.getTemperature());
+        }
+        Integer limit = requestedLimit(requested);
+        Integer routeLimit = route.getMaxCompletionTokens();
+        if (limit != null && limit > 0 && (routeLimit == null || limit < routeLimit)) {
+            builder.maxCompletionTokens(limit);
+        }
+        if (requested instanceof ToolCallingChatOptions tooling) {
+            if (tooling.getToolCallbacks() != null
+                    && !tooling.getToolCallbacks().isEmpty()) {
+                builder.toolCallbacks(tooling.getToolCallbacks());
+            }
+            if (tooling.getToolContext() != null && !tooling.getToolContext().isEmpty()) {
+                builder.toolContext(tooling.getToolContext());
+            }
+        }
+        if (requested instanceof StructuredOutputChatOptions structured && structured.getOutputSchema() != null) {
+            builder.outputSchema(structured.getOutputSchema());
+        }
+        return builder.build();
+    }
+
+    private static @Nullable Integer requestedLimit(ChatOptions requested) {
+        if (requested instanceof OpenAiChatOptions openAi && openAi.getMaxCompletionTokens() != null) {
+            return openAi.getMaxCompletionTokens();
+        }
+        return requested.getMaxTokens();
+    }
+
+    private static void rejectOverrides(OpenAiChatOptions route, OpenAiChatOptions requested) {
+        if (requested.getN() != null && requested.getN() > 1) {
+            throw new IllegalArgumentException(
+                    "Request option 'n' above 1 is not allowed: the cost estimate assumes one");
+        }
+        if (requested.getExtraBody() != null && !requested.getExtraBody().isEmpty()) {
+            throw new IllegalArgumentException("Request option 'extraBody' is not allowed");
+        }
+        if (requested.getCustomHeaders() != null
+                && !requested.getCustomHeaders().isEmpty()) {
+            throw new IllegalArgumentException("Request option 'customHeaders' is not allowed");
+        }
+        if (requested.getBaseUrl() != null && !requested.getBaseUrl().equals(route.getBaseUrl())) {
+            throw new IllegalArgumentException("Request option 'baseUrl' cannot differ from the route's");
+        }
+        if (requested.getApiKey() != null && !requested.getApiKey().equals(route.getApiKey())) {
+            throw new IllegalArgumentException("Request option 'apiKey' cannot differ from the route's");
         }
     }
 
