@@ -209,6 +209,7 @@ These are checked mechanically, not just by review:
   requirement) — **don't wire the client interceptor into an LLM-driven retry loop before the M3
   SpendGuard exists**, and M3's guard must count *held* reservations (signed, outcome unknown)
   against the budget, not just committed ones.
+- Orchestrator `/api` has no authn until M6; the only controls are the Host allowlist (DNS rebinding) and JSON + `X-Saiman-Csrf` (CSRF), both applied to every request regardless of path form (raw URIs containing `;`, `%` or `//` are refused). Spend limits: Postgres is the authority; the app DB role must not own the tables (trigger bypass), and `committed_atomic` is monotonic by convention only until M6 (separate migration/DML roles).
 
 ## Facilitator trust
 
@@ -296,6 +297,7 @@ These are checked mechanically, not just by review:
 | One circuit breaker instance is shared by `/verify` and `/settle`, and counts a facilitator rejection (`FacilitatorClientErrorException`, including 429) as a breaker failure | A flood of unfunded-wallet signatures rate-limited by x402.org could open the breaker and short-circuit `/settle` for requests that already ran their (paid-for) handler | M3, alongside the per-payer/IP rate limit above: separate breakers for verify and settle, and don't count 4xx (or at least not 429) as a breaker failure |
 | The starter's client interceptor still follows redirects on Spring Boot's defaults; only the console-buyer *sample* pins `spring.http.clients.redirects=dont-follow` | `X402RestClients.nonRedirectingRequestFactory()` exists but isn't applied automatically | The M2/M3 orchestrator's paying `RestClient` must use it explicitly, with its own real-socket test (same shape as the sample's) |
 | `PaymentSigner` bean + pass-through can bypass the SpendGuard | unchanged starter design | M6 hardening |
+| Shared superuser DB role can bypass the budget trigger | one `saiman` role for all services in local compose | M6: per-service DML role + a monotonic committed_atomic trigger |
 | Valkey (the nonce store) is reachable from every app container, not only seller-api | Compose gives every service the same `SPRING_DATA_REDIS_URL`; a future service with an unrelated vulnerability (e.g. an SSRF-exposed fetcher in `ingest`) could reach it too | Same remediation as the no-auth gap above: scope network/credentials to the services that actually need it |
 
 ## How to re-verify
