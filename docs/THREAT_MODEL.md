@@ -184,6 +184,16 @@ These are checked mechanically, not just by review:
   `X402RestClients.nonRedirectingRequestFactory()` for this; the M2/M3 orchestrator's paying
   `RestClient` must use it (or the equivalent `spring.http.clients.redirects=dont-follow`
   property), with its own test proving it.
+- **Plaintext is refused except for loopback and exact allowlisted hosts.** `x402.client.allowed-plaintext-hosts`
+  (empty by default) holds exact host names only: entries with `*`, `/`, `:`, `@`, a leading or
+  trailing dot or non-DNS characters fail startup, matching is against `URI#getHost()` (so
+  `http://seller-api@evil.com` is `evil.com`), and a non-empty list fails startup on any network
+  other than Base Sepolia. Tests cover sibling (`seller-api2`), suffix (`seller-api.evil.com`),
+  prefix (`evilseller-api`) and userinfo tricks.
+- **`SpendGuard.signed` is the last fail-closed gate.** It runs after signing and before the paid
+  retry is sent (never given the signature itself); if it throws, the signed authorization is
+  dropped unsent, the reservation is released and the exception rethrown. A real-socket test proves
+  zero `PAYMENT-SIGNATURE` requests reach the stub and the idempotency key is reusable afterwards.
 - **402 and other seller response bodies are untrusted tool output**, not just untrusted HTTP: once
   the orchestrator (M2+) feeds tool results back to an LLM, a seller-controlled error message is a
   prompt-injection surface like any other retrieved text.
