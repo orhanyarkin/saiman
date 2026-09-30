@@ -78,6 +78,23 @@ class DisclosureSummaryEndpointTests {
     private PaymentNonceStore nonceStore;
 
     @Test
+    void theTickerCatalogIsFreeAndListsTheFixtureTickers() {
+        client.get()
+                .uri("/v1/tickers")
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectHeader()
+                .doesNotExist(io.github.orhanyarkin.x402.core.X402Headers.PAYMENT_REQUIRED)
+                .expectBody()
+                .jsonPath("$.dataSource")
+                .isEqualTo("fixture")
+                .jsonPath("$.tickers[*].ticker")
+                .isEqualTo(java.util.List.of("ASELS", "GARAN", "THYAO"));
+        assertThat(FACILITATOR.verifyCallCount()).isZero();
+    }
+
+    @Test
     void nonceStoreIsRedisBacked() {
         assertThat(nonceStore).isInstanceOf(RedisPaymentNonceStore.class);
     }

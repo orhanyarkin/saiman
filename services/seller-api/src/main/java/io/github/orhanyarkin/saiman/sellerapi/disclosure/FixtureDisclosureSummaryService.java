@@ -23,7 +23,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @Service
 @ConditionalOnProperty(name = "seller.disclosures.source", havingValue = "fixture", matchIfMissing = true)
-class FixtureDisclosureSummaryService implements DisclosureSummaryService {
+class FixtureDisclosureSummaryService implements DisclosureSummaryService, TickerCatalog {
 
     /** Every fixture summary is marked with this, never read from the fixture file itself. */
     static final String DATA_SOURCE = "fixture";
@@ -43,6 +43,17 @@ class FixtureDisclosureSummaryService implements DisclosureSummaryService {
             throw new TickerNotFoundException(ticker);
         }
         return summary;
+    }
+
+    /** The fixture tickers; {@code documents} is the number of cited disclosures in each fixture. */
+    @Override
+    public TickerListResponse tickers() {
+        return TickerListResponse.of(
+                summariesByTicker.values().stream()
+                        .map(s -> new TickerListResponse.Ticker(
+                                s.ticker(), s.citations().size()))
+                        .toList(),
+                DATA_SOURCE);
     }
 
     private static Map<String, DisclosureSummaryResponse> loadFixtures(JsonMapper jsonMapper) {

@@ -5,13 +5,16 @@ import io.github.orhanyarkin.saiman.modelrouter.DataClass;
 import io.github.orhanyarkin.saiman.modelrouter.DataClassViolationException;
 import io.github.orhanyarkin.saiman.modelrouter.ModelRouter;
 import io.github.orhanyarkin.saiman.modelrouter.RequestNotSentException;
+import io.github.orhanyarkin.saiman.modelrouter.RouterProperties;
 import io.github.orhanyarkin.saiman.modelrouter.Tier;
 import io.github.orhanyarkin.saiman.sellerapi.llm.Deadline;
+import io.github.orhanyarkin.saiman.sellerapi.llm.LlmRunProperties;
 import io.github.orhanyarkin.saiman.sellerapi.llm.RunGuardUnavailableException;
 import io.github.orhanyarkin.saiman.sellerapi.llm.UnsettledRunGuard;
 import io.github.orhanyarkin.saiman.shared.retrieval.RetrievedChunk;
 import io.github.orhanyarkin.x402.server.X402PaymentContext;
 import jakarta.servlet.http.HttpServletRequest;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -97,11 +100,38 @@ class GroundedGenerator {
     private final ModelRouter router;
     private final JsonMapper jsonMapper;
     private final UnsettledRunGuard guard;
+    private final Duration modelTimeout;
 
-    GroundedGenerator(ModelRouter router, JsonMapper jsonMapper, UnsettledRunGuard guard) {
+    /**
+     * @throws IllegalStateException if the router's model timeout is not shorter than {@code
+     *     seller.llm.deadline}: the model would then never be called (see {@link #requireTimeForModel})
+     */
+    GroundedGenerator(
+            ModelRouter router,
+            JsonMapper jsonMapper,
+            UnsettledRunGuard guard,
+            RouterProperties routerProperties,
+            LlmRunProperties llm) {
         this.router = router;
         this.jsonMapper = jsonMapper;
         this.guard = guard;
+        this.modelTimeout = routerProperties.openai().timeout();
+        if (modelTimeout.compareTo(llm.deadline()) >= 0) {
+            throw new IllegalStateException(
+                    "saiman.router.openai.timeout must be shorter than seller.llm.deadline in RAG mode");
+        }
+    }
+
+    /**
+     * Refuses to start a model call that could outlive the request's deadline: less time left than
+     * the model timeout means a late (never served, never settled) answer the provider still bills.
+     *
+     * @throws ModelUnavailableException if {@code deadline} has less than the model timeout left
+     */
+    void requireTimeForModel(Deadline deadline) {
+        if (deadline.remaining().compareTo(modelTimeout) < 0) {
+            throw new ModelUnavailableException();
+        }
     }
 
     /** The model's reply after schema validation; the ids are still unverified against retrieval. */
@@ -115,7 +145,8 @@ class GroundedGenerator {
      * @param task the task text; treated as untrusted whatever its origin
      * @param deadline the request's time budget: no model call past it, and no answer returned after it
      *     (the caller must hold a run slot, see {@link #withRunSlot})
-     * @throws ModelUnavailableException if the router refused or failed, or the deadline passed
+     * @throws ModelUnavailableException if the router refused or failed, less than the model timeout
+     *     was left before the call (nothing is sent then), or the deadline passed during it
      * @throws RunGuardUnavailableException if there is no current request
      * @throws MalformedModelOutputException if the reply does not match the schema
      */
@@ -127,9 +158,7 @@ class GroundedGenerator {
             String taskLabel,
             String task,
             Deadline deadline) {
-        if (deadline.expired()) {
-            throw new ModelUnavailableException();
-        }
+        requireTimeForModel(deadline);
         HttpServletRequest request = currentRequest();
         String system = RULES + "{\"" + textField + "\": \"...\", \"citedChunkIds\": [\"kap:...\"]}";
         String user = userMessage(excerpts, taskLabel, task);
