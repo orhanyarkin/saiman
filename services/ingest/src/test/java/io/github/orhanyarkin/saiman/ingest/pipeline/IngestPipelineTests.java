@@ -264,7 +264,7 @@ class IngestPipelineTests extends IngestIntegrationTests {
 
     @Test
     void theCredentialNeverReachesTheLogsOrTheDeadLetterTable(CapturedOutput output) {
-        MKK.always("/disclosureDetail/1101500", Reply.status(403));
+        MKK.always("/disclosureDetail/1101500", Reply.status(400));
 
         job.run();
 
@@ -273,6 +273,6 @@ class IngestPipelineTests extends IngestIntegrationTests {
                         .query(String.class)
                         .single())
                 .doesNotContain(SyntheticKap.CREDENTIALS)
-                .contains("status 403");
+                .contains("status 400");
     }
 }

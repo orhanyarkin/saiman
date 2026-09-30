@@ -16,12 +16,17 @@ import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
@@ -127,13 +132,30 @@ public class MkkClient {
      * fromIndex}, matches only (at most 50). An empty page does not mean the end.
      */
     public List<DisclosureSummary> disclosures(long fromIndex, long companyId) {
+        try {
+            return listDisclosures(fromIndex, companyId);
+        } catch (MkkHttpException e) {
+            if (e.emptyListing()) {
+                // Live behaviour: past a company's last match MKK answers HTTP 400 + ER005 instead of [].
+                return List.of();
+            }
+            throw e;
+        }
+    }
+
+    /** Closes the circuit breaker again (used by tests to isolate scenarios). */
+    public void resetCircuit() {
+        breaker.reset();
+    }
+
+    private List<DisclosureSummary> listDisclosures(long fromIndex, long companyId) {
         return call(
                 "disclosures",
                 () -> client.get()
                         .uri("/disclosures?disclosureIndex={i}&companyId={c}", fromIndex, companyId)
                         .retrieve()
                         .onStatus(status -> status.isError(), (request, response) -> {
-                            throw httpError(response.getStatusCode().value(), response.getHeaders());
+                            throw httpError(response);
                         })
                         .body(SUMMARIES));
     }
@@ -153,7 +175,7 @@ public class MkkClient {
                 .uri(path)
                 .retrieve()
                 .onStatus(status -> status.isError(), (request, response) -> {
-                    throw httpError(response.getStatusCode().value(), response.getHeaders());
+                    throw httpError(response);
                 })
                 .body(type);
     }
@@ -163,7 +185,7 @@ public class MkkClient {
                 .uri(path)
                 .retrieve()
                 .onStatus(status -> status.isError(), (request, response) -> {
-                    throw httpError(response.getStatusCode().value(), response.getHeaders());
+                    throw httpError(response);
                 })
                 .body(type);
     }
@@ -201,7 +223,7 @@ public class MkkClient {
             throw new MkkCircuitOpenException();
         } catch (MkkHttpException e) {
             count(operation, "http_" + e.status());
-            throw e;
+            throw e.credentialProblem() ? new MkkCredentialException(e) : e;
         } catch (MkkException e) {
             count(operation, "error");
             throw e;
@@ -215,8 +237,24 @@ public class MkkClient {
         }
     }
 
-    private static MkkHttpException httpError(int status, HttpHeaders headers) {
-        return new MkkHttpException(status, parseRetryAfter(headers.getFirst(HttpHeaders.RETRY_AFTER)));
+    private static final Pattern ERROR_CODE = Pattern.compile("\"code\"\\s*:\\s*\"(ER\\d{3})\"");
+
+    private static MkkHttpException httpError(ClientHttpResponse response) throws IOException {
+        return new MkkHttpException(
+                response.getStatusCode().value(),
+                errorCode(response),
+                parseRetryAfter(response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER)));
+    }
+
+    /** Only the {@code ER###} code is extracted from the JSON error body; its message text is dropped. */
+    private static @Nullable String errorCode(ClientHttpResponse response) {
+        try {
+            String body = new String(response.getBody().readNBytes(2048), StandardCharsets.UTF_8);
+            Matcher matcher = ERROR_CODE.matcher(body);
+            return matcher.find() ? matcher.group(1) : null;
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     static @Nullable Duration parseRetryAfter(@Nullable String value) {
