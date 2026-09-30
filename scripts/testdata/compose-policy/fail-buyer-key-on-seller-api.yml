@@ -1,0 +1,13 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: seller-api: mounts secret "x402_buyer_private_key"
+# seller-api never holds a private key (ADR-0009), even via the new file secret.
+name: cptest-fail-buyer-key-on-seller-api
+services:
+  seller-api:
+    image: busybox:1
+    secrets:
+      - source: x402_buyer_private_key
+        target: x402.client.private-key
+secrets:
+  x402_buyer_private_key:
+    file: ../../secrets/x402_buyer_private_key

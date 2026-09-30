@@ -1,0 +1,9 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS must be exactly "seller-api" and only on orchestrator
+# The plaintext allowlist on any service other than the orchestrator.
+name: cptest-fail-plaintext-hosts-on-seller
+services:
+  seller-api:
+    image: busybox:1
+    environment:
+      X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS: seller-api
