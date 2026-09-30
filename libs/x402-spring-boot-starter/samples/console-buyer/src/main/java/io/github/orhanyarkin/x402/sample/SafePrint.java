@@ -15,13 +15,18 @@ final class SafePrint {
 
     /** @return {@code value}, control-character-free and at most {@value #MAX_LENGTH} characters */
     static String of(String value) {
+        return of(value, MAX_LENGTH);
+    }
+
+    /** Like {@link #of(String)} with a caller-chosen cap, for a paid response the caller wants to read. */
+    static String of(String value, int maxLength) {
         if (value == null) {
             return "";
         }
         StringBuilder sanitized = new StringBuilder();
         boolean truncated = false;
         for (int i = 0; i < value.length(); i++) {
-            if (sanitized.length() >= MAX_LENGTH) {
+            if (sanitized.length() >= maxLength) {
                 truncated = true;
                 break;
             }
