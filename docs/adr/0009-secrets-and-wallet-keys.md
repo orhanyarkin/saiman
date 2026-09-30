@@ -28,3 +28,7 @@ Revisit if: a service other than the orchestrator needs to sign.
 - Spend containment does not rely on the key alone: the OpenAI project has a hard provider-side limit, and the router enforces a daily USD cap in code.
 - Mounted secret files are 0644 inside the 0700 `secrets/` directory because the container user's uid differs from the host user's (compose file secrets keep host owner and mode); the directory mode is the protection. `buyer.key`, which is not mounted, stays 0600.
 
+## Amendment (2026-09-30, M3): orchestrator secrets and the plaintext exception
+- `orchestrator` holds the buyer key (`secrets/x402_buyer_private_key`, mounted as `x402.client.private-key` through the compose long syntax `target:`) and an OpenAI key. The compose policy allows exactly those two for that service; the human creates the key file (0644 inside the 0700 directory, as above).
+- Inside compose the orchestrator reaches `http://seller-api:8081` over plaintext. The starter refuses to sign over plaintext except for loopback and for hosts named **exactly** in `x402.client.allowed-plaintext-hosts` (no wildcard or suffix); the list is empty by default and startup fails if it is non-empty on any network other than the Base Sepolia testnet.
+

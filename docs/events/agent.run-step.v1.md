@@ -1,0 +1,30 @@
+# `agent.run-step.v1`
+
+One event per step of a research run, appended to the orchestrator's `run_event` table and streamed over SSE (`GET /api/v1/runs/{runId}/events`). **No Kafka topic in M3**; M4 relays the same records through the outbox under the topic `agent.run-step.v1`. Java contract: `io.github.orhanyarkin.saiman.shared.run` (`RunEvent`, `RunEventData`).
+
+Envelope (SSE `id` = `seq`, `event` = `type`, `data` = JSON below):
+
+```json
+{ "eventId": "<runId>:<seq>", "runId": "uuid", "seq": 1, "type": "RUN_STARTED",
+  "occurredAt": "RFC3339", "data": {} }
+```
+
+`seq` starts at 1 and is gap-free per run; consumers dedupe on `eventId`. Amounts are `{atomicUnits, asset, decimals}` (integers, rule 4).
+
+| type | data |
+|---|---|
+| RUN_STARTED | question, budget |
+| STEP_STARTED / STEP_COMPLETED | step (PLANNER, RESEARCHER, RISK, SYNTHESIS) |
+| PLAN_CREATED | tickers, tasks (validated by code against the seller's ticker catalogue) |
+| TOOL_CALL_REQUESTED | tool, arguments (code-rendered, validated) |
+| PAYMENT_APPROVAL_REQUIRED | approvalId, paymentIntentId, amount, payTo, resource, expiresAt |
+| PAYMENT_APPROVAL_DECIDED | approvalId, decision (APPROVED, REJECTED, EXPIRED) |
+| PAYMENT_DENIED | reason (RUN_BUDGET, DAILY_CAP, PAYEE_NOT_ALLOWED, OVER_PER_REQUEST_MAX, UNKNOWN_INTENT, APPROVAL_REJECTED, APPROVAL_EXPIRED, MAX_PAID_CALLS, INVALID_ARGS), amount |
+| PAYMENT_SETTLED | paymentIntentId, amount, txHash |
+| PAYMENT_AMBIGUOUS | paymentIntentId, amount (signed, outcome unknown, reservation stays counted) |
+| TOOL_CALL_COMPLETED | tool, paid, citationCount |
+| MODEL_CALL_COMPLETED | step, tier, model, inputTokens, outputTokens, costUsd |
+| RUN_COMPLETED | report {answer, citations[{chunkId, sourceUrl, title}]}, cost {paymentsUsdc, llmUsd, totalUsd} |
+| RUN_FAILED | failureCode (fixed code, never a message), costSoFar |
+
+`RUN_COMPLETED` and `RUN_FAILED` are terminal. Idempotency keys, nonces and signatures never appear; the answer is plain text and citation fields are rebuilt by code from retrieved evidence, so every consumer renders them as text.
