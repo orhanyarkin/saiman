@@ -135,6 +135,17 @@ public class DocumentRepository {
                 .update();
     }
 
+    /** The listing named the disclosure but MKK has no detail for it (ER005/ER008). */
+    public void markMissing(String documentId) {
+        jdbc.sql("UPDATE source_document SET status = 'MISSING', attempts = 0, updated_at = now() WHERE id = :id")
+                .param("id", documentId)
+                .update();
+        jdbc.sql("DELETE FROM dead_letter WHERE source = :s AND external_id = :e")
+                .param("s", SOURCE)
+                .param("e", documentId.substring(documentId.indexOf(':') + 1))
+                .update();
+    }
+
     /** KAP blocked the disclosure (personal-data removal): delete its chunks and never index it again. */
     public void markBlocked(String documentId) {
         if (find(documentId).map(d -> d.status() == DocumentStatus.BLOCKED).orElse(true)) {

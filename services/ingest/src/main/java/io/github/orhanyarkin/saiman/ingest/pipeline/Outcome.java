@@ -12,6 +12,8 @@ public enum Outcome {
     CANCELLATION,
     /** Purged or never indexed because KAP blocked it. */
     BLOCKED,
+    /** MKK has no detail for the listed disclosure (ER005/ER008); recorded, not retried. */
+    MISSING,
     /** Failed {@code max-attempts} times and parked in the DLQ. */
     FAILED
 }

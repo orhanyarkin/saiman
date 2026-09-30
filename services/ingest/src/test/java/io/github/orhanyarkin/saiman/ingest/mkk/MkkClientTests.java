@@ -220,4 +220,40 @@ class MkkClientTests {
         assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(2));
         assertThat(server.countRequests("/members")).isEqualTo(3);
     }
+
+    @Test
+    void er005OnTheListingIsAnEmptyPageButOnTheDetailItIsAnException() {
+        MkkClient client = client(SyntheticKap.CREDENTIALS, 4);
+        server.always("/disclosures", FakeMkkServer.mkkError(400, "ER005", "Bildirim bulunamadi. MARKER-TEXT"));
+        server.always("/disclosureDetail/1093000", FakeMkkServer.mkkError(400, "ER005", "MARKER-TEXT"));
+
+        assertThat(client.disclosures(1_230_957L, SyntheticKap.THYAO)).isEmpty();
+        assertThatThrownBy(() -> client.disclosureDetail(1_093_000L))
+                .isInstanceOfSatisfying(MkkHttpException.class, e -> {
+                    assertThat(e.errorCode()).isEqualTo("ER005");
+                    assertThat(e.notFoundCode()).isTrue();
+                    assertThat(e.toString()).contains("400").contains("ER005").doesNotContain("MARKER-TEXT");
+                });
+        assertThat(server.countRequests("/disclosureDetail/1093000")).isEqualTo(1);
+    }
+
+    @Test
+    void otherClientErrorsOnTheListingStillFail() {
+        server.always("/disclosures", FakeMkkServer.mkkError(400, "ER099", "x"));
+
+        assertThatThrownBy(() -> client(SyntheticKap.CREDENTIALS, 4).disclosures(1L, 1L))
+                .isInstanceOfSatisfying(
+                        MkkHttpException.class, e -> assertThat(e.errorCode()).isEqualTo("ER099"));
+    }
+
+    @Test
+    void credentialCodesBecomeACredentialException() {
+        server.always("/members", FakeMkkServer.mkkError(401, "ER004", "MARKER-TEXT"));
+
+        assertThatThrownBy(() -> client(SyntheticKap.CREDENTIALS, 4).members())
+                .isInstanceOf(MkkCredentialException.class)
+                .hasMessageContaining("ER004")
+                .hasMessageNotContaining("MARKER-TEXT");
+        assertThat(server.countRequests("/members")).isEqualTo(1);
+    }
 }

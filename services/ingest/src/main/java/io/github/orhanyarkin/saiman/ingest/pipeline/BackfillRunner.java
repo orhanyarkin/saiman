@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.ingest.pipeline;
 
+import io.github.orhanyarkin.saiman.ingest.mkk.MkkException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -29,9 +30,20 @@ class BackfillRunner implements ApplicationRunner {
         Thread.ofVirtual().name("ingest-backfill").start(() -> {
             try {
                 RunReport report = job.run();
-                log.info("Backfill finished: aborted={}, outcomes={}", report.aborted(), report.outcomes());
+                log.info(
+                        "Backfill finished: aborted={} ({}), failedTickers={}, unknownTickers={}, outcomes={}",
+                        report.aborted(),
+                        report.abortReason(),
+                        report.failedTickers(),
+                        report.unknownTickers(),
+                        report.outcomes());
             } catch (RuntimeException e) {
-                log.error("Backfill failed: {}", e.getClass().getSimpleName());
+                // MKK exception messages carry the HTTP status and MKK error code only, never bodies.
+                log.error(
+                        "Backfill failed: {}",
+                        e instanceof MkkException
+                                ? e.getMessage()
+                                : e.getClass().getSimpleName());
             }
         });
     }

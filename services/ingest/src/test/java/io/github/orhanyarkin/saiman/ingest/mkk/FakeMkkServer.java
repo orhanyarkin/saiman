@@ -51,6 +51,8 @@ public final class FakeMkkServer implements AutoCloseable {
     private volatile String blockedJson = "[]";
     private volatile long lastIndex = 0;
     private volatile long window = 3000;
+    private volatile boolean emptyListingAs400;
+    private final Map<Long, Reply> failingCompanies = new HashMap<>();
 
     private FakeMkkServer(String expectedCredentials) throws IOException {
         this.expectedCredentials = expectedCredentials;
@@ -83,6 +85,8 @@ public final class FakeMkkServer implements AutoCloseable {
         blockedJson = "[]";
         lastIndex = 0;
         window = 3000;
+        emptyListingAs400 = false;
+        failingCompanies.clear();
     }
 
     public void members(String json) {
@@ -95,6 +99,21 @@ public final class FakeMkkServer implements AutoCloseable {
 
     public void lastIndex(long value) {
         this.lastIndex = value;
+    }
+
+    /** Live behaviour: a listing with no matches answers HTTP 400 + ER005 instead of {@code []}. */
+    public void emptyListingAsEr005(boolean value) {
+        this.emptyListingAs400 = value;
+    }
+
+    /** Every {@code /disclosures} call for this company gets {@code reply}. */
+    public synchronized void failCompany(long companyId, Reply reply) {
+        failingCompanies.put(companyId, reply);
+    }
+
+    /** The exact live error shape: JSON with a code and a (Turkish/English) message. */
+    public static Reply mkkError(int status, String code, String message) {
+        return new Reply(status, "{\"code\":\"" + code + "\",\"message\":\"" + message + "\"}", Map.of());
     }
 
     public void window(long value) {
@@ -155,10 +174,27 @@ public final class FakeMkkServer implements AutoCloseable {
                 send(exchange, scripted);
                 return;
             }
-            send(exchange, new Reply(200, route(path, query), Map.of()));
+            if (path.equals("/disclosures")) {
+                Reply failing = failingCompany(query);
+                if (failing != null) {
+                    send(exchange, failing);
+                    return;
+                }
+            }
+            String body = route(path, query);
+            if (path.equals("/disclosures") && body.equals("[]") && emptyListingAs400) {
+                send(exchange, mkkError(400, "ER005", "Bildirim bulunamadi. Disclosure not found. MARKER-ER-MESSAGE"));
+                return;
+            }
+            send(exchange, new Reply(200, body, Map.of()));
         } catch (RuntimeException e) {
             send(exchange, Reply.status(500));
         }
+    }
+
+    private synchronized Reply failingCompany(String query) {
+        Matcher m = Pattern.compile("companyId=(\\d+)").matcher(query == null ? "" : query);
+        return m.find() ? failingCompanies.get(Long.parseLong(m.group(1))) : null;
     }
 
     private synchronized Reply scripted(String path) {

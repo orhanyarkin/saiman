@@ -3,8 +3,10 @@ package io.github.orhanyarkin.saiman.ingest.pipeline;
 import io.github.orhanyarkin.saiman.ingest.IngestProperties;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkCircuitOpenException;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkClient;
+import io.github.orhanyarkin.saiman.ingest.mkk.MkkCredentialException;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkDtos.BlockedDisclosure;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkDtos.Member;
+import io.github.orhanyarkin.saiman.ingest.mkk.MkkException;
 import io.github.orhanyarkin.saiman.ingest.store.DocumentRepository;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -87,7 +89,9 @@ public class IngestJob {
     private RunReport runLocked() {
         RunReport.Tally tally = new RunReport.Tally();
         List<String> unknown = new ArrayList<>();
+        List<String> failed = new ArrayList<>();
         boolean aborted = false;
+        String abortReason = null;
         try {
             long lastIndex = mkk.lastDisclosureIndex();
             Map<String, Long> directory = directory(mkk.members());
@@ -99,15 +103,35 @@ public class IngestJob {
                     unknown.add(ticker);
                     continue;
                 }
-                if (companies.ingest(ticker.strip().toUpperCase(Locale.ROOT), companyId, lastIndex, blocked, tally)) {
-                    tally.tickersDone++;
+                String symbol = ticker.strip().toUpperCase(Locale.ROOT);
+                try {
+                    if (companies.ingest(symbol, companyId, lastIndex, blocked, tally)) {
+                        tally.tickersDone++;
+                    }
+                } catch (MkkCircuitOpenException | MkkCredentialException e) {
+                    throw e; // not about this ticker: stop the run
+                } catch (RuntimeException e) {
+                    // One ticker's MKK/database failure must not stop the others. Its cursor stays where
+                    // it was, so the next run resumes it. Messages: MKK ones carry status and code only.
+                    log.warn(
+                            "Ticker {} failed and is skipped for this run: {}",
+                            symbol,
+                            e instanceof MkkException
+                                    ? e.getMessage()
+                                    : e.getClass().getSimpleName());
+                    failed.add(symbol);
                 }
             }
         } catch (MkkCircuitOpenException e) {
             log.warn("MKK circuit breaker is open; run aborted, it resumes from the cursors next time");
             aborted = true;
+            abortReason = "circuit open";
+        } catch (MkkCredentialException e) {
+            log.error("MKK rejected the request; run aborted: {}", e.getMessage());
+            aborted = true;
+            abortReason = e.getMessage();
         }
-        return new RunReport(false, aborted, tally.outcomes, unknown, tally.tickersDone);
+        return new RunReport(false, aborted, abortReason, tally.outcomes, unknown, failed, tally.tickersDone);
     }
 
     /** Ticker (any of a member's comma-separated stock codes) to MKK company id, listed companies only. */

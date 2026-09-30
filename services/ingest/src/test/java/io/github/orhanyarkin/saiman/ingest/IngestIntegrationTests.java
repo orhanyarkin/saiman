@@ -29,6 +29,9 @@ public abstract class IngestIntegrationTests {
     @Autowired
     protected RecordingEmbeddingModel embeddings;
 
+    @Autowired
+    protected io.github.orhanyarkin.saiman.ingest.mkk.MkkClient mkkClient;
+
     @DynamicPropertySource
     static void mkkProperties(DynamicPropertyRegistry registry) {
         registry.add("saiman.ingest.mkk.base-url", MKK::baseUrl);
@@ -38,6 +41,7 @@ public abstract class IngestIntegrationTests {
     void resetState() {
         jdbc.sql("TRUNCATE chunk, dead_letter, source_cursor, source_document CASCADE")
                 .update();
+        mkkClient.resetCircuit();
         MKK.reset();
         SyntheticKap.load(MKK);
         embeddings.reset();

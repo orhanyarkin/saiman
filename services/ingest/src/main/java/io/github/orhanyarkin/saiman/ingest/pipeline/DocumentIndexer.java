@@ -6,9 +6,12 @@ import io.github.orhanyarkin.saiman.ingest.chunking.DisclosureTextExtractor;
 import io.github.orhanyarkin.saiman.ingest.dlq.DeadLetterRepository;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkCircuitOpenException;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkClient;
+import io.github.orhanyarkin.saiman.ingest.mkk.MkkCredentialException;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkDtos.DisclosureDetail;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkDtos.DisclosureSummary;
 import io.github.orhanyarkin.saiman.ingest.mkk.MkkDtos.HtmlMessage;
+import io.github.orhanyarkin.saiman.ingest.mkk.MkkException;
+import io.github.orhanyarkin.saiman.ingest.mkk.MkkHttpException;
 import io.github.orhanyarkin.saiman.ingest.store.DocumentRepository;
 import io.github.orhanyarkin.saiman.ingest.store.DocumentRepository.NewDocument;
 import io.github.orhanyarkin.saiman.ingest.store.DocumentRepository.Stored;
@@ -112,17 +115,25 @@ public class DocumentIndexer {
             Stage stage = new Stage();
             try {
                 return record(attempt(ticker, summary, stage));
-            } catch (MkkCircuitOpenException e) {
-                throw e;
+            } catch (MkkCircuitOpenException | MkkCredentialException e) {
+                throw e; // not the document's fault: stop the run
             } catch (RuntimeException e) {
+                if (e instanceof MkkHttpException http && http.notFoundCode()) {
+                    // ER005/ER008 on the detail call: MKK lists it but cannot serve it. Terminal, not a failure.
+                    documents.markMissing(id);
+                    return record(Outcome.MISSING);
+                }
                 int attempts = documents.recordFailure(id, maxAttempts);
-                // Log the class only: messages of unexpected errors could quote document content.
+                // MKK exception messages carry status and error code only; for anything else log the
+                // class only, since messages of unexpected errors could quote document content.
                 log.warn(
                         "Disclosure {} failed at stage {} (attempt {}): {}",
                         index,
                         stage.name,
                         attempts,
-                        e.getClass().getSimpleName());
+                        e instanceof MkkException
+                                ? e.getMessage()
+                                : e.getClass().getSimpleName());
                 if (attempts >= maxAttempts) {
                     deadLetters.park(Long.toString(index), stage.name, e, attempts);
                     return record(Outcome.FAILED);
