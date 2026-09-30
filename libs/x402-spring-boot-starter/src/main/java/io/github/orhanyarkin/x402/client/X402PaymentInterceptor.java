@@ -52,9 +52,11 @@ import org.springframework.http.client.support.HttpRequestWrapper;
  * allowlist, (c) an amount at or below the configured maximum and (d) a positive {@code
  * maxTimeoutSeconds} is selected — with no such offer, {@link PaymentRejectedException} is thrown
  * and nothing is signed. This interceptor also refuses to pay at all over a non-{@code https} URL
- * that isn't loopback ({@code localhost}/{@code 127.0.0.1}/{@code ::1}), before any signing: a
- * plaintext {@code PAYMENT-SIGNATURE} header is a bearer instrument for its authorization until
- * {@code validBefore}. {@link SpendGuard#reserve(PaymentIntent)} runs next, <em>before</em> any
+ * that isn't loopback ({@code localhost}/{@code 127.0.0.1}/{@code ::1}) or a host named exactly in
+ * {@code x402.client.allowed-plaintext-hosts} (see {@link PlaintextHostAllowlist}), before any
+ * signing: a plaintext {@code PAYMENT-SIGNATURE} header is a bearer instrument for its
+ * authorization until {@code validBefore}. {@link SpendGuard#reserve(PaymentIntent)} runs next,
+ * <em>before</em> any
  * signing (rule 3 in {@code CLAUDE.md}); a denial means {@link
  * PaymentSigner#signTransferWithAuthorization} is never called. Only once a reservation is granted
  * is an EIP-3009 authorization built (payer = the signer's address, {@code validAfter} {@value
@@ -62,7 +64,10 @@ import org.springframework.http.client.support.HttpRequestWrapper;
  * EIP-3009 requires {@code block.timestamp > validAfter} — {@code validBefore} at most {@value
  * #MAX_VALIDITY_SECONDS} seconds ahead, a fresh random nonce), signed and retried with a {@code
  * PAYMENT-SIGNATURE} header — never more than once. If signing or encoding itself fails, nothing
- * has been sent yet, so the reservation is released and the failure rethrown.
+ * has been sent yet, so the reservation is released and the failure rethrown. After signing and
+ * before the paid retry is sent, {@link SpendGuard#signed(SpendReservation, Eip3009Authorization)}
+ * is called; if it throws, the signature is dropped unsent, the reservation is released and the
+ * failure rethrown (fail closed).
  *
  * <p><b>Outcome bookkeeping.</b> A 2xx response carrying a successful {@code PAYMENT-RESPONSE}
  * header with a well-formed {@code transaction} hash commits the reservation. Anything else on the
@@ -115,9 +120,11 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
     private final X402Codec codec;
     private final long maxAmountPerRequest;
     private final List<String> allowedPayTo;
+    private final List<String> allowedPlaintextHosts;
     private final ObservationRegistry observationRegistry;
     private final Clock clock;
 
+    /** Creates an interceptor that pays only over {@code https} or to a loopback host. */
     public X402PaymentInterceptor(
             PaymentSigner signer,
             SpendGuard spendGuard,
@@ -125,7 +132,33 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
             long maxAmountPerRequest,
             List<String> allowedPayTo,
             ObservationRegistry observationRegistry) {
-        this(signer, spendGuard, codec, maxAmountPerRequest, allowedPayTo, observationRegistry, Clock.systemUTC());
+        this(signer, spendGuard, codec, maxAmountPerRequest, allowedPayTo, List.of(), observationRegistry);
+    }
+
+    /**
+     * Creates an interceptor that may also pay over plain {@code http} to the hosts named exactly
+     * in {@code allowedPlaintextHosts} (see {@link PlaintextHostAllowlist}).
+     *
+     * @throws IllegalStateException if {@code allowedPlaintextHosts} holds anything but exact host
+     *     names
+     */
+    public X402PaymentInterceptor(
+            PaymentSigner signer,
+            SpendGuard spendGuard,
+            X402Codec codec,
+            long maxAmountPerRequest,
+            List<String> allowedPayTo,
+            List<String> allowedPlaintextHosts,
+            ObservationRegistry observationRegistry) {
+        this(
+                signer,
+                spendGuard,
+                codec,
+                maxAmountPerRequest,
+                allowedPayTo,
+                allowedPlaintextHosts,
+                observationRegistry,
+                Clock.systemUTC());
     }
 
     /** Package-private: lets tests fix "now" instead of racing the system clock. */
@@ -137,6 +170,19 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
             List<String> allowedPayTo,
             ObservationRegistry observationRegistry,
             Clock clock) {
+        this(signer, spendGuard, codec, maxAmountPerRequest, allowedPayTo, List.of(), observationRegistry, clock);
+    }
+
+    /** Package-private: lets tests fix "now" instead of racing the system clock. */
+    X402PaymentInterceptor(
+            PaymentSigner signer,
+            SpendGuard spendGuard,
+            X402Codec codec,
+            long maxAmountPerRequest,
+            List<String> allowedPayTo,
+            List<String> allowedPlaintextHosts,
+            ObservationRegistry observationRegistry,
+            Clock clock) {
         this.signer = Objects.requireNonNull(signer, "signer must not be null");
         this.spendGuard = Objects.requireNonNull(spendGuard, "spendGuard must not be null");
         this.codec = Objects.requireNonNull(codec, "codec must not be null");
@@ -145,6 +191,10 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
         }
         this.maxAmountPerRequest = maxAmountPerRequest;
         this.allowedPayTo = PayToAllowlist.requireValidAndNormalize(allowedPayTo);
+        // The interceptor only ever pays on TestnetAssets.NETWORK (see isAcceptable), so that is
+        // the network the plaintext exception is checked against.
+        this.allowedPlaintextHosts =
+                PlaintextHostAllowlist.requireValidAndNormalize(allowedPlaintextHosts, TestnetAssets.NETWORK);
         this.observationRegistry = Objects.requireNonNull(observationRegistry, "observationRegistry must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
@@ -223,15 +273,25 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
         SpendReservation reservation = spendGuard.reserve(intent);
 
         String encodedPayload;
+        Eip3009Authorization authorization;
         try {
-            Eip3009Authorization authorization = buildAuthorization(chosen);
+            authorization = buildAuthorization(chosen);
             String signature = signer.signTransferWithAuthorization(authorization);
             PaymentPayload paymentPayload =
                     new PaymentPayload(2, null, chosen, new ExactEvmPayload(signature, authorization), null);
             encodedPayload = codec.encodePaymentPayload(paymentPayload);
         } catch (RuntimeException e) {
             // Nothing has been sent yet: safe to release (see SpendGuard#release's Javadoc).
-            spendGuard.release(reservation, "signing failed");
+            releaseQuietly(reservation, "signing failed", e);
+            throw e;
+        }
+        try {
+            // Last point before the signature can leave this process: the guard records (or
+            // vetoes) the signed authorization first.
+            spendGuard.signed(reservation, authorization);
+        } catch (RuntimeException e) {
+            // The signature exists only in this process's memory and is dropped here, never sent.
+            releaseQuietly(reservation, "signed hook failed", e);
             throw e;
         }
 
@@ -377,21 +437,40 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
     }
 
     /**
-     * @throws PaymentRejectedException if {@code uri}'s scheme is not {@code https} and its host
-     *     is not loopback ({@code localhost}/{@code 127.0.0.1}/{@code ::1}); a {@code
+     * @throws PaymentRejectedException if {@code uri}'s scheme is not {@code https}, and it is not
+     *     plain {@code http} to a loopback host ({@code localhost}/{@code 127.0.0.1}/{@code ::1}) or
+     *     to a host named exactly in {@code x402.client.allowed-plaintext-hosts}. A {@code
      *     PAYMENT-SIGNATURE} header is a bearer instrument for the authorization it carries until
      *     {@code validBefore}, so it must not travel in the clear or be forwarded by a redirect to
-     *     an untrusted host
+     *     an untrusted host. The host comes from {@link URI#getHost()}, so userinfo ({@code
+     *     http://seller-api@evil.com}) never counts as the host.
      */
-    private static void requireSecureOrLoopback(URI uri) {
+    private void requireSecureOrLoopback(URI uri) {
         if ("https".equalsIgnoreCase(uri.getScheme())) {
             return;
         }
-        String host = uri.getHost();
-        if (host != null && (host.equalsIgnoreCase("localhost") || host.equals("127.0.0.1") || host.equals("::1"))) {
-            return;
+        if ("http".equalsIgnoreCase(uri.getScheme())) {
+            String host = uri.getHost();
+            if (host != null
+                    && (host.equalsIgnoreCase("localhost")
+                            || host.equals("127.0.0.1")
+                            || host.equals("::1")
+                            || host.equals("[::1]")
+                            || PlaintextHostAllowlist.contains(allowedPlaintextHosts, host))) {
+                return;
+            }
         }
-        throw new PaymentRejectedException("refusing to sign a payment for a non-https URL that isn't loopback");
+        throw new PaymentRejectedException("refusing to sign a payment for a non-https URL that is neither loopback"
+                + " nor an allowed plaintext host");
+    }
+
+    /** Releases {@code reservation}; a failing release never hides the original failure. */
+    private void releaseQuietly(SpendReservation reservation, String reason, RuntimeException cause) {
+        try {
+            spendGuard.release(reservation, reason);
+        } catch (RuntimeException releaseFailure) {
+            cause.addSuppressed(releaseFailure);
+        }
     }
 
     /**

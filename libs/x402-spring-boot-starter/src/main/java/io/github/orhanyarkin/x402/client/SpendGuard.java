@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.x402.client;
 
+import io.github.orhanyarkin.x402.core.Eip3009Authorization;
 import io.github.orhanyarkin.x402.core.SettlementResponse;
 
 /**
@@ -22,6 +23,25 @@ public interface SpendGuard {
      *     {@code intent.idempotencyKey()} has already been used for a payment
      */
     SpendReservation reserve(PaymentIntent intent) throws SpendDeniedException;
+
+    /**
+     * Called by {@link X402PaymentInterceptor} after {@code reservation}'s payment was signed and
+     * <b>before</b> the paid request is sent. A guard that tracks money in flight records what it
+     * needs to reconcile the payment later (e.g. {@code from}, {@code nonce}, {@code validBefore}
+     * for an {@code authorizationState(from, nonce)} query) here, durably, while nothing has left
+     * the process yet.
+     *
+     * <p><b>Fail closed:</b> if this throws, the interceptor never sends the signed authorization;
+     * it calls {@link #release} for {@code reservation} and rethrows. Implementations must not log
+     * or store anything that would let a third party settle the authorization (this method is
+     * never given the signature itself).
+     *
+     * <p>The default does nothing, which keeps existing guards source- and behaviour-compatible.
+     *
+     * @param reservation the reservation {@link #reserve} returned for this payment
+     * @param authorization the signed EIP-3009 authorization about to be sent
+     */
+    default void signed(SpendReservation reservation, Eip3009Authorization authorization) {}
 
     /** Confirms {@code reservation}'s payment settled. */
     void commit(SpendReservation reservation, SettlementResponse settlement);
