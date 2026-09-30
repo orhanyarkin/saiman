@@ -135,7 +135,7 @@ class GroundedGenerator {
                         .content();
             } catch (RuntimeException e) {
                 // Class name only: router and provider messages are never logged or returned.
-                log.warn("model call failed: {}", e.getClass().getSimpleName());
+                log.warn("model call failed: {} at {}", e.getClass().getSimpleName(), topFrames(e));
                 if (!provablyNotSent(e)) {
                     X402PaymentContext.markWorkDone(request);
                 }
@@ -286,5 +286,13 @@ class GroundedGenerator {
                 .filter(chunk -> KAP_URL.matcher(chunk.sourceUrl()).matches())
                 .filter(chunk -> ticker.equals(chunk.ticker()))
                 .toList();
+    }
+
+    /** Top stack frames without the message, so provider text never reaches the log. */
+    private static String topFrames(Throwable e) {
+        return java.util.Arrays.stream(e.getStackTrace())
+                .limit(6)
+                .map(f -> f.getClassName().replaceAll("^.*\\.", "") + "." + f.getMethodName() + ":" + f.getLineNumber())
+                .collect(java.util.stream.Collectors.joining(" < "));
     }
 }
