@@ -22,6 +22,11 @@ server:
 x402:
   server:
     pay-to: ${X402_SELLER_PAYTO_ADDRESS}
+    # Settle margin = connect + read + 5 s; with the 25 s LLM deadline it must fit the 45 s window:
+    # 25 + 3 + 12 + 5 = 45 (see seller.llm.deadline).
+    facilitator:
+      connect-timeout: 3s
+      read-timeout: 12s
 
 seller:
   disclosures:
@@ -41,8 +46,9 @@ seller:
     max-in-flight-per-payer: 2
     max-runs-per-payer-per-hour: 30
     max-unsettled-per-day: 100 # runs started whose payment has not settled, all payers, per UTC day
-    # End-to-end budget per request, cut to (validBefore - now - facilitator read timeout - 5 s) when the
-    # authorization expires sooner. Startup fails unless deadline + read timeout (15 s) + 5 s <= 45 s,
+    # End-to-end budget per request, cut to (validBefore - now - facilitator connect - read timeout - 5 s)
+    # when the authorization expires sooner. Startup fails unless deadline + connect (3 s) + read (12 s)
+    # timeout + 5 s <= 45 s,
     # the authorization window the LLM endpoints demand.
     deadline: 25s
     single-flight-wait: 5s

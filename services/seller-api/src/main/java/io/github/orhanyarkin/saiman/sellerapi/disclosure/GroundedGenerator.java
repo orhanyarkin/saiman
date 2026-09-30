@@ -126,11 +126,12 @@ class GroundedGenerator {
      * Refuses to start a model call that could outlive the request's deadline: less time left than
      * the model timeout means a late (never served, never settled) answer the provider still bills.
      *
-     * @throws ModelUnavailableException if {@code deadline} has less than the model timeout left
+     * @throws InsufficientTimeException if {@code deadline} has less than the model timeout left (a
+     *     per-request refusal, never negative-cached)
      */
     void requireTimeForModel(Deadline deadline) {
         if (deadline.remaining().compareTo(modelTimeout) < 0) {
-            throw new ModelUnavailableException();
+            throw new InsufficientTimeException();
         }
     }
 
@@ -145,8 +146,10 @@ class GroundedGenerator {
      * @param task the task text; treated as untrusted whatever its origin
      * @param deadline the request's time budget: no model call past it, and no answer returned after it
      *     (the caller must hold a run slot, see {@link #withRunSlot})
-     * @throws ModelUnavailableException if the router refused or failed, less than the model timeout
-     *     was left before the call (nothing is sent then), or the deadline passed during it
+     * @throws InsufficientTimeException if less than the model timeout was left before the call
+     *     (nothing is sent then)
+     * @throws ModelUnavailableException if the router refused or failed, or the deadline passed during
+     *     the call
      * @throws RunGuardUnavailableException if there is no current request
      * @throws MalformedModelOutputException if the reply does not match the schema
      */

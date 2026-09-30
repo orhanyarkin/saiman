@@ -71,10 +71,11 @@ class RagStartupTests {
 
     @Test
     void aDeadlineThatNoLongerFitsTheAuthorizationWindowFailsStartup() {
-        // 26 s + the 15 s facilitator read timeout + 5 s > the 45 s window the LLM endpoints demand.
+        // 26 s + the 3 s connect + 12 s read timeout of the facilitator + 5 s > the 45 s window.
         assertStartupFails("seller.llm.deadline", "--seller.llm.deadline=26s");
         // Same rule from the other side: a longer settle call eats into the handler's window.
-        assertStartupFails("seller.llm.deadline", "--x402.server.facilitator.read-timeout=16s");
+        assertStartupFails("seller.llm.deadline", "--x402.server.facilitator.read-timeout=13s");
+        assertStartupFails("seller.llm.deadline", "--x402.server.facilitator.connect-timeout=4s");
     }
 
     @Test

@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class RequestDeadlinesTests {
 
     private static final Duration DEADLINE = Duration.ofSeconds(25);
-    private static final Duration SETTLE_MARGIN = Duration.ofSeconds(20); // 15 s read timeout + 5 s
+    private static final Duration SETTLE_MARGIN = Duration.ofSeconds(20); // 3 s connect + 12 s read + 5 s
     private static final Instant NOW = Instant.parse("2026-09-30T12:00:00Z");
 
     @Test
@@ -52,16 +52,30 @@ class RequestDeadlinesTests {
         assertThatNoException()
                 .isThrownBy(() -> RequestDeadlines.requireFitsWindow(
                         Duration.ofSeconds(25),
-                        Duration.ofSeconds(15),
+                        Duration.ofSeconds(3),
+                        Duration.ofSeconds(12),
                         LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS));
         assertThatThrownBy(() -> RequestDeadlines.requireFitsWindow(
                         Duration.ofMillis(25_001),
-                        Duration.ofSeconds(15),
+                        Duration.ofSeconds(3),
+                        Duration.ofSeconds(12),
                         LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS))
                 .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> RequestDeadlines.requireFitsWindow(
                         Duration.ofSeconds(25),
-                        Duration.ofSeconds(16),
+                        Duration.ofSeconds(3),
+                        Duration.ofSeconds(13),
+                        LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void theConnectTimeoutCountsTowardsTheWindowToo() {
+        // 25 + 4 + 12 + 5 = 46 > 45: a slower connect alone is enough to fail the rule.
+        assertThatThrownBy(() -> RequestDeadlines.requireFitsWindow(
+                        Duration.ofSeconds(25),
+                        Duration.ofSeconds(4),
+                        Duration.ofSeconds(12),
                         LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS))
                 .isInstanceOf(IllegalStateException.class);
     }

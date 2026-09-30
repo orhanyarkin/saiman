@@ -34,8 +34,12 @@ class ProductionTimeBudgetTests extends RagTestBase {
         assertThat(ingestProperties.retryAttempts()).isLessThanOrEqualTo(2);
 
         assertThat(routerProperties.openai().timeout()).isLessThan(llm.deadline());
-        Duration handlerPlusSettle =
-                llm.deadline().plus(x402.facilitator().readTimeout()).plusSeconds(5);
+        // Settle = connect + read timeout of the facilitator call, plus the 5 s margin.
+        assertThat(x402.facilitator().connectTimeout()).isEqualTo(Duration.ofSeconds(3));
+        Duration handlerPlusSettle = llm.deadline()
+                .plus(x402.facilitator().connectTimeout())
+                .plus(x402.facilitator().readTimeout())
+                .plusSeconds(5);
         assertThat(handlerPlusSettle)
                 .isLessThanOrEqualTo(Duration.ofSeconds(LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS));
     }
