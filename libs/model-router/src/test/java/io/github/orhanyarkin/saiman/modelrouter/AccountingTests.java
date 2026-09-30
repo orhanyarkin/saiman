@@ -307,11 +307,11 @@ class AccountingTests {
     void usageThatOverflowsThePriceArithmeticKeepsTheEstimate() {
         RouterProperties base = RouterProperties.defaults();
         var prices = new java.util.HashMap<>(base.prices());
-        prices.put("gpt-5-nano", new RouterProperties.Price(1_000_000_000_000L, 0)); // 1e12 USD micros per MTok
+        prices.put("gpt-5-nano", new RouterProperties.Price(10_000_000_000L, 0)); // 1e10 USD micros per MTok
         var props = new RouterProperties(
-                base.routes(), base.embedding(), 1_000_000_000_000L, Map.copyOf(prices), base.openai(), null);
-        var guard = new RecordingGuard(1_000_000_000_000L);
-        var chat = calling(Chunk.usage(Integer.MAX_VALUE, 0)); // 2.1e9 tokens * 1e12 = 2e21, beyond a long
+                base.routes(), base.embedding(), 700_000L, Map.copyOf(prices), base.openai(), null);
+        var guard = new RecordingGuard(700_000L);
+        var chat = calling(Chunk.usage(Integer.MAX_VALUE, 0)); // 2.1e9 tokens * 1e10 = 2e19, beyond a long
 
         routerWith(props, chat, new FakeEmbeddingModel(1536), guard, RouterMetrics.NOOP)
                 .chatClient(Tier.TIER0, DataClass.PUBLIC)

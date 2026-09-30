@@ -11,6 +11,8 @@ dependencies {
     api(libs.spring.ai.client.chat)
     implementation(libs.spring.ai.openai)
     implementation(libs.spring.boot.autoconfigure)
+    // Circuit breaker per route for the OpenAI primary -> fallback model switch; core module only.
+    implementation(libs.resilience4j.circuitbreaker)
     // Daily USD cap lives in Valkey; the counter is only touched when a StringRedisTemplate exists.
     compileOnly(libs.spring.boot.starter.data.redis)
     compileOnly(libs.micrometer.core)

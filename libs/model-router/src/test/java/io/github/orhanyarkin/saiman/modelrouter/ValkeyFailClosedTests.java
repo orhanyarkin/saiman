@@ -48,4 +48,47 @@ class ValkeyFailClosedTests {
             factory.destroy();
         }
     }
+
+    @Test
+    void deadValkeyBlocksAScopedCallBeforeTheModelIsReached() {
+        var config = LettuceClientConfiguration.builder()
+                .commandTimeout(Duration.ofMillis(500))
+                .build();
+        var factory = new LettuceConnectionFactory(new RedisStandaloneConfiguration("127.0.0.1", 1), config);
+        factory.afterPropertiesSet();
+        try {
+            var scoped = new ValkeyScopedCostGuard(new StringRedisTemplate(factory));
+            var chat = new FakeChatModel("ok");
+            var router = new DefaultModelRouter(
+                    io.github.orhanyarkin.saiman.modelrouter.RouterProperties.defaults(),
+                    new ModelFactory() {
+                        @Override
+                        public org.springframework.ai.chat.model.ChatModel chatModel(RouterProperties.Route route) {
+                            return chat;
+                        }
+
+                        @Override
+                        public org.springframework.ai.embedding.EmbeddingModel embeddingModel(
+                                RouterProperties.Embedding route) {
+                            return new FakeEmbeddingModel(1536);
+                        }
+                    },
+                    new InMemoryCostGuard(700_000, new MutableClock(Instant.parse("2026-09-29T10:00:00Z"))),
+                    RouterMetrics.NOOP,
+                    scoped,
+                    io.micrometer.observation.ObservationRegistry.NOOP);
+
+            assertThatThrownBy(() -> router.chatClient(Tier.TIER0, DataClass.PUBLIC)
+                            .prompt()
+                            .advisors(a -> a.param(RouterAdvisorParams.COST_SCOPE, "run-1"))
+                            .user("hi")
+                            .call()
+                            .content())
+                    .isInstanceOf(RuntimeException.class);
+
+            assertThat(chat.callCount()).isZero();
+        } finally {
+            factory.destroy();
+        }
+    }
 }

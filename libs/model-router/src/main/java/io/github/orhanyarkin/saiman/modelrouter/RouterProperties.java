@@ -24,6 +24,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param openai provider credentials and client limits
  * @param costGuard {@code memory} to accept a per-process daily cap when no Valkey is configured;
  *     absent otherwise (see {@link ModelRouterAutoConfiguration})
+ * @param requireCostScope {@code true} refuses every chat call that carries no {@link
+ *     RouterAdvisorParams#COST_SCOPE} before anything is sent (the orchestrator sets it)
+ * @param maxScopeBudgetUsdMicros upper bound for a caller-supplied scope budget (USD micro-dollars)
  */
 @ConfigurationProperties(prefix = "saiman.router")
 public record RouterProperties(
@@ -32,7 +35,27 @@ public record RouterProperties(
         @DefaultValue("700000") long dailyCapUsdMicros,
         Map<String, Price> prices,
         OpenAi openai,
-        @Nullable String costGuard) {
+        @Nullable String costGuard,
+        boolean requireCostScope,
+        @DefaultValue("200000") long maxScopeBudgetUsdMicros) {
+
+    @ConstructorBinding
+    public RouterProperties {
+        routes = routes == null ? Map.of() : Map.copyOf(routes);
+        prices = prices == null ? Map.of() : Map.copyOf(prices);
+        openai = openai == null ? new OpenAi(null, 1, Duration.ofSeconds(30)) : openai;
+    }
+
+    /** The properties without scope settings (scope not required, default upper bound). */
+    public RouterProperties(
+            Map<Tier, Route> routes,
+            @Nullable Embedding embedding,
+            long dailyCapUsdMicros,
+            Map<String, Price> prices,
+            OpenAi openai,
+            @Nullable String costGuard) {
+        this(routes, embedding, dailyCapUsdMicros, prices, openai, costGuard, false, 200_000L);
+    }
 
     /** The library defaults only (no application overrides): for tests and fixtures. */
     public static RouterProperties defaults() {
@@ -41,13 +64,21 @@ public record RouterProperties(
 
     /** A copy with a different daily cap. */
     public RouterProperties withDailyCapUsdMicros(long cap) {
-        return new RouterProperties(routes, embedding, cap, prices, openai, costGuard);
+        return new RouterProperties(
+                routes, embedding, cap, prices, openai, costGuard, requireCostScope, maxScopeBudgetUsdMicros);
     }
 
-    public RouterProperties {
-        routes = routes == null ? Map.of() : Map.copyOf(routes);
-        prices = prices == null ? Map.of() : Map.copyOf(prices);
-        openai = openai == null ? new OpenAi(null, 1, Duration.ofSeconds(30)) : openai;
+    /** A copy with different OpenAI settings (used to inject the key read from a config tree). */
+    RouterProperties withOpenai(OpenAi replacement) {
+        return new RouterProperties(
+                routes,
+                embedding,
+                dailyCapUsdMicros,
+                prices,
+                replacement,
+                costGuard,
+                requireCostScope,
+                maxScopeBudgetUsdMicros);
     }
 
     /**
@@ -61,6 +92,7 @@ public record RouterProperties(
      * @param region hosting region, informational
      * @param reasoningEffort OpenAI {@code reasoning_effort} for reasoning models ({@code minimal}, {@code low}, ...);
      *     absent for models that do not reason. Hidden reasoning is billed and counts against the token limit.
+     * @param fallback the same provider's backup model, used only on connect/timeout/429/5xx; absent for none
      */
     public record Route(
             String provider,
@@ -68,10 +100,38 @@ public record RouterProperties(
             int maxCompletionTokens,
             Set<DataClass> allowedDataClasses,
             String region,
-            @Nullable String reasoningEffort) {
+            @Nullable String reasoningEffort,
+            @Nullable Fallback fallback) {
         @ConstructorBinding
         public Route {
             allowedDataClasses = allowedDataClasses == null ? Set.of() : Set.copyOf(allowedDataClasses);
+        }
+
+        /** A route without a fallback. */
+        public Route(
+                String provider,
+                String model,
+                int maxCompletionTokens,
+                Set<DataClass> allowedDataClasses,
+                String region,
+                @Nullable String reasoningEffort) {
+            this(provider, model, maxCompletionTokens, allowedDataClasses, region, reasoningEffort, null);
+        }
+
+        /** The fallback as a route of its own: same provider, data classes and region, its own limits. */
+        @Nullable
+        Route fallbackRoute() {
+            if (fallback == null) {
+                return null;
+            }
+            return new Route(
+                    provider,
+                    fallback.model(),
+                    fallback.maxCompletionTokens(),
+                    allowedDataClasses,
+                    region,
+                    fallback.reasoningEffort(),
+                    null);
         }
 
         /** A route without a reasoning effort. */
@@ -84,6 +144,16 @@ public record RouterProperties(
             this(provider, model, maxCompletionTokens, allowedDataClasses, region, null);
         }
     }
+
+    /**
+     * The backup model of a route (same provider, same data classes, same region).
+     *
+     * @param model provider model id; needs an entry in {@code prices}
+     * @param maxCompletionTokens hard output limit, {@code > 0}
+     * @param reasoningEffort OpenAI {@code reasoning_effort}, absent for models that do not reason
+     */
+    public record Fallback(
+            String model, int maxCompletionTokens, @Nullable String reasoningEffort) {}
 
     /**
      * The embedding route.
