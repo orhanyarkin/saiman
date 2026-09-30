@@ -94,7 +94,7 @@ fi
 #    compose `secrets:` (ADR-0009 + M2 amendment: exactly ingest -> {mkk_credentials,
 #    openai_api_key}, seller-api -> {openai_api_key}, orchestrator -> {buyer_key}; the M2
 #    secrets must be file-sourced from secrets/<name>; no service may set OPENAI_API_KEY,
-#    OPENAI_BASE_URL, AZURE_OPENAI_BASE_URL or OPENAI_LOG in its environment).
+#    OPENAI_BASE_URL, AZURE_OPENAI_BASE_URL, OPENAI_LOG, SAIMAN_INGEST_MKK_* or SPRING_CONFIG_IMPORT|LOCATION|ADDITIONAL_LOCATION in its environment).
 #    The buyer key reaches only the orchestrator, from M3,
 #    via `secrets:` mounted at /run/secrets/, read with
 #    `spring.config.import=optional:configtree:/run/secrets/`). This scans every
@@ -111,7 +111,7 @@ fi
 bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
   . as $root
   | def allowed: {"ingest": ["mkk_credentials", "openai_api_key"], "seller-api": ["openai_api_key"], "orchestrator": ["buyer_key"]};
-    def forbidden_env: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_BASE_URL", "OPENAI_LOG", "SPRING_APPLICATION_JSON", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS"];
+    def forbidden_env: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_BASE_URL", "OPENAI_LOG", "SPRING_APPLICATION_JSON", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "SPRING_CONFIG_IMPORT", "SPRING_CONFIG_LOCATION", "SPRING_CONFIG_ADDITIONAL_LOCATION"];
     def keyish: test("(?i)(PRIVATE_?KEY|/secrets(/|$)|\\.key$|\\.pem$)|0x[0-9a-fA-F]{64}");
     $root.services | to_entries[] | .key as $svc | .value as $s
   | ( if ($s.env_file // []) | length > 0
@@ -126,8 +126,8 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
       | ($root.secrets // {})[$src] as $def
       | select(($def.file // "") != ($secrets_dir + "/" + $src))
       | "\($svc): secret \"\($src)\" must be file-sourced from the repo secrets/\($src) (not environment or another path)" ),
-    ( ($s.environment // {}) | keys[] | select(. as $k | (forbidden_env | index($k)) != null or ($k | test("^SPRING_AI_OPENAI_")))
-      | "\($svc): environment defines \(.) (the OpenAI key must arrive only as a secret file; OPENAI_BASE_URL / SPRING_AI_OPENAI_* would redirect the key, OPENAI_LOG=debug dumps prompts, SPRING_APPLICATION_JSON / *JAVA_OPTIONS can inject any property)" ),
+    ( ($s.environment // {}) | keys[] | select(. as $k | (forbidden_env | index($k)) != null or ($k | test("^(SPRING_AI_OPENAI_|SAIMAN_INGEST_MKK_)")))
+      | "\($svc): environment defines \(.) (the OpenAI key must arrive only as a secret file; OPENAI_BASE_URL / SPRING_AI_OPENAI_* would redirect the key, OPENAI_LOG=debug dumps prompts, SPRING_APPLICATION_JSON / SPRING_CONFIG_* / *JAVA_OPTIONS can inject any property or load arbitrary config; SAIMAN_INGEST_MKK_* would redirect the MKK Basic credential)" ),
     ( ($s.environment // {}) | keys[] | select(contains("$"))
       | "\($svc): environment key \"\(.)\" contains $ (interpolated names would bypass this check)" ),
     ( ($s.configs // [])[]? | .source as $src | (($root.configs // {})[$src] // {})
