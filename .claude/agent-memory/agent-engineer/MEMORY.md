@@ -1,4 +1,5 @@
 - [Boot 4.1 TestRestTemplate relocation](boot41-test-client-relocation.md) — use RestClient + @LocalServerPort instead; TestRestTemplate needs a starter not in the catalog.
 - [datasource-micrometer span shape](datasource-micrometer-span-shape.md) — JDBC spans are named "query"/"connection"/"result-set"; the "jdbc." prefix is only in attribute keys.
 - [Boot 4 test standard](boot4-test-standard.md) — RestTestClient, Testcontainers as beans, *Tests naming; supersedes older test-client notes
+- [Servlet path guard testing](servlet-path-guard-testing.md) — raw-URI prefix filters are bypassable; test with raw socket on real Tomcat
 - [Spring AI 2.0.1 OpenAI quirks](spring-ai-2-openai-quirks.md) — builder API, lazy key handling, advisor/usage shapes, Boot 4.1 autoconfig names
