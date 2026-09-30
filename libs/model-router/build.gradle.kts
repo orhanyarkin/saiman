@@ -1,5 +1,6 @@
 plugins {
     id("saiman.java-library")
+    `java-test-fixtures`
 }
 
 description = "Model router: tiers, data-classification policy, cost caps and metrics in front of Spring AI models (ADR-0011)."
@@ -13,8 +14,19 @@ dependencies {
     // Daily USD cap lives in Valkey; the counter is only touched when a StringRedisTemplate exists.
     compileOnly(libs.spring.boot.starter.data.redis)
     compileOnly(libs.micrometer.core)
-    implementation(project(":libs:shared"))
+    // Money (USD micro-dollars) appears in the public API of CostGuard.
+    api(project(":libs:shared"))
+    annotationProcessor(libs.spring.boot.configuration.processor)
+
+    // FakeEmbeddingModel, FakeChatModel, FakeModelRouter for ingest / seller-api tests (no key, no network).
+    testFixturesImplementation(platform(libs.spring.boot.dependencies))
+    testFixturesApi(platform(libs.spring.ai.bom))
+    testFixturesApi(libs.spring.ai.client.chat)
+    testFixturesImplementation(libs.jspecify)
 
     testImplementation(libs.spring.boot.starter.data.redis)
     testImplementation(libs.micrometer.core)
+    testImplementation(libs.spring.boot.testcontainers)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit.jupiter)
 }

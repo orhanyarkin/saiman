@@ -1,0 +1,20 @@
+# USD micro-dollars per million tokens (1_000_000 = 1 USD), as long integers (CLAUDE.md rule 4).
+# Figures follow the docs/ARCHITECTURE.md table (verified 2026-09); config wins over the table.
+saiman:
+  router:
+    prices:
+      gpt-5-nano:
+        input-usd-micros-per-mtok: 100000
+        output-usd-micros-per-mtok: 500000
+      gpt-5-mini:
+        input-usd-micros-per-mtok: 200000
+        output-usd-micros-per-mtok: 1200000
+      gpt-5:
+        input-usd-micros-per-mtok: 750000
+        output-usd-micros-per-mtok: 3750000
+      gpt-5-chat:
+        input-usd-micros-per-mtok: 1000000
+        output-usd-micros-per-mtok: 5000000
+      text-embedding-3-small:
+        input-usd-micros-per-mtok: 20000
+        output-usd-micros-per-mtok: 0
