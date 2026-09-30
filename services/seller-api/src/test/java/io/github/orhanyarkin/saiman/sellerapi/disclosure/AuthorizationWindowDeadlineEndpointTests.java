@@ -17,8 +17,9 @@ import org.springframework.test.context.TestPropertySource;
  * (here: a slow {@code /verify}) gets a short deadline, and the model is not called when less than
  * the model timeout remains.
  *
- * <p>Scaled-down timeouts that still pass the startup rule {@code deadline + read timeout + 5 s <=
- * 45 s}: deadline 3 s, facilitator read timeout 37 s (settle margin 42 s), model timeout 1.5 s. An
+ * <p>Scaled-down timeouts that still pass the startup rule {@code deadline + connect + read timeout
+ * + 5 s <= 45 s}: deadline 3 s, facilitator connect 3 s and read timeout 34 s (settle margin 42 s),
+ * model timeout 1.5 s. An
  * authorization valid for 46 s leaves {@code ~46 - 42 = 4 s}, capped at 3 s, when it arrives
  * promptly; after a 3 s {@code /verify} it leaves under 1 s.
  */
@@ -26,7 +27,7 @@ import org.springframework.test.context.TestPropertySource;
         properties = {
             "seller.llm.deadline=3s",
             "saiman.router.openai.timeout=1500ms",
-            "x402.server.facilitator.read-timeout=37s"
+            "x402.server.facilitator.read-timeout=34s"
         })
 class AuthorizationWindowDeadlineEndpointTests extends RagTestBase {
 
@@ -64,6 +65,39 @@ class AuthorizationWindowDeadlineEndpointTests extends RagTestBase {
         assertThat(router.modelCalls()).isZero();
         assertThat(INGEST.retrieveCalls()).isZero();
         assertThat(FACILITATOR.settleCallCount()).isZero();
+    }
+
+    @Test
+    void aSummaryRefusedForLackOfTimeIsNotNegativeCachedAndTheNextFullWindowRequestGenerates() {
+        INGEST.retrieves(List.of(FakeIngestServer.chunk("kap:5:0000", "THYAO", "one")), "v-no-poison");
+        router.replyWith("{\"summary\":\"Summary.\",\"citedChunkIds\":[\"kap:5:0000\"]}");
+        String shortWindow = paymentWithWindow("10000", 46);
+        FACILITATOR.injectVerifyDelay(Duration.ofSeconds(3));
+
+        client.get()
+                .uri(SUMMARY)
+                .header(X402Headers.PAYMENT_SIGNATURE, shortWindow)
+                .exchange()
+                .expectStatus()
+                .isEqualTo(503);
+
+        assertThat(router.modelCalls()).isZero();
+        assertThat(redis.hasKey(DisclosureSummaryCache.failureKey("THYAO", "v-no-poison")))
+                .isFalse();
+        assertThat(redis.hasKey(DisclosureSummaryCache.lockKey("THYAO", "v-no-poison")))
+                .isFalse();
+
+        // Someone else, with a full window, is not affected by that refusal.
+        FACILITATOR.injectVerifyDelay(Duration.ZERO);
+        client.get()
+                .uri(SUMMARY)
+                .header(X402Headers.PAYMENT_SIGNATURE, paymentWithWindow("10000", 46))
+                .exchange()
+                .expectStatus()
+                .isOk();
+
+        assertThat(router.modelCalls()).isEqualTo(1);
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
     }
 
     @Test

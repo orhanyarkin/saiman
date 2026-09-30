@@ -1,11 +1,13 @@
 package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 
 import io.github.orhanyarkin.saiman.sellerapi.retrieval.IngestClient;
+import io.github.orhanyarkin.saiman.sellerapi.retrieval.RetrievalUnavailableException;
 import io.github.orhanyarkin.saiman.shared.retrieval.IndexedTicker;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -19,19 +21,24 @@ import org.springframework.stereotype.Component;
  * <p>The catalogue is free and unauthenticated, so the cache is what keeps it from being a lever
  * against ingest: at most one refresh runs at a time (others wait for it, then read its result),
  * so a burst of requests costs ingest one call per TTL. On a failed refresh the last good value is
- * served until it is replaced; with nothing cached the failure surfaces as a 503.
+ * served until it is replaced; with nothing cached the failure surfaces as a 503 and is remembered
+ * for {@link #STALE_RETRY_AFTER}, so an outage costs ingest at most one call per back-off window
+ * and requests during it are refused at once. Waiting for the refresh lock is bounded by {@link
+ * #LOCK_WAIT}: a request that can not get it in time is served the stale value, or refused.
  */
 @Component
 @ConditionalOnProperty(name = "seller.disclosures.source", havingValue = "rag")
 class IngestTickerCatalog implements TickerCatalog {
 
     static final Duration STALE_RETRY_AFTER = Duration.ofSeconds(5);
+    static final Duration LOCK_WAIT = Duration.ofSeconds(2);
 
     private final IngestClient ingest;
     private final DisclosureProperties properties;
     private final Clock clock;
     private final ReentrantLock refreshLock = new ReentrantLock();
     private volatile @Nullable Cached cached;
+    private volatile @Nullable Instant failedUntil;
 
     IngestTickerCatalog(IngestClient ingest, DisclosureProperties properties, Clock clock) {
         this.ingest = ingest;
@@ -47,13 +54,24 @@ class IngestTickerCatalog implements TickerCatalog {
         if (current != null && clock.instant().isBefore(current.expiresAt())) {
             return current.response();
         }
+        if (current == null && backingOff()) {
+            throw new RetrievalUnavailableException();
+        }
         // A ReentrantLock rather than synchronized: it does not pin a virtual thread while the
-        // refresh waits on the network.
-        refreshLock.lock();
+        // refresh waits on the network, and tryLock bounds how long a request queues behind it.
+        if (!acquire()) {
+            if (current != null) {
+                return current.response();
+            }
+            throw new RetrievalUnavailableException();
+        }
         try {
             current = cached;
             if (current != null && clock.instant().isBefore(current.expiresAt())) {
                 return current.response();
+            }
+            if (current == null && backingOff()) {
+                throw new RetrievalUnavailableException();
             }
             List<IndexedTicker> indexed;
             try {
@@ -65,8 +83,10 @@ class IngestTickerCatalog implements TickerCatalog {
                     cached = new Cached(current.response(), clock.instant().plus(STALE_RETRY_AFTER));
                     return current.response();
                 }
+                failedUntil = clock.instant().plus(STALE_RETRY_AFTER);
                 throw e;
             }
+            failedUntil = null;
             TickerListResponse response = TickerListResponse.of(
                     indexed.stream()
                             .map(t -> new TickerListResponse.Ticker(t.ticker(), t.documents()))
@@ -76,6 +96,20 @@ class IngestTickerCatalog implements TickerCatalog {
             return response;
         } finally {
             refreshLock.unlock();
+        }
+    }
+
+    private boolean backingOff() {
+        Instant until = failedUntil;
+        return until != null && clock.instant().isBefore(until);
+    }
+
+    private boolean acquire() {
+        try {
+            return refreshLock.tryLock(LOCK_WAIT.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 }

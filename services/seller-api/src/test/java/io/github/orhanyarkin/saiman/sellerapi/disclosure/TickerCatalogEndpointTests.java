@@ -19,11 +19,8 @@ class TickerCatalogEndpointTests extends RagTestBase {
 
     @Test
     void theCatalogIsFreeCachedCleanedAndSurvivesAnIngestOutageOnceCached() {
-        // Nothing cached yet and ingest down: a 503 with a fixed message, no payment involved.
-        INGEST.failWith(500);
-        client.get().uri("/v1/tickers").exchange().expectStatus().isEqualTo(503);
-
-        INGEST.reset();
+        // (Nothing cached and ingest down: see IngestTickerCatalogTests; the back-off would outlast
+        // this test's first request.)
         INGEST.tickers(List.of(
                 new IndexedTicker("THYAO", 12, 40),
                 new IndexedTicker("GARAN", 3, 9),

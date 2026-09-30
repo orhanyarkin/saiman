@@ -65,7 +65,11 @@ class RagDisclosureSummaryService implements DisclosureSummaryService {
             throw new TickerNotFoundException(ticker);
         }
         return cache.getOrGenerate(
-                ticker, retrieved.corpusVersion(), deadline, () -> generate(ticker, excerpts, deadline));
+                ticker,
+                retrieved.corpusVersion(),
+                deadline,
+                () -> generator.requireTimeForModel(deadline),
+                () -> generate(ticker, excerpts, deadline));
     }
 
     private DisclosureSummaryResponse generate(String ticker, List<RetrievedChunk> excerpts, Deadline deadline) {

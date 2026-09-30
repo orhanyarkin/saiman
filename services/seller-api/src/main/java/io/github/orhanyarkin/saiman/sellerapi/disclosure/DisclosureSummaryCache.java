@@ -72,11 +72,19 @@ class DisclosureSummaryCache {
      * The cached summary, or the result of {@code generator} (run by exactly one of the concurrent
      * callers for this key; the others wait briefly for its result).
      *
+     * @param requireTime run after the cache and negative-cache checks and BEFORE the lock is taken;
+     *     throws {@link InsufficientTimeException} when this request has too little time left to
+     *     generate. A request that can not generate must never become the winner, and that refusal
+     *     is never recorded as a failure of the key (it says nothing about the ticker).
      * @throws ModelUnavailableException if a recent generation for this key failed (remembered for
      *     {@code seller.llm.negative-cache-ttl}), or the winner's result did not arrive in time
      */
     DisclosureSummaryResponse getOrGenerate(
-            String ticker, String corpusVersion, Deadline deadline, Supplier<DisclosureSummaryResponse> generator) {
+            String ticker,
+            String corpusVersion,
+            Deadline deadline,
+            Runnable requireTime,
+            Supplier<DisclosureSummaryResponse> generator) {
         Optional<DisclosureSummaryResponse> hit = get(ticker, corpusVersion);
         if (hit.isPresent()) {
             return hit.get();
@@ -84,6 +92,7 @@ class DisclosureSummaryCache {
         if (failedRecently(ticker, corpusVersion)) {
             throw new ModelUnavailableException();
         }
+        requireTime.run();
         String token = UUID.randomUUID().toString();
         if (!tryLock(ticker, corpusVersion, token)) {
             return awaitWinner(ticker, corpusVersion, deadline);

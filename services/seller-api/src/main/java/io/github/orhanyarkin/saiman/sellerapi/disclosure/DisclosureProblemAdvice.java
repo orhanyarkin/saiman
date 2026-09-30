@@ -30,6 +30,12 @@ class DisclosureProblemAdvice {
         return problem(HttpStatus.SERVICE_UNAVAILABLE, "Answer generation is temporarily unavailable");
     }
 
+    /** Same status and text as {@link #modelUnavailable()}: the client learns nothing more. */
+    @ExceptionHandler(InsufficientTimeException.class)
+    ProblemDetail insufficientTime() {
+        return problem(HttpStatus.SERVICE_UNAVAILABLE, "Answer generation is temporarily unavailable");
+    }
+
     @ExceptionHandler(RunLimitExceededException.class)
     ProblemDetail runLimitExceeded() {
         return problem(HttpStatus.TOO_MANY_REQUESTS, "Too many answers requested right now; retry later");
