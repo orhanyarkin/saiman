@@ -7,3 +7,4 @@
 - [seller-api RAG testing notes](seller-api-rag-testing-notes.md) — singleton containers, SwitchableRouter, breaker isolation, manual JSON parsing, Bash-tool quirks.
 - [Worktree branch sync](worktree-branch-sync.md) — when a worktree is behind the task branch and git checkout/merge get sandbox-blocked, use path-scoped `git checkout <branch> -- <paths>` first.
 - [Boot 4 MVC wiring gotchas](boot4-mvc-wiring-gotchas.md) — WebMvcConfigurer circular deps (use ObjectProvider), ContentCachingResponseWrapper's real buffering behaviour, no Redis ConnectionDetailsFactory, ObservationRegistry auto-config ordering, micrometer-core absent from the starter's classpath.
+- [Modulith/evm-rpc notes](modulith-evmrpc-notes.md) — verified Modulith 2.1.1 property formats, testnet-tag Gradle task trap, test gotchas (M4 T1).
