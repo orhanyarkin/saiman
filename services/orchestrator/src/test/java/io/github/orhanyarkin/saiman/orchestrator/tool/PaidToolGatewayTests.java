@@ -219,7 +219,8 @@ class PaidToolGatewayTests extends RunTestSupport {
                 spend.approvalThresholdAtomic(),
                 spend.approvalTimeout(),
                 4,
-                spend.maxToolCallsPerRun());
+                spend.maxToolCallsPerRun(),
+                spend.maxPaidCallsPerHour());
         PaidToolGateway limited = new PaidToolGateway(
                 catalog,
                 tickerCatalog,

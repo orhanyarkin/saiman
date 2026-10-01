@@ -31,6 +31,9 @@ saiman:
       # The seller answers a paid call only after /settle, up to validBefore (<= 60 s ahead): startup
       # refuses anything below 65s.
       read-timeout: 65s
+      # seller.llm.max-runs-per-payer-per-hour on the seller; startup WARNs if spend.max-paid-calls-per-hour
+      # is above it.
+      max-paid-calls-per-hour-at-seller: 30
     # Spend control (ADR-0013). USDC atomic units (6 decimals): 10000 = 0.01 USDC.
     spend:
       daily-cap-atomic: 1000000
@@ -42,6 +45,9 @@ saiman:
       approval-timeout: 5m
       max-paid-calls-per-run: 4
       max-tool-calls-per-run: 6
+      # Across all runs, per rolling hour; below the seller's 30 per payer, leaving room for cache
+      # hits and a manual rag-ask with the same wallet.
+      max-paid-calls-per-hour: 25
     runs:
       max-concurrent: 2 # the seller allows 2 in-flight runs per payer; the orchestrator is one wallet
       llm-budget-usd-micros: 150000

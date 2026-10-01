@@ -26,12 +26,12 @@ class SellerPropertiesTests {
     @Test
     void aReadTimeoutBelowTheAuthorizationWindowFailsStartup() {
         // 35 s was the old default: a 200 the seller settled 40 s in would be cut off and held.
-        assertThatThrownBy(() -> new SellerProperties(BASE, Duration.ofSeconds(5), Duration.ofSeconds(35)))
+        assertThatThrownBy(() -> new SellerProperties(BASE, Duration.ofSeconds(5), Duration.ofSeconds(35), 30))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("read-timeout must be at least 65s");
-        assertThatThrownBy(() -> new SellerProperties(BASE, Duration.ofSeconds(5), Duration.ofMillis(64_999)))
+        assertThatThrownBy(() -> new SellerProperties(BASE, Duration.ofSeconds(5), Duration.ofMillis(64_999), 30))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThat(new SellerProperties(BASE, Duration.ofSeconds(5), Duration.ofSeconds(65)).readTimeout())
+        assertThat(new SellerProperties(BASE, Duration.ofSeconds(5), Duration.ofSeconds(65), 30).readTimeout())
                 .isEqualTo(SellerProperties.MIN_READ_TIMEOUT);
     }
 }

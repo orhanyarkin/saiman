@@ -50,7 +50,11 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       else {@code OFFER_NOT_PAYABLE}; the resource must be the one the intent was created for;
  *       payee on the allowlist; amount at most the per-request maximum;
  *   <li>lock the {@code run} row, then the UTC {@code spend_day} row (fixed order: no deadlock);
- *       {@code reserved + committed + amount <= budget} for both (a DB CHECK backs the run's);
+ *       {@code reserved + committed + amount <= budget} for both (a DB CHECK backs the run's); the
+ *       run's paid calls stay under {@code max-paid-calls-per-run} ({@code MAX_PAID_CALLS});
+ *   <li>under a transaction-scoped advisory lock, the wallet's paid calls created in the last hour
+ *       (all runs) stay under {@code max-paid-calls-per-hour} ({@code HOURLY_PAID_CALLS}), so the
+ *       seller's per-payer hourly limit never answers a signed retry with 429;
  *   <li>strictly above the approval threshold without an APPROVED approval, the intent goes
  *       AWAITING_APPROVAL and the payment is refused for now; an APPROVED intent whose fresh offer
  *       differs from what the human approved is refused ({@code APPROVAL_MISMATCH});
@@ -70,6 +74,8 @@ public class BudgetSpendGuard implements SpendGuard {
     private static final Logger LOG = LoggerFactory.getLogger(BudgetSpendGuard.class);
     private static final Pattern ADDRESS = Pattern.compile("0x[0-9a-fA-F]{40}");
     private static final String DECISIONS_METRIC = "saiman.spend.decisions";
+    /** Postgres advisory-lock key of the hourly paid-call count ("SAIMAN" + 0x0001). */
+    private static final long HOURLY_COUNT_LOCK = 0x5341494D414E0001L;
 
     private final JdbcClient jdbc;
     private final TransactionTemplate tx;
@@ -244,6 +250,10 @@ public class BudgetSpendGuard implements SpendGuard {
                 > spend.dailyCapAtomic()) {
             return deny(view, DenyReason.DAILY_CAP, offer);
         }
+        lockHourlyCount();
+        if (paidCallsInLastHour() >= spend.maxPaidCallsPerHour()) {
+            return deny(view, DenyReason.HOURLY_PAID_CALLS, offer);
+        }
 
         if (view.status() == PaymentIntentStatus.APPROVED) {
             // The fresh 402 must be exactly what the human approved.
@@ -349,6 +359,31 @@ public class BudgetSpendGuard implements SpendGuard {
         return jdbc.sql("SELECT count(*) FROM payment_intent WHERE run_id = :id"
                         + " AND status IN ('RESERVED', 'SIGNED', 'SETTLED', 'HELD')")
                 .param("id", runId)
+                .query(Integer.class)
+                .single();
+    }
+
+    /**
+     * Serialises the hourly count across runs until this transaction ends. The day row lock already
+     * does so within one UTC day; this lock also covers two reservations that straddle midnight and
+     * lock different day rows. Taken last and only here, so it adds no lock-order cycle.
+     */
+    private void lockHourlyCount() {
+        jdbc.sql("SELECT 1 FROM (SELECT pg_advisory_xact_lock(:key)) AS locked")
+                .param("key", HOURLY_COUNT_LOCK)
+                .query(Integer.class)
+                .single();
+    }
+
+    /**
+     * Intents that may move money (reserved, signed, settled or held), created in the last hour by
+     * the database clock, across all runs. No payer filter: the orchestrator pays from one wallet,
+     * and a RESERVED intent has no payer recorded yet.
+     */
+    private int paidCallsInLastHour() {
+        return jdbc.sql("SELECT count(*) FROM payment_intent"
+                        + " WHERE status IN ('RESERVED', 'SIGNED', 'SETTLED', 'HELD')"
+                        + " AND created_at > now() - interval '1 hour'")
                 .query(Integer.class)
                 .single();
     }

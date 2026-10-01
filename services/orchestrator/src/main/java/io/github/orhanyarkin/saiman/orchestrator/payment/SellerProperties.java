@@ -17,12 +17,16 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *     can arrive as late as the authorization's {@code validBefore}, which the starter sets at most
  *     60 s ahead ({@code X402PaymentInterceptor.MAX_VALIDITY_SECONDS}). A shorter timeout cuts off
  *     answers the seller has already settled (the paid call then becomes a held reservation)
+ * @param maxPaidCallsPerHourAtSeller the seller's own paid-call limit per payer and hour ({@code
+ *     seller.llm.max-runs-per-payer-per-hour}); only used to warn at startup when {@code
+ *     saiman.orchestrator.spend.max-paid-calls-per-hour} is above it
  */
 @ConfigurationProperties("saiman.orchestrator.seller")
 public record SellerProperties(
         @DefaultValue("http://seller-api:8081") URI baseUrl,
         @DefaultValue("5s") Duration connectTimeout,
-        @DefaultValue("65s") Duration readTimeout) {
+        @DefaultValue("65s") Duration readTimeout,
+        @DefaultValue("30") int maxPaidCallsPerHourAtSeller) {
 
     /**
      * The smallest read timeout startup accepts: the starter's 60 s authorization validity (the
@@ -55,6 +59,10 @@ public record SellerProperties(
             throw new IllegalArgumentException("saiman.orchestrator.seller.read-timeout must be at least "
                     + MIN_READ_TIMEOUT.toSeconds()
                     + "s: a settled answer can arrive up to the authorization's validBefore (at most 60 s ahead)");
+        }
+        if (maxPaidCallsPerHourAtSeller <= 0) {
+            throw new IllegalArgumentException(
+                    "saiman.orchestrator.seller.max-paid-calls-per-hour-at-seller must be positive");
         }
     }
 }
