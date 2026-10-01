@@ -61,6 +61,13 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Modulith registry, same transaction). If a producer changed the row between the read and the lock, the evidence
  * no longer covers it and the pure step says PENDING. {@link ChainUnavailableException} on an item makes it
  * PENDING and the run PARTIAL — never a mismatch.
+ *
+ * <p><b>Clock bound.</b> Every due, grace and expiry decision uses the <em>effective</em> chain time {@code
+ * min(safe.timestamp, now)}: neither a fast RPC nor a fast local clock alone can make an authorization final early.
+ * A safe block more than {@value #MAX_SAFE_AHEAD_SECONDS} s ahead of the local clock is a lying or broken RPC: the
+ * run still performs its internal checks, skips the chain part, ends PARTIAL and counts {@code
+ * saiman.ledger.reconciliation.skipped{reason=safe_in_future}}. The block <em>number</em> is never clamped, so
+ * receipts and {@code authorizationState} are still read at the safe block.
  */
 @Service
 @EnableConfigurationProperties(ReconciliationProperties.class)
@@ -73,6 +80,9 @@ public class ReconciliationService {
     static final String NETWORK = AuthorizationRef.BASE_SEPOLIA;
 
     private static final Logger log = LoggerFactory.getLogger(ReconciliationService.class);
+
+    /** A safe block further ahead of the local clock than this is not trusted: the run skips its chain part. */
+    static final long MAX_SAFE_AHEAD_SECONDS = 60;
 
     /** Base produces a block every two seconds; used only to aim the bounded log search. */
     private static final long SECONDS_PER_BLOCK = 2;
@@ -105,7 +115,7 @@ public class ReconciliationService {
             ApplicationEventPublisher events,
             PlatformTransactionManager transactionManager,
             DataSource dataSource,
-            Clock clock,
+            ObjectProvider<Clock> clock,
             MeterRegistry meters,
             ObjectProvider<ObservationRegistry> observations) {
         this.chainProvider = chainProvider;
@@ -117,7 +127,7 @@ public class ReconciliationService {
         this.events = events;
         this.transactions = new TransactionTemplate(transactionManager);
         this.dataSource = dataSource;
-        this.clock = clock;
+        this.clock = clock.getIfAvailable(Clock::systemUTC);
         this.meters = meters;
         this.observations = observations.getIfAvailable(() -> ObservationRegistry.NOOP);
         meters.gauge("saiman.ledger.reconciliation.unbalanced.entries", unbalancedEntries);
@@ -231,20 +241,34 @@ public class ReconciliationService {
         Long safeBlock = null;
         String status;
         try {
-            ChainBlock safe = chain.block(BlockTag.SAFE);
-            safeBlock = safe.number();
+            ChainBlock reported = chain.block(BlockTag.SAFE);
+            safeBlock = reported.number();
             long unbalanced = repository.unbalancedEntries();
             if (unbalanced > 0) {
                 log.error("Reconciliation run {}: {} journal entries do not balance per asset", runId, unbalanced);
             }
             unbalancedEntries.set(unbalanced);
-            recordBacklog(safe);
-            List<String> due = repository.duePaymentKeys(
-                    safe.timestamp(), properties.graceAfterValidBefore().toSeconds(), properties.batchSize());
-            for (String key : due) {
-                tally.add(checkOne(runId, key, safe, chain));
+            long now = clock.instant().getEpochSecond();
+            if (reported.timestamp() > Math.addExact(now, MAX_SAFE_AHEAD_SECONDS)) {
+                // Trusting it would expire live authorizations and post SETTLED_BUT_UNUSED for payments that may
+                // still settle. Nothing is checked; a later run with a sane safe block catches up.
+                log.warn(
+                        "Reconciliation run {}: safe block {} s ahead of the local clock, chain checks skipped",
+                        runId,
+                        reported.timestamp() - now);
+                meters.counter("saiman.ledger.reconciliation.skipped", "reason", "safe_in_future")
+                        .increment();
+                status = "PARTIAL";
+            } else {
+                ChainBlock safe = effective(reported, now);
+                recordBacklog(safe);
+                List<String> due = repository.duePaymentKeys(
+                        safe.timestamp(), properties.graceAfterValidBefore().toSeconds(), properties.batchSize());
+                for (String key : due) {
+                    tally.add(checkOne(runId, key, safe, chain));
+                }
+                status = tally.unavailable ? "PARTIAL" : "COMPLETED";
             }
-            status = tally.unavailable ? "PARTIAL" : "COMPLETED";
         } catch (ChainUnavailableException e) {
             log.warn("Reconciliation run {}: safe block unavailable, nothing checked", runId);
             status = "FAILED";
@@ -255,6 +279,14 @@ public class ReconciliationService {
         repository.finishRun(runId, status, clock.instant(), safeBlock, tally.counters());
         meters.counter("saiman.ledger.reconciliation.runs", "status", status).increment();
         log.info("Reconciliation run {} {}: {}", runId, status, tally.counters());
+    }
+
+    /**
+     * The safe block with its timestamp bounded by the local clock: {@code min(safe.timestamp, now)} is the chain
+     * time every due, grace and expiry decision uses (here and in {@link ChainReconciler}).
+     */
+    static ChainBlock effective(ChainBlock safe, long nowEpochSecond) {
+        return safe.timestamp() <= nowEpochSecond ? safe : new ChainBlock(safe.number(), nowEpochSecond);
     }
 
     private void recordBacklog(ChainBlock safe) {
