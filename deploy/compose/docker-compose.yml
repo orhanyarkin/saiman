@@ -138,7 +138,7 @@ services:
     # Buyer key + OpenAI key as file secrets (ADR-0009 amendments). Long syntax with `target:`
     # names the mounted file /run/secrets/x402.client.private-key, so the configtree import
     # exposes it as the property `x402.client.private-key`. No key-shaped environment entries:
-    # scripts/check-compose-policy.sh forbids them. An empty key file = paid runs fail closed.
+    # scripts/check-compose-policy.sh forbids them. An empty key file = the orchestrator fails closed at startup (ADR-0008) and `make up` skips its health wait.
     secrets:
       - source: x402_buyer_private_key
         target: x402.client.private-key

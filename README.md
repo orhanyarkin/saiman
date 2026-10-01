@@ -56,8 +56,8 @@ make secrets-check              # present / empty / absent + file mode per secre
 
 M3 adds `secrets/x402_buyer_private_key`: the orchestrator's throwaway **testnet** buyer key,
 created by you only (nothing generates or copies it; never commit it). `make up` creates an
-empty placeholder so compose can start, and warns that paid runs fail closed until you fill
-it (0644 inside the 0700 directory, same reason as above). Then `make research-run
+empty placeholder so compose can start; with it empty the orchestrator fails closed at
+startup and stays down (the other services run) until you fill it (0644 inside the 0700 directory, same reason as above). Then `make research-run
 RUN_QUESTION='...'` starts a run and streams its events; `make research-approve` and
 `make research-status` decide approvals and show a run.
 

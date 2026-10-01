@@ -44,7 +44,12 @@ up: ## Verify payTo, create empty secret files if missing, build images, start t
 	scripts/ensure-secret-files.sh
 	$(MAKE) images
 	$(COMPOSE) --profile apps up -d
-	scripts/wait-for-health.sh 8080 8081 8082 8083
+	@if [ -s secrets/x402_buyer_private_key ]; then \
+	  scripts/wait-for-health.sh 8080 8081 8082 8083; \
+	else \
+	  echo "up: secrets/x402_buyer_private_key is empty: the orchestrator fails closed at startup (blank x402.client.private-key, ADR-0008) and stays down until you fill it; waiting for the other apps only." >&2; \
+	  scripts/wait-for-health.sh 8081 8082 8083; \
+	fi
 
 down: ## Stop and remove all containers (volumes kept).
 	$(COMPOSE) --profile apps down

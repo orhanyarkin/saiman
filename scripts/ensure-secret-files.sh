@@ -7,7 +7,7 @@
 # overwrites an existing file and never prints file contents (ADR-0009 M2 amendment).
 # x402_buyer_private_key (M3) gets the same empty placeholder ONLY so compose can start; this
 # script never generates, derives or copies a key. While it is empty the orchestrator's paid
-# runs fail closed, and a warning says so on every run.
+# orchestrator fails closed at startup (blank key), and a warning says so on every run.
 set -euo pipefail
 
 readonly SECRET_NAMES=(mkk_credentials openai_api_key x402_buyer_private_key)
@@ -29,5 +29,5 @@ for name in "${SECRET_NAMES[@]}"; do
 done
 
 if [[ ! -s "${dir}/x402_buyer_private_key" ]]; then
-  echo "ensure-secret-files: WARNING: ${dir}/x402_buyer_private_key is empty; the orchestrator's paid runs fail closed until you put a throwaway TESTNET buyer key in it (see README, 'Secrets for M2 (RAG)' / M3 addition; mode 0644 inside the 0700 ${dir}/ dir)" >&2
+  echo "ensure-secret-files: WARNING: ${dir}/x402_buyer_private_key is empty; the orchestrator fails closed at startup (blank key, ADR-0008) and stays down until you put a throwaway TESTNET buyer key in it (see README, 'Secrets for M2 (RAG)' / M3 addition; mode 0644 inside the 0700 ${dir}/ dir)" >&2
 fi
