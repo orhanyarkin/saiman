@@ -1,3 +1,5 @@
+import java.util.HashSet
+
 plugins {
     id("saiman.java-library")
 }
@@ -26,7 +28,7 @@ tasks.register<Test>("testnetTest") {
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
     useJUnitPlatform {
-        setExcludeTags(emptySet()) // the shared conventions exclude it
+        setExcludeTags(HashSet<String>()) // the shared conventions exclude it
         includeTags("testnet")
     }
     outputs.upToDateWhen { false }
