@@ -3,3 +3,11 @@ management:
   opentelemetry:
     # Keep a developer's exported OTEL_* variables from sending test telemetry to a collector.
     map-environment-variables: false
+spring:
+  autoconfigure:
+    # No Valkey in these tests: without a StringRedisTemplate the model router uses its in-memory
+    # daily cap and run scopes (cost-guard=memory below). The router library tests the Valkey guards.
+    exclude: org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
+saiman:
+  router:
+    cost-guard: memory

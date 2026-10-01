@@ -1,10 +1,16 @@
 package io.github.orhanyarkin.saiman.orchestrator.budget;
 
+import io.github.orhanyarkin.saiman.orchestrator.events.RunEventAppender;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentService;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentView;
+import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.github.orhanyarkin.saiman.shared.run.RunCost;
+import io.github.orhanyarkin.saiman.shared.run.RunEventData;
+import io.github.orhanyarkin.saiman.shared.run.RunEventType;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -29,7 +35,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  *   <li><b>APPROVED</b> stays APPROVED: an approved intent is never reserved until its paid attempt
  *       starts, so there is nothing to release.
  *   <li><b>Unfinished runs</b> (QUEUED, RUNNING, AWAITING_APPROVAL) become FAILED with {@code
- *       failure_code = INTERRUPTED}; their in-process virtual thread is gone.
+ *       failure_code = INTERRUPTED} and get a terminal {@code RUN_FAILED} event with the cost so
+ *       far, so their event stream ends; their in-process virtual thread is gone.
  * </ul>
  *
  * Idempotent: a second pass finds nothing to do. Assumes one orchestrator instance per database
@@ -48,6 +55,7 @@ class SpendRecovery implements ApplicationRunner {
     private final TransactionTemplate tx;
     private final PaymentIntentService intents;
     private final BudgetSpendGuard guard;
+    private final RunEventAppender events;
     private final MeterRegistry meters;
 
     SpendRecovery(
@@ -55,11 +63,13 @@ class SpendRecovery implements ApplicationRunner {
             PlatformTransactionManager transactionManager,
             PaymentIntentService intents,
             BudgetSpendGuard guard,
+            RunEventAppender events,
             MeterRegistry meters) {
         this.jdbc = jdbc;
         this.tx = new TransactionTemplate(transactionManager);
         this.intents = intents;
         this.guard = guard;
+        this.events = events;
         this.meters = meters;
     }
 
@@ -75,11 +85,23 @@ class SpendRecovery implements ApplicationRunner {
             List<PaymentIntentView> reserved = intents.lockAllReserved();
             reserved.forEach(guard::releaseLocked);
             int held = intents.holdAllSigned();
-            int interrupted = jdbc.sql("""
+            List<InterruptedRun> interrupted = jdbc.sql("""
                             UPDATE run SET status = 'FAILED', failure_code = :code, finished_at = now()
                              WHERE status IN ('QUEUED', 'RUNNING', 'AWAITING_APPROVAL')
-                            """).param("code", INTERRUPTED).update();
-            return new Outcome(reserved.size(), held, interrupted);
+                            RETURNING id, committed_atomic, llm_cost_usd_micros
+                            """)
+                    .param("code", INTERRUPTED)
+                    .query((rs, row) -> new InterruptedRun(
+                            rs.getObject("id", UUID.class),
+                            RunCost.of(
+                                    Money.usdc(rs.getLong("committed_atomic")),
+                                    Money.usdMicros(rs.getLong("llm_cost_usd_micros")))))
+                    .list();
+            // Each interrupted run gets its terminal event, so its stream and export end (ADR-0014).
+            for (InterruptedRun run : interrupted) {
+                events.append(run.id(), RunEventType.RUN_FAILED, new RunEventData.RunFailed(INTERRUPTED, run.cost()));
+            }
+            return new Outcome(reserved.size(), held, interrupted.size());
         }));
         meters.counter(METRIC, "action", "released").increment(outcome.released());
         meters.counter(METRIC, "action", "held").increment(outcome.held());
@@ -94,6 +116,8 @@ class SpendRecovery implements ApplicationRunner {
         }
         return outcome;
     }
+
+    private record InterruptedRun(UUID id, RunCost cost) {}
 
     /** What one recovery pass changed. */
     record Outcome(int released, int held, int interruptedRuns) {}
