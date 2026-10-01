@@ -1,0 +1,1 @@
+- [M4b close audit](m4b-close-audit.md) — upfront flow: forged credit note invisible to recon (Med), deadline cut dropped after settle, no pre-settle per-payer limit (2026-10-01)
