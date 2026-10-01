@@ -69,6 +69,50 @@ class ChainReconcilerTests {
     }
 
     @Test
+    void nonUsdcTwinWithAMatchingReceiptIsNeverMatched() {
+        Books books = settledBothBooks();
+        PaymentProjection real = books.projection();
+        PaymentProjection twin = new PaymentProjection(
+                real.id(),
+                real.paymentKey(),
+                real.network(),
+                "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+                real.payer(),
+                real.nonce(),
+                real.payTo(),
+                real.amount(),
+                real.validBefore(),
+                real.paymentIntentId(),
+                real.runId(),
+                real.buyerState(),
+                real.sellerState(),
+                real.chainState(),
+                real.buyerTxHash(),
+                real.sellerTxHash(),
+                real.chainTxHash(),
+                real.lastCheckedAt());
+        String tx = payment.txHash();
+        Map<String, Optional<UsdcReceipt>> receipts = Map.of(tx, Optional.of(matching(real, tx)));
+
+        assertThat(ChainReconciler.needsAuthorizationState(twin, receipts, SAFE_LATE))
+                .isFalse();
+        var outcome = ChainReconciler.reconcile(
+                twin,
+                books.nets(),
+                evidence(SAFE_LATE, receipts, true, matching(real, tx)),
+                SETTINGS,
+                UUID.randomUUID(),
+                NOW);
+
+        assertThat(outcome.status()).isEqualTo(ItemStatus.MISMATCH);
+        assertThat(outcome.findings())
+                .extracting(ChainReconciler.Finding::kind)
+                .containsExactly(MismatchKind.TX_NOT_FOR_AUTHORIZATION);
+        assertThat(outcome.adjustment()).isNull();
+        assertThat(outcome.next().chainState()).isEqualTo(real.chainState());
+    }
+
+    @Test
     void buyerOnlyHistoryIsMatchedWithoutComparingTheUnreportedSellerBook() {
         Books books = Books.of(List.of(PaymentFact.of(payment.buyerSettled())));
         String tx = payment.txHash();

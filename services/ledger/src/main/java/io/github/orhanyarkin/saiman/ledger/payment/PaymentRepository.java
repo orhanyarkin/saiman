@@ -66,7 +66,23 @@ public class PaymentRepository {
         return jdbc.sql("SELECT " + COLUMNS + " FROM payment WHERE payment_key = :key FOR UPDATE")
                 .param("key", initial.paymentKey())
                 .query(PaymentRepository::map)
-                .single();
+                .optional()
+                .orElseThrow(() -> twin(initial));
+    }
+
+    /**
+     * The insert did nothing and no row has this key: another row already books the same {@code (payer, nonce)}
+     * (index {@code payment_one_per_authorization}). One authorization is one payment, so this fact is a forged or
+     * broken twin. The schema's asset and network checks make this unreachable today; it stays as a guard.
+     */
+    private ConflictingFactException twin(PaymentProjection initial) {
+        UUID existing = jdbc.sql("SELECT id FROM payment WHERE lower(payer) = :payer AND lower(nonce) = :nonce")
+                .param("payer", initial.payer())
+                .param("nonce", initial.nonce())
+                .query(UUID.class)
+                .optional()
+                .orElse(null);
+        return new ConflictingFactException("the authorization is already booked under another payment key", existing);
     }
 
     /** Writes the mutable columns of a row locked by {@link #insertIfAbsentAndLock}. */
