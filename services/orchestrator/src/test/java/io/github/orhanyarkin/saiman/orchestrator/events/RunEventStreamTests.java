@@ -10,6 +10,12 @@ import io.github.orhanyarkin.saiman.shared.run.RunCost;
 import io.github.orhanyarkin.saiman.shared.run.RunEvent;
 import io.github.orhanyarkin.saiman.shared.run.RunEventData;
 import io.github.orhanyarkin.saiman.shared.run.RunEventType;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -24,6 +30,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.MediaType;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -36,6 +43,9 @@ class RunEventStreamTests extends RunTestSupport {
 
     @Autowired
     private JsonMapper json;
+
+    @LocalServerPort
+    private int port;
 
     @Test
     void seqsAreGapFreeUnder16ConcurrentAppenders() throws Exception {
@@ -158,6 +168,100 @@ class RunEventStreamTests extends RunTestSupport {
                 .exchange()
                 .expectStatus()
                 .isBadRequest();
+    }
+
+    @Test
+    void aFifthStreamOfOneRunReplacesTheOldest() {
+        UUID run = createRun(50_000);
+        eventLog.append(run, RunEventType.STEP_STARTED, step());
+        List<CompletableFuture<String>> streams = new ArrayList<>();
+        for (int i = 1; i <= 4; i++) {
+            streams.add(openStream(run));
+            int expected = i;
+            await().atMost(Duration.ofSeconds(5)).until(() -> bus.subscriberCount(run) == expected);
+        }
+
+        CompletableFuture<String> fifth = openStream(run);
+
+        String oldest = streams.getFirst().orTimeout(5, TimeUnit.SECONDS).join(); // evicted, ended
+        assertThat(parse(oldest)).extracting(Sse::id).containsExactly("1");
+        await().atMost(Duration.ofSeconds(5)).until(() -> bus.subscriberCount(run) == 4);
+        assertThat(streams.subList(1, 4)).noneMatch(CompletableFuture::isDone);
+        assertThat(fifth).isNotDone();
+
+        eventLog.append(run, RunEventType.RUN_FAILED, failed());
+        assertThat(fifth.orTimeout(10, TimeUnit.SECONDS).join()).contains("RUN_FAILED");
+        await().atMost(Duration.ofSeconds(5)).until(() -> bus.subscriberCount(run) == 0);
+    }
+
+    @Test
+    void theSixtyFifthStreamOverallIs429() {
+        await().atMost(Duration.ofSeconds(10)).until(() -> bus.totalSubscribers() == 0);
+        List<UUID> runs = new ArrayList<>();
+        for (int r = 0; r < 16; r++) {
+            UUID run = createRun(50_000);
+            runs.add(run);
+            for (int i = 0; i < 4; i++) {
+                openStream(run);
+            }
+        }
+        await().atMost(Duration.ofSeconds(20)).until(() -> bus.totalSubscribers() == 64);
+
+        http.get()
+                .uri("/api/v1/runs/{id}/events", createRun(50_000))
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .exchange()
+                .expectStatus()
+                .isEqualTo(429)
+                .expectHeader()
+                .contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON);
+        assertThat(bus.totalSubscribers()).isEqualTo(64);
+
+        runs.forEach(run -> eventLog.append(run, RunEventType.RUN_FAILED, failed()));
+        await().atMost(Duration.ofSeconds(20)).until(() -> bus.totalSubscribers() == 0);
+    }
+
+    @Test
+    void aDisconnectedClientFreesItsSlot() throws Exception {
+        UUID run = createRun(50_000);
+        try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
+            OutputStream out = socket.getOutputStream();
+            out.write(("GET /api/v1/runs/" + run + "/events HTTP/1.1\r\nHost: localhost\r\n"
+                            + "Accept: text/event-stream\r\n\r\n")
+                    .getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            BufferedReader in =
+                    new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+            assertThat(in.readLine()).startsWith("HTTP/1.1 200");
+            await().atMost(Duration.ofSeconds(5)).until(() -> bus.subscriberCount(run) == 1);
+        } // the client goes away without reading on
+
+        await().atMost(Duration.ofSeconds(10)).until(() -> bus.subscriberCount(run) == 0);
+    }
+
+    @Test
+    void aFinishedRunIsReplayedWithoutASlotAnd204WhenNothingIsLeft() {
+        UUID run = createRun(50_000);
+        eventLog.append(run, RunEventType.STEP_STARTED, step());
+        eventLog.append(run, RunEventType.RUN_FAILED, failed());
+        jdbc.sql("UPDATE run SET status = 'FAILED', finished_at = now() WHERE id = :id")
+                .param("id", run)
+                .update();
+
+        assertThat(parse(stream(run, null))).extracting(Sse::id).containsExactly("1", "2");
+        assertThat(parse(stream(run, "1"))).extracting(Sse::id).containsExactly("2");
+        http.get()
+                .uri("/api/v1/runs/{id}/events", run)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .header("Last-Event-ID", "2")
+                .exchange()
+                .expectStatus()
+                .isNoContent();
+        assertThat(bus.subscriberCount(run)).isZero();
+    }
+
+    private CompletableFuture<String> openStream(UUID run) {
+        return CompletableFuture.supplyAsync(() -> stream(run, null), Executors.newVirtualThreadPerTaskExecutor());
     }
 
     private String stream(UUID run, String lastEventId) {

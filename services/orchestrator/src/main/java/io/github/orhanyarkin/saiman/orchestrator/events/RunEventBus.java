@@ -18,7 +18,11 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * event was in flight) sees a seq gap and backfills from the database, which is the source of truth.
  *
  * <p>Bounded: at most {@code max-streams-per-run} subscribers per run and {@code max-streams} in
- * total; a listener must not block (it runs on the thread that committed the event).
+ * total; a listener must not block (it runs on the thread that committed the event). A new
+ * subscriber of a run whose per-run slots are full <em>replaces</em> the run's oldest subscriber
+ * (that one is evicted and its stream ends): a client that reconnects without the old connection
+ * having been noticed as closed is not locked out of its own run. The global bound is never
+ * exceeded by a replacement, since one slot is freed for the one taken.
  */
 @Component
 public class RunEventBus {
@@ -36,28 +40,41 @@ public class RunEventBus {
     /**
      * Registers a listener for one run's events.
      *
-     * @throws TooManyStreamsException if the per-run or the global bound is reached
+     * @param onEvicted called (outside any lock) if a newer subscriber of the same run replaces this
+     *     one; it should end the stream
+     * @throws TooManyStreamsException if the global bound is reached
      */
-    public Subscription subscribe(UUID runId, Consumer<RunEvent> listener) {
-        if (total.incrementAndGet() > maxTotal) {
-            total.decrementAndGet();
-            throw new TooManyStreamsException();
-        }
-        Subscription subscription = new Subscription(runId, listener);
-        boolean[] added = {false};
+    public Subscription subscribe(UUID runId, Consumer<RunEvent> listener, Runnable onEvicted) {
+        Subscription subscription = new Subscription(runId, listener, onEvicted);
+        Subscription[] evicted = {null};
+        boolean[] overGlobal = {false};
         subscribers.compute(runId, (id, current) -> {
             Set<Subscription> set = current == null ? new CopyOnWriteArraySet<>() : current;
-            if (set.size() < maxPerRun) {
-                set.add(subscription);
-                added[0] = true;
+            if (set.size() >= maxPerRun) {
+                // Replace the oldest (insertion order): one slot freed for the one taken.
+                Subscription oldest = set.iterator().next();
+                set.remove(oldest);
+                evicted[0] = oldest;
+            } else if (total.incrementAndGet() > maxTotal) {
+                total.decrementAndGet();
+                overGlobal[0] = true;
+                return set.isEmpty() ? null : set;
             }
-            return set.isEmpty() ? null : set;
+            set.add(subscription);
+            return set;
         });
-        if (!added[0]) {
-            total.decrementAndGet();
+        if (overGlobal[0]) {
             throw new TooManyStreamsException();
         }
+        if (evicted[0] != null) {
+            evicted[0].onEvicted.run();
+        }
         return subscription;
+    }
+
+    /** All live subscribers (for tests and metrics). */
+    public int totalSubscribers() {
+        return total.get();
     }
 
     /** Live subscribers of one run (for tests and metrics). */
@@ -90,10 +107,12 @@ public class RunEventBus {
     public final class Subscription implements AutoCloseable {
         private final UUID runId;
         private final Consumer<RunEvent> listener;
+        private final Runnable onEvicted;
 
-        private Subscription(UUID runId, Consumer<RunEvent> listener) {
+        private Subscription(UUID runId, Consumer<RunEvent> listener, Runnable onEvicted) {
             this.runId = runId;
             this.listener = listener;
+            this.onEvicted = onEvicted;
         }
 
         @Override
@@ -102,7 +121,7 @@ public class RunEventBus {
         }
     }
 
-    /** The per-run or global stream bound is reached. */
+    /** The global stream bound is reached. */
     public static final class TooManyStreamsException extends RuntimeException {
         private static final long serialVersionUID = 1L;
 
