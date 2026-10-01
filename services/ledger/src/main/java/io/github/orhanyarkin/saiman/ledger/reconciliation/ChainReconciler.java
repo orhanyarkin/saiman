@@ -19,6 +19,7 @@ import io.github.orhanyarkin.saiman.ledger.payment.PaymentProjection;
 import io.github.orhanyarkin.saiman.ledger.payment.SellerState;
 import io.github.orhanyarkin.saiman.shared.ledger.MismatchKind;
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.github.orhanyarkin.saiman.shared.payments.AuthorizationRef;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -153,7 +154,7 @@ public final class ChainReconciler {
      */
     public static boolean needsAuthorizationState(
             PaymentProjection p, Map<String, Optional<UsdcReceipt>> receipts, ChainBlock safe) {
-        if (reportedTxHashes(p).size() > 1 || safe.timestamp() <= p.validBefore()) {
+        if (!isUsdc(p) || reportedTxHashes(p).size() > 1 || safe.timestamp() <= p.validBefore()) {
             return false;
         }
         return receipts.values().stream().flatMap(Optional::stream).noneMatch(r -> isCanonical(r, p, safe));
@@ -176,6 +177,19 @@ public final class ChainReconciler {
 
         ChainBlock safe = evidence.safe();
         List<String> reported = reportedTxHashes(p);
+        if (!isUsdc(p)) {
+            // Receipts only carry the USDC contract's logs, so a stolen (payer, nonce) on another asset would look
+            // canonical. Never MATCHED, nothing posted: the chain says nothing about this asset.
+            findings.add(new Finding(
+                    MismatchKind.TX_NOT_FOR_AUTHORIZATION,
+                    null,
+                    null,
+                    reported.isEmpty() ? null : reported.getFirst(),
+                    null,
+                    false));
+            return new Outcome(
+                    ItemStatus.MISMATCH, p.withChain(p.chainState(), p.chainTxHash(), now), null, findings, null);
+        }
         if (reported.size() > 1) {
             findings.add(
                     new Finding(MismatchKind.CONFLICTING_TX, null, null, p.buyerTxHash(), p.sellerTxHash(), false));
@@ -363,7 +377,17 @@ public final class ChainReconciler {
         return receipt.succeeded() && receipt.blockNumber() <= safe.number() && usesAuthorization(receipt, p);
     }
 
+    /** Test USDC on Base Sepolia is the only asset the receipts describe (evm-rpc filters on its address). */
+    private static boolean isUsdc(PaymentProjection p) {
+        return AuthorizationRef.USDC.equalsIgnoreCase(p.assetAddress())
+                && "USDC".equals(p.amount().asset())
+                && p.amount().decimals() == Money.SIX_DECIMALS;
+    }
+
     private static boolean usesAuthorization(UsdcReceipt receipt, PaymentProjection p) {
+        if (!isUsdc(p)) {
+            return false;
+        }
         String wanted = p.payer() + ":" + p.nonce();
         return receipt.authorizationsUsed().stream().map(ChainReconciler::lower).anyMatch(wanted::equals);
     }

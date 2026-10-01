@@ -177,13 +177,14 @@ public final class PaymentBook {
             throw new IllegalArgumentException("fact is about another payment");
         }
         if (!p.amount().equals(fact.amount())) {
-            throw new ConflictingFactException("amount differs from the one already recorded for this payment");
+            throw new ConflictingFactException("amount differs from the one already recorded for this payment", p.id());
         }
         if (!p.payTo().equals(PaymentProjection.lower(fact.payTo()))) {
-            throw new ConflictingFactException("payTo differs from the one already recorded for this payment");
+            throw new ConflictingFactException("payTo differs from the one already recorded for this payment", p.id());
         }
         if (p.validBefore() != auth.validBefore()) {
-            throw new ConflictingFactException("validBefore differs from the one already recorded for this payment");
+            throw new ConflictingFactException(
+                    "validBefore differs from the one already recorded for this payment", p.id());
         }
     }
 

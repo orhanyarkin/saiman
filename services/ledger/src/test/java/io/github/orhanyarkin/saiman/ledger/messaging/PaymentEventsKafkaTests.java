@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.ledger.messaging;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import io.github.orhanyarkin.saiman.ledger.LedgerIntegrationTest;
@@ -25,6 +26,7 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -150,6 +152,44 @@ class PaymentEventsKafkaTests {
         assertThat(drainValues(PaymentTopics.AUTHORIZED + LedgerMessagingConfiguration.DLT_SUFFIX, withExtra))
                 .containsExactly(withExtra);
         assertThat(payments.findByKey(payment.key())).isEmpty();
+    }
+
+    @Test
+    void forgedNonUsdcTwinOfABookedPaymentIsDeadLetteredAndBooksNothing() throws Exception {
+        TestPayment payment = TestPayment.random(new SplittableRandom(), 20_000);
+        String real = json.writeValueAsString(payment.buyerSettled());
+        send(PaymentTopics.SETTLED, payment.key(), real);
+        await().atMost(TIMEOUT)
+                .untilAsserted(() -> assertThat(kinds(payment.key())).containsExactlyInAnyOrder("ENCUMBER", "SETTLE"));
+
+        // Same payer and nonce, another token, a thousand times the amount, a fresh event id.
+        String twin = json.writeValueAsString(payment.buyerSettled())
+                .replace(TestPayment.USDC_ADDRESS, "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
+                .replace("\"atomicUnits\":20000", "\"atomicUnits\":20000000");
+        send(PaymentTopics.SETTLED, "twin", twin);
+
+        assertThat(drainValues(PaymentTopics.SETTLED + LedgerMessagingConfiguration.DLT_SUFFIX, twin))
+                .containsExactly(twin);
+        String payer = payment.authorization().payer().toLowerCase(Locale.ROOT);
+        String nonce = payment.authorization().nonce().toLowerCase(Locale.ROOT);
+        assertThat(jdbc.sql("SELECT count(*) FROM payment WHERE payer = :payer AND nonce = :nonce")
+                        .param("payer", payer)
+                        .param("nonce", nonce)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1L);
+        assertThat(kinds(payment.key())).containsExactlyInAnyOrder("ENCUMBER", "SETTLE");
+
+        // Even written straight to the table, a twin of (payer, nonce) is refused by the schema.
+        assertThatThrownBy(() -> jdbc.sql("""
+                                INSERT INTO payment (id, payment_key, network, asset_address, payer, nonce, pay_to,
+                                                     amount_atomic, asset, decimals, valid_before, buyer_state,
+                                                     seller_state)
+                                SELECT gen_random_uuid(), 'twin:' || payment_key, network, asset_address, upper(payer),
+                                       nonce, pay_to, amount_atomic, asset, decimals, valid_before, 'NONE', 'NONE'
+                                  FROM payment WHERE payment_key = :key
+                                """).param("key", payment.key()).update())
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     private void send(String topic, String key, String value) throws Exception {
