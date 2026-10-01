@@ -204,7 +204,7 @@ recon-report: ## Wait for the latest reconciliation run to finish (up to 2 min),
 ledger-balance: ## Print the ledger trial balance as a table.
 	@command -v jq >/dev/null 2>&1 || { echo "ledger-balance needs jq; install jq." >&2; exit 1; }
 	@resp=$$(curl -sS --fail-with-body $(LEDGER_URL)/api/v1/ledger/trial-balance) || { echo "$$resp" >&2; exit 1; }; \
-	printf '%s\n' "$$resp" | jq -r '(if type == "array" then . else (.accounts // .balances // .rows // []) end) as $$rows | if ($$rows | length) == 0 then "(no accounts)" else ($$rows[0] | keys_unsorted) as $$cols | ($$cols | join("\t")), ($$rows[] | [.[$$cols[]] | if type == "object" then (.atomicUnits // tojson) else . end] | map(tostring) | join("\t")) end' \
+	printf '%s\n' "$$resp" | jq -r 'if length == 0 then "(no accounts)" else (.[0] | keys_unsorted) as $$cols | ($$cols | join("\t")), (.[] | [.[$$cols[]] | if type == "object" then (.atomicUnits // tojson) else . end] | map(tostring) | join("\t")) end' \
 		| column -t -s "$$(printf '\t')"
 
 ledger-tamper-demo: ## LOCAL COMPOSE ONLY: bypass the immutability triggers and inflate the latest SALE entry by 5000 atomic, for the reconciliation demo.
