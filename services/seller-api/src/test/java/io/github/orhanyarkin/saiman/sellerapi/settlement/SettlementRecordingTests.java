@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.SettlementTestBase;
 import io.github.orhanyarkin.x402.core.Eip3009Authorization;
 import io.github.orhanyarkin.x402.core.PaymentPayload;
+import io.github.orhanyarkin.x402.server.X402PaymentFailedEvent;
 import io.github.orhanyarkin.x402.server.X402PaymentSettledEvent;
 import io.github.orhanyarkin.x402.testing.TestWallets;
 import java.time.Instant;
@@ -105,5 +106,65 @@ class SettlementRecordingTests extends SettlementTestBase {
         assertThat(settlementRows()).isEqualTo(1);
         assertThat(publications()).hasSize(1);
         assertThat(TestWallets.PAYER.address()).isEqualToIgnoringCase(authorization.from());
+    }
+
+    @Test
+    void aSettleFailureLaterFollowedBySettledUpgradesTheRowAndPublishesSettled() {
+        PaymentPayload payload = newPayload();
+        Eip3009Authorization a = payload.payload().authorization();
+        String tx = "0x" + "cd".repeat(32);
+        publisher.publishEvent(new X402PaymentFailedEvent(
+                UUID.randomUUID(),
+                "/v1/disclosures/THYAO/summary",
+                offer(),
+                a.from(),
+                a.nonce(),
+                a.value(),
+                a.validBefore(),
+                a.from(),
+                "settle_timeout",
+                Instant.now()));
+        assertThat(jdbc.sql("SELECT outcome FROM settlement")
+                        .query(String.class)
+                        .single())
+                .isEqualTo("SETTLE_FAILED");
+
+        X402PaymentSettledEvent settled = new X402PaymentSettledEvent(
+                UUID.randomUUID(),
+                "/v1/disclosures/THYAO/summary",
+                offer(),
+                a.from(),
+                a.nonce(),
+                a.value(),
+                a.validBefore(),
+                a.from(),
+                tx,
+                Instant.now());
+        publisher.publishEvent(settled);
+        publisher.publishEvent(settled); // replay: nothing more
+        // A late failure report never downgrades a settled row.
+        publisher.publishEvent(new X402PaymentFailedEvent(
+                UUID.randomUUID(),
+                "/v1/disclosures/THYAO/summary",
+                offer(),
+                a.from(),
+                a.nonce(),
+                a.value(),
+                a.validBefore(),
+                a.from(),
+                "settle_timeout",
+                Instant.now()));
+
+        assertThat(settlementRows()).isEqualTo(1);
+        Map<String, Object> row = jdbc.sql("SELECT * FROM settlement").query().singleRow();
+        assertThat(row.get("outcome")).isEqualTo("SETTLED");
+        assertThat(row.get("tx_hash")).isEqualTo(tx);
+        assertThat(row.get("reason_code")).isNull();
+        assertThat(publications().stream().map(Map.Entry::getKey)).containsExactly("PaymentFailed", "PaymentSettled");
+        JsonNode event = publications().get(1).getValue();
+        assertThat(event.at("/txHash").asString()).isEqualTo(tx);
+        String key = ("eip155:84532:" + offer().asset() + ":" + a.from() + ":" + a.nonce()).toLowerCase(Locale.ROOT);
+        assertThat(event.at("/meta/eventId").asString())
+                .isEqualTo(SettlementRecorder.eventId(key, "SETTLED").toString());
     }
 }

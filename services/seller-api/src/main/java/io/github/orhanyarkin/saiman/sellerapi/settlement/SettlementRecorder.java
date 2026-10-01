@@ -46,8 +46,15 @@ import org.springframework.transaction.support.TransactionTemplate;
  * saiman.seller.settlement_record_failures}, and the response is untouched. The chain stays the safety net, since
  * the ledger's reconciliation compares its own books with the chain.
  *
- * <p>Event ids derive from the payment key and kind, and the row is inserted with {@code ON CONFLICT DO NOTHING}:
- * the same authorization reported twice yields one row and one event.
+ * <p>Event ids derive from the payment key and kind. The row is inserted once per payment key: the same
+ * authorization reported twice yields one row and one event. The one exception is an authorization whose settle
+ * failed (ambiguous) and later settled (a retry, or the facilitator's late success): the {@code SETTLE_FAILED}
+ * row is upgraded to {@code SETTLED} and {@code PaymentSettled} is published as well (its own event id), so the
+ * ledger's seller book learns the final outcome. A settled row is never downgraded.
+ *
+ * <p>The recorder runs on the request thread, so it is bounded: the transaction has a {@value
+ * SettlementOutboxConfiguration#RECORD_TIMEOUT_SECONDS} s timeout (also applied to each statement by Spring's
+ * JDBC support), and the datasource has a socket timeout and a server-side statement timeout (application.yaml).
  */
 @Component
 public class SettlementRecorder {
@@ -176,7 +183,9 @@ public class SettlementRecorder {
                                 INSERT INTO settlement
                                     (payment_key, tx_hash, amount_atomic, pay_to, payer, outcome, reason_code)
                                 VALUES (:key, :txHash, :amount, :payTo, :payer, :outcome, :reason)
-                                ON CONFLICT (payment_key) DO NOTHING
+                                ON CONFLICT (payment_key) DO UPDATE
+                                   SET tx_hash = EXCLUDED.tx_hash, outcome = EXCLUDED.outcome, reason_code = NULL
+                                 WHERE settlement.outcome = 'SETTLE_FAILED' AND EXCLUDED.outcome = 'SETTLED'
                                 """)
                         .param("key", key)
                         .param("txHash", txHash)
@@ -186,7 +195,7 @@ public class SettlementRecorder {
                         .param("outcome", settled ? "SETTLED" : "SETTLE_FAILED")
                         .param("reason", settled ? null : reasonCode)
                         .update();
-                if (inserted == 1) {
+                if (inserted == 1) { // inserted, or upgraded from SETTLE_FAILED
                     publisher.publishEvent(event);
                 }
             });
