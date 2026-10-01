@@ -47,7 +47,9 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * settles a payment itself (that only happens after the handler returns a 2xx, in {@link
  * X402SettlementFilter}); for an {@link io.github.orhanyarkin.x402.core.PaymentFlow#UPFRONT upfront}
  * handler it settles right after a successful {@code /verify}, and the handler runs only if that
- * settle succeeded. Every check before that (offer, amount, window, signature, nonce claim, verify)
+ * settle succeeded. Before that settle it checks the window once more: a slow {@code /verify} that
+ * left less than the facilitator's settle margin is refused with {@code 402} and the nonce claim
+ * released, since nothing was settled. Every check before that (offer, amount, window, signature, nonce claim, verify)
  * is the same in both flows, so a refused request never reaches {@code /settle}. It communicates
  * its outcome to that filter through the {@link
  * X402PaymentAttempt} request attribute the filter created before dispatching. The very first thing
@@ -68,9 +70,6 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
 
     /** Extra allowance, on top of a handler's {@code maxTimeoutSeconds}, for clock drift between payer and server. */
     static final Duration CLOCK_SKEW = Duration.ofSeconds(5);
-
-    /** Extra margin, on top of the facilitator read timeout, an authorization's remaining window must clear. */
-    static final Duration SETTLEMENT_MARGIN = Duration.ofSeconds(5);
 
     private final RequiresPaymentRegistry registry;
     private final X402Codec codec;
@@ -245,6 +244,22 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
             return false;
         }
 
+        if (entry.upfront() && !leavesTimeToSettle(validBefore)) {
+            // /verify (with its retries) used up so much of the window that an upfront /settle
+            // could now lose the race against validBefore. Nothing was settled and nothing will be
+            // under this claim, so -- unlike every later upfront branch -- releasing it is safe: the
+            // same authorization may be retried. Checked before markVerified, so
+            // X402SettlementFilter treats this like any other refusal written here.
+            nonceStore.release(nonceKey, claimToken);
+            reject(
+                    request,
+                    response,
+                    attempt,
+                    "window_too_short",
+                    "the submitted payment does not match the required payment");
+            return false;
+        }
+
         attempt.markVerified(serverPayload, nonceKey, claimToken, authorization.from());
         if (!entry.upfront()) {
             return true;
@@ -255,6 +270,18 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
         // its 402 and published X402PaymentFailedEvent; the handler never runs.
         attempt.markSettleAttempted();
         return settler.settle(request, response, attempt);
+    }
+
+    /**
+     * Whether an authorization valid before {@code validBefore} (epoch seconds) still has at least
+     * the facilitator's {@linkplain X402ServerProperties.Facilitator#settleMargin() settle margin}
+     * left now. Whole seconds, exactly like the window check before the claim in {@link
+     * #validateAuthorization}, so an authorization that passed that check is refused here only if
+     * time actually passed in between.
+     */
+    private boolean leavesTimeToSettle(long validBefore) {
+        long left = validBefore - clock.instant().getEpochSecond();
+        return left >= properties.facilitator().settleMargin().toSeconds();
     }
 
     /**
@@ -286,11 +313,7 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
         if (window > offer.maxTimeoutSeconds() + CLOCK_SKEW.toSeconds()) {
             return "window_too_large";
         }
-        long minimumWindow = Math.max(
-                properties.facilitator().connectTimeout().toSeconds()
-                        + properties.facilitator().readTimeout().toSeconds()
-                        + SETTLEMENT_MARGIN.toSeconds(),
-                entry.minWindowSeconds());
+        long minimumWindow = Math.max(properties.facilitator().settleMargin().toSeconds(), entry.minWindowSeconds());
         if (window < minimumWindow) {
             return "window_too_short";
         }

@@ -70,6 +70,9 @@ public record X402ServerProperties(
         private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(3);
         private static final Duration DEFAULT_READ_TIMEOUT = Duration.ofSeconds(15);
 
+        /** Extra time, on top of the facilitator timeouts, that {@link #settleMargin()} adds. */
+        public static final Duration SETTLE_MARGIN_EXTRA = Duration.ofSeconds(5);
+
         public Facilitator {
             if (url == null || url.isBlank()) {
                 url = DEFAULT_FACILITATOR_URL;
@@ -80,6 +83,18 @@ public record X402ServerProperties(
             if (readTimeout == null) {
                 readTimeout = DEFAULT_READ_TIMEOUT;
             }
+        }
+
+        /**
+         * The time a {@code /settle} call may need: {@code connectTimeout + readTimeout +}
+         * {@link #SETTLE_MARGIN_EXTRA}. An authorization must have at least this much of its window
+         * left when it is accepted and again right before an upfront {@code /settle}, so the
+         * settle cannot lose a race against the authorization's own {@code validBefore}.
+         * Applications that budget their own work against {@code validBefore} should use this same
+         * value.
+         */
+        public Duration settleMargin() {
+            return connectTimeout.plus(readTimeout).plus(SETTLE_MARGIN_EXTRA);
         }
     }
 }
