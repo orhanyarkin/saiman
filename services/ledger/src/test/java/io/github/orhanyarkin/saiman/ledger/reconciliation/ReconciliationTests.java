@@ -233,6 +233,25 @@ class ReconciliationTests {
     }
 
     @Test
+    void realSettledPaymentIsCheckedInTheFirstRunDespiteAFloodOfForgedRows() {
+        TestPayment real = settledBothBooks(20_000);
+        chain.mine(receipt(real, real.txHash(), real.payTo(), 20_000, true));
+        List<TestPayment> flood = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            TestPayment forged = TestPayment.random(random, 1);
+            ledger.record(PaymentFact.of(forged.authorized()), PaymentTopics.AUTHORIZED);
+            flood.add(forged);
+        }
+
+        ReconciliationReport report = runNow();
+
+        assertThat(item(report, real).status()).isEqualTo("MATCHED");
+        assertThat(report.items()).hasSizeLessThanOrEqualTo(50);
+        // The rest of the batch went to the flood, oldest first: the first forged row is in this run too.
+        assertThat(item(report, flood.getFirst()).status()).isNotNull();
+    }
+
+    @Test
     void nearMaxValidBeforeDoesNotFailARun() {
         TestPayment payment = TestPayment.of(
                 random,
