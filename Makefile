@@ -191,10 +191,14 @@ recon-run: ## Trigger a reconciliation run on the ledger and print its runId.
 	@resp=$$(curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' -H 'X-Saiman-Csrf: 1' --data '{}' $(LEDGER_URL)/api/v1/reconciliation/runs) || { echo "$$resp" >&2; exit 1; }; \
 	printf '%s\n' "$$resp" | jq -r '"runId: \(.runId)"'
 
-recon-report: ## Show the latest reconciliation report and save it to build/reports/reconciliation/latest.json.
+recon-report: ## Wait for the latest reconciliation run to finish (up to 2 min), show its report and save it to build/reports/reconciliation/latest.json.
 	@command -v jq >/dev/null 2>&1 || { echo "recon-report needs jq; install jq." >&2; exit 1; }
 	@mkdir -p build/reports/reconciliation
-	@resp=$$(curl -sS --fail-with-body $(LEDGER_URL)/api/v1/reconciliation/runs/latest) || { echo "$$resp" >&2; exit 1; }; \
+	@for i in $$(seq 1 60); do \
+	  resp=$$(curl -sS --fail-with-body $(LEDGER_URL)/api/v1/reconciliation/runs/latest) || { echo "$$resp" >&2; exit 1; }; \
+	  [ "$$(printf '%s' "$$resp" | jq -r '.status')" != "RUNNING" ] && break; \
+	  sleep 2; \
+	done; \
 	printf '%s\n' "$$resp" | jq . | tee build/reports/reconciliation/latest.json
 
 ledger-balance: ## Print the ledger trial balance as a table.
