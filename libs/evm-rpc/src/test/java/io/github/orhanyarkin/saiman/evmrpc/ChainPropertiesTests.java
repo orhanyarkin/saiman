@@ -84,4 +84,16 @@ class ChainPropertiesTests {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatCode(() -> with("https://sepolia.base.org", hosts, 5, 1000)).doesNotThrowAnyException();
     }
+
+    @Test
+    void rejectsAQueryOrFragment() {
+        assertThatThrownBy(() -> ChainProperties.of("https://sepolia.base.org/?apikey=secret"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("query or fragment")
+                .hasMessageNotContaining("secret");
+        assertThatThrownBy(() -> ChainProperties.of("https://sepolia.base.org/#frag"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> ChainProperties.of("http://127.0.0.1:8545/?k=v"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

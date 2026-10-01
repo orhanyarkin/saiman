@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -43,7 +44,9 @@ import tools.jackson.databind.json.JsonMapper;
  * responses are capped at {@value #MAX_RESPONSE_BYTES} bytes; every number is range-checked; only logs emitted by
  * the USDC contract are read. Every failure surfaces as {@link ChainUnavailableException} with a fixed message
  * (response text is never echoed). Each call runs as {@code Retry(CircuitBreaker(RateLimiter(call)))}: IO errors,
- * 429 and 5xx are retried with jittered backoff, JSON-RPC errors and malformed answers are not.
+ * 429, 5xx and JSON-RPC rate-limit errors (codes -32005 and -32016) are retried with jittered backoff, other
+ * JSON-RPC errors and malformed answers are not. {@code findAuthorizationTx} verifies the returned logs itself
+ * (topics, removed flag) instead of trusting the node's filter.
  */
 public class JsonRpcBaseSepoliaUsdc implements BaseSepoliaUsdc {
 
@@ -63,6 +66,12 @@ public class JsonRpcBaseSepoliaUsdc implements BaseSepoliaUsdc {
 
     /** {@code keccak256("AuthorizationUsed(address,bytes32)")}. */
     static final String AUTHORIZATION_USED_TOPIC = topic("AuthorizationUsed(address,bytes32)");
+
+    /**
+     * JSON-RPC error codes that mean "slow down": -32005 (limit exceeded: Infura, geth-family nodes) and -32016
+     * (over rate limit: Alchemy, op-geth-based endpoints). HTTP 429 is handled separately.
+     */
+    private static final Set<Long> RATE_LIMIT_CODES = Set.of(-32005L, -32016L);
 
     private static final Logger LOG = LoggerFactory.getLogger(JsonRpcBaseSepoliaUsdc.class);
     private static final Pattern ADDRESS = Pattern.compile("0x[0-9a-fA-F]{40}");
@@ -181,6 +190,7 @@ public class JsonRpcBaseSepoliaUsdc implements BaseSepoliaUsdc {
         }
         List<UsdcTransfer> transfers = new ArrayList<>();
         List<String> authorizations = new ArrayList<>();
+        List<UsdcAuthorizationUse> uses = new ArrayList<>();
         for (JsonNode log : logs) {
             if (!USDC.equalsIgnoreCase(text(log.get("address")))) {
                 continue; // only the USDC contract's logs count
@@ -192,13 +202,19 @@ public class JsonRpcBaseSepoliaUsdc implements BaseSepoliaUsdc {
             String topic0 = text(topics.get(0)).toLowerCase(Locale.ROOT);
             if (topic0.equals(TRANSFER_TOPIC) && topics.size() == 3) {
                 transfers.add(new UsdcTransfer(
-                        addressTopic(topics.get(1)), addressTopic(topics.get(2)), uint64Data(log.get("data"))));
+                        addressTopic(topics.get(1)),
+                        addressTopic(topics.get(2)),
+                        uint64Data(log.get("data")),
+                        logIndex(log)));
             } else if (topic0.equals(AUTHORIZATION_USED_TOPIC) && topics.size() == 3) {
-                authorizations.add(addressTopic(topics.get(1)) + ":" + bytes32(topics.get(2)));
+                UsdcAuthorizationUse use =
+                        new UsdcAuthorizationUse(addressTopic(topics.get(1)), bytes32(topics.get(2)), logIndex(log));
+                authorizations.add(use.key());
+                uses.add(use);
             }
         }
         return Optional.of(new UsdcReceipt(
-                txHash.toLowerCase(Locale.ROOT), blockNumber, status.equals("0x1"), transfers, authorizations));
+                txHash.toLowerCase(Locale.ROOT), blockNumber, status.equals("0x1"), transfers, authorizations, uses));
     }
 
     @Override
@@ -234,12 +250,37 @@ public class JsonRpcBaseSepoliaUsdc implements BaseSepoliaUsdc {
                 if (!USDC.equalsIgnoreCase(text(log.get("address")))) {
                     continue;
                 }
+                // Do not trust the node's topic filter: the log must really be this authorizer's use of this
+                // nonce, and not a log the node reports as removed by a reorg.
+                if (!isAuthorizationUsed(log, authorizer, nonce)) {
+                    continue;
+                }
                 String tx = text(log.get("transactionHash"));
                 requireMalformedUnless(BYTES32.matcher(tx).matches());
                 return Optional.of(tx.toLowerCase(Locale.ROOT));
             }
         }
         return Optional.empty();
+    }
+
+    private static boolean isAuthorizationUsed(JsonNode log, String authorizer, String nonce) {
+        JsonNode removed = log.get("removed");
+        if (removed != null && removed.isBoolean() && removed.asBoolean()) {
+            return false;
+        }
+        JsonNode topics = log.get("topics");
+        if (topics == null || !topics.isArray() || topics.size() != 3) {
+            return false;
+        }
+        return AUTHORIZATION_USED_TOPIC.equals(text(topics.get(0)).toLowerCase(Locale.ROOT))
+                && addressTopic(topics.get(1)).equals(authorizer.toLowerCase(Locale.ROOT))
+                && bytes32(topics.get(2)).equals(nonce.toLowerCase(Locale.ROOT));
+    }
+
+    /** The log's {@code logIndex}, or {@link UsdcTransfer#UNKNOWN_LOG_INDEX} if the node sent none. */
+    private static long logIndex(JsonNode log) {
+        JsonNode index = log.get("logIndex");
+        return index == null || index.isNull() ? UsdcTransfer.UNKNOWN_LOG_INDEX : quantity(index);
     }
 
     // ---- transport -------------------------------------------------------------------------------------------
@@ -316,6 +357,11 @@ public class JsonRpcBaseSepoliaUsdc implements BaseSepoliaUsdc {
         }
         JsonNode error = root.get("error");
         if (error != null && !error.isNull()) {
+            // Rate limiting is transient (retry + breaker); recognised by the JSON-RPC code only, never by text.
+            JsonNode code = error.get("code");
+            if (code != null && code.isIntegralNumber() && RATE_LIMIT_CODES.contains(code.asLong())) {
+                throw new TransientChainException("chain RPC rate limited");
+            }
             throw new ChainUnavailableException("chain RPC returned an error");
         }
         JsonNode result = root.get("result");

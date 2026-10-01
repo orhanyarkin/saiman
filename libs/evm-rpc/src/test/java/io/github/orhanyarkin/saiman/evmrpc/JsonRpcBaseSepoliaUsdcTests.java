@@ -331,4 +331,91 @@ class JsonRpcBaseSepoliaUsdcTests {
             assertThat(server.calls()).isEqualTo(before);
         }
     }
+
+    private static String indexedLog(String body, long index) {
+        return body.substring(0, body.length() - 1) + ",\"logIndex\":\"0x" + Long.toHexString(index) + "\"}";
+    }
+
+    @Test
+    void receiptExposesTheLogIndexOfEveryTransferAndAuthorization() {
+        String logs = String.join(
+                ",",
+                indexedLog(transferLog(USDC, 10_000), 7),
+                indexedLog(authorizationLog(USDC), 8),
+                indexedLog(transferLog(USDC, 5), 9));
+        try (StubRpcServer server = stub((m, p, n) -> Reply.result(receiptJson("0x1", logs)))) {
+            JsonRpcBaseSepoliaUsdc client = new JsonRpcBaseSepoliaUsdc(props(server.url(), 1000));
+            UsdcReceipt receipt = client.receipt(TX).orElseThrow();
+            assertThat(receipt.transfers())
+                    .containsExactly(new UsdcTransfer(PAYER, PAYEE, 10_000, 7), new UsdcTransfer(PAYER, PAYEE, 5, 9));
+            assertThat(receipt.authorizationUses()).containsExactly(new UsdcAuthorizationUse(PAYER, NONCE, 8));
+            assertThat(receipt.authorizationsUsed()).containsExactly(PAYER + ":" + NONCE);
+        }
+    }
+
+    @Test
+    void findAuthorizationTxDoesNotTrustTheNodesFilter() {
+        String otherNonce = "0x" + "11".repeat(32);
+        String wrongNonce = authorizationLog(USDC).replace(NONCE, otherNonce);
+        String wrongAuthorizer = authorizationLog(USDC).replace(PAYER.substring(2), PAYEE.substring(2));
+        String wrongEvent = authorizationLog(USDC)
+                .replace(JsonRpcBaseSepoliaUsdc.AUTHORIZATION_USED_TOPIC, JsonRpcBaseSepoliaUsdc.TRANSFER_TOPIC);
+        String removed = authorizationLog(USDC).replace("\"data\":", "\"removed\":true,\"data\":");
+        String bad = String.join(",", wrongNonce, wrongAuthorizer, wrongEvent, removed);
+        try (StubRpcServer server = stub((m, p, n) -> Reply.result("[" + bad + "]"))) {
+            JsonRpcBaseSepoliaUsdc client = new JsonRpcBaseSepoliaUsdc(props(server.url(), 1000));
+            assertThat(client.findAuthorizationTx(PAYER, NONCE, 100, 199)).isEmpty();
+        }
+        // The genuine log after the bad ones is the one returned.
+        String genuine = authorizationLog(USDC).replace(TX, "0x" + "ee".repeat(32));
+        try (StubRpcServer server = stub((m, p, n) -> Reply.result("[" + bad + "," + genuine + "]"))) {
+            JsonRpcBaseSepoliaUsdc client = new JsonRpcBaseSepoliaUsdc(props(server.url(), 1000));
+            assertThat(client.findAuthorizationTx(PAYER, NONCE, 100, 199)).contains("0x" + "ee".repeat(32));
+        }
+    }
+
+    @Test
+    void jsonRpcRateLimitCodesAreTransientAndRetried() {
+        for (int code : new int[] {-32005, -32016}) {
+            try (StubRpcServer server = stub((m, p, n) -> n == 2
+                    ? Reply.json("{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":" + code
+                            + ",\"message\":\"secret-detail\"}}")
+                    : Reply.result("{\"number\":\"0x1\",\"timestamp\":\"0x2\"}"))) {
+                JsonRpcBaseSepoliaUsdc client = new JsonRpcBaseSepoliaUsdc(props(server.url(), 1000));
+                assertThat(client.block(BlockTag.LATEST)).isEqualTo(new ChainBlock(1, 2));
+                assertThat(server.methods().stream()
+                                .filter("eth_getBlockByNumber"::equals)
+                                .count())
+                        .isEqualTo(2);
+            }
+        }
+    }
+
+    @Test
+    void aPersistentRateLimitExhaustsTheRetriesWithoutEchoingTheMessage() {
+        try (StubRpcServer server = stub((m, p, n) -> Reply.json(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32005,\"message\":\"secret-detail\"}}"))) {
+            JsonRpcBaseSepoliaUsdc client = new JsonRpcBaseSepoliaUsdc(props(server.url(), 1000));
+            assertThatThrownBy(() -> client.block(BlockTag.LATEST))
+                    .isInstanceOf(ChainUnavailableException.class)
+                    .hasMessageNotContaining("secret-detail");
+            assertThat(server.methods().stream()
+                            .filter("eth_getBlockByNumber"::equals)
+                            .count())
+                    .isEqualTo(3);
+        }
+    }
+
+    @Test
+    void aRateLimitMessageWithoutTheCodeIsNotTreatedAsTransient() {
+        try (StubRpcServer server = stub((m, p, n) -> Reply.json(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32000,\"message\":\"rate limit exceeded\"}}"))) {
+            JsonRpcBaseSepoliaUsdc client = new JsonRpcBaseSepoliaUsdc(props(server.url(), 1000));
+            assertThatThrownBy(() -> client.block(BlockTag.LATEST)).isInstanceOf(ChainUnavailableException.class);
+            assertThat(server.methods().stream()
+                            .filter("eth_getBlockByNumber"::equals)
+                            .count())
+                    .isEqualTo(1);
+        }
+    }
 }
