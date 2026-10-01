@@ -47,7 +47,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Reconciliation against {@link FakeChain} with Postgres and Redpanda. A context of its own (the property only
+ * Reconciliation against {@link FakeChain} with Postgres and Kafka. A context of its own (the property only
  * changes the cache key), so the runs here see only these tests' payments.
  */
 @LedgerIntegrationTest

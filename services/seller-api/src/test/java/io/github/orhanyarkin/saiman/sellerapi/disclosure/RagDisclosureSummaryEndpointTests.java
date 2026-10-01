@@ -84,7 +84,7 @@ class RagDisclosureSummaryEndpointTests extends RagTestBase {
                 .getResponseBody();
         assertThat(router.modelCalls()).isEqualTo(1);
 
-        // Same corpus version: served from Valkey. The model is not asked again, even if it now
+        // Same corpus version: served from Redis. The model is not asked again, even if it now
         // could not answer (retrieval still runs: its corpusVersion is the cache key).
         router.failWith(new DailyCapExceededException("cap"));
         String second = getPaid(URI, PRICE)

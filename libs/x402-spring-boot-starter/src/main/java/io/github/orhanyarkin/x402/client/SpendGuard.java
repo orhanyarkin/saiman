@@ -11,7 +11,7 @@ import io.github.orhanyarkin.x402.core.SettlementResponse;
  *
  * <p>{@link PropertiesSpendGuard} is the M1 default: a per-request maximum and a payee allowlist,
  * both read from {@code x402.client.*} properties, plus in-memory idempotency-key dedupe. M3
- * replaces it with a bean backed by Valkey (fast budget checks) and Postgres (durable,
+ * replaces it with a bean backed by Redis (fast budget checks) and Postgres (durable,
  * ledger-linked reservations); this interface does not change.
  */
 public interface SpendGuard {

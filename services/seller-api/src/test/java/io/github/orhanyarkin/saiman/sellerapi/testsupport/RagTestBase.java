@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.sellerapi.testsupport;
 
 import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
+import io.github.orhanyarkin.saiman.testsupport.RedisContainerConfiguration;
 import io.github.orhanyarkin.x402.core.Eip3009Authorization;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
@@ -25,11 +26,9 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.client.RestTestClient;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
 /**
- * Shared wiring for the RAG-mode endpoint tests: a real Valkey (nonce store, router cost guard is
+ * Shared wiring for the RAG-mode endpoint tests: the shared Redis (nonce store, router cost guard is
  * replaced by the fake router, summary cache), a {@link FakeFacilitator}, a {@link
  * FakeIngestServer} and a {@link SwitchableRouter}. Everything is a JVM singleton started once, so
  * Spring's context cache stays valid across test classes (a per-class {@code @Container} would be
@@ -40,26 +39,18 @@ import org.testcontainers.utility.DockerImageName;
         classes = SellerApiApplication.class,
         properties = {"seller.disclosures.source=rag", "seller.ingest.retry-wait=5ms"})
 @AutoConfigureRestTestClient
-@Import({RagTestBase.RouterConfig.class, TestcontainersConfiguration.class})
+@Import({RagTestBase.RouterConfig.class, TestcontainersConfiguration.class, RedisContainerConfiguration.class})
 public abstract class RagTestBase {
 
-    public static final GenericContainer<?> VALKEY =
-            new GenericContainer<>(DockerImageName.parse("valkey/valkey:9.1.2-alpine")).withExposedPorts(6379);
     public static final FakeFacilitator FACILITATOR = new FakeFacilitator();
     public static final FakeIngestServer INGEST = new FakeIngestServer();
     public static final String PAY_TO = TestWallets.OTHER_PAYER.address();
-
-    static {
-        VALKEY.start();
-    }
 
     @DynamicPropertySource
     static void wiring(DynamicPropertyRegistry registry) {
         registry.add("x402.server.pay-to", () -> PAY_TO);
         registry.add("x402.server.facilitator.url", FACILITATOR::url);
         registry.add("seller.ingest.base-url", INGEST::url);
-        registry.add("spring.data.redis.host", VALKEY::getHost);
-        registry.add("spring.data.redis.port", () -> VALKEY.getMappedPort(6379));
     }
 
     @TestConfiguration(proxyBeanMethods = false)

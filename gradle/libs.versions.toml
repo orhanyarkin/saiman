@@ -21,7 +21,6 @@ spring-modulith-events-kafka = { module = "org.springframework.modulith:spring-m
 spring-modulith-events-api = { module = "org.springframework.modulith:spring-modulith-events-api" }
 spring-boot-starter-kafka = { module = "org.springframework.boot:spring-boot-starter-kafka" }
 spring-boot-starter-kafka-test = { module = "org.springframework.boot:spring-boot-starter-kafka-test" }
-testcontainers-redpanda = { module = "org.testcontainers:testcontainers-redpanda" }
 spring-ai-bom = { module = "org.springframework.ai:spring-ai-bom", version.ref = "spring-ai" }
 # Versions managed by the Spring AI BOM (apply `platform(libs.spring.ai.bom)` in the module)
 spring-ai-client-chat = { module = "org.springframework.ai:spring-ai-client-chat" }
@@ -61,6 +60,7 @@ spring-boot-micrometer-tracing-test = { module = "org.springframework.boot:sprin
 testcontainers = { module = "org.testcontainers:testcontainers" }
 testcontainers-junit-jupiter = { module = "org.testcontainers:testcontainers-junit-jupiter" }
 testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql" }
+testcontainers-kafka = { module = "org.testcontainers:testcontainers-kafka" }
 opentelemetry-sdk-testing = { module = "io.opentelemetry:opentelemetry-sdk-testing" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 

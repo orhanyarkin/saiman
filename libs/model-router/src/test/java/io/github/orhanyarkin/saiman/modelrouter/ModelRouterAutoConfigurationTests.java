@@ -29,7 +29,7 @@ class ModelRouterAutoConfigurationTests {
             new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(ModelRouterAutoConfiguration.class));
 
     @Test
-    void withoutValkeyAndWithoutTheExplicitMemoryPropertyStartupFailsWithAClearMessage() {
+    void withoutRedisAndWithoutTheExplicitMemoryPropertyStartupFailsWithAClearMessage() {
         noExplicitGuard.run(context -> {
             assertThat(context).hasFailed();
             assertThat(context.getStartupFailure())
@@ -45,7 +45,7 @@ class ModelRouterAutoConfigurationTests {
                 new org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory());
         noExplicitGuard.withBean(StringRedisTemplate.class, () -> template).run(context -> {
             assertThat(context).hasNotFailed();
-            assertThat(context.getBean(CostGuard.class)).isInstanceOf(ValkeyCostGuard.class);
+            assertThat(context.getBean(CostGuard.class)).isInstanceOf(RedisCostGuard.class);
         });
     }
 
@@ -180,11 +180,11 @@ class ModelRouterAutoConfigurationTests {
     }
 
     @Test
-    void aStringRedisTemplateSelectsTheValkeyGuardAndAUserGuardStillWins() {
+    void aStringRedisTemplateSelectsTheRedisGuardAndAUserGuardStillWins() {
         StringRedisTemplate template = new StringRedisTemplate(
                 new org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory());
         runner.withBean(StringRedisTemplate.class, () -> template)
-                .run(context -> assertThat(context.getBean(CostGuard.class)).isInstanceOf(ValkeyCostGuard.class));
+                .run(context -> assertThat(context.getBean(CostGuard.class)).isInstanceOf(RedisCostGuard.class));
 
         CostGuard mine = new InMemoryCostGuard(1, java.time.Clock.systemUTC());
         runner.withBean(StringRedisTemplate.class, () -> template)
@@ -203,7 +203,7 @@ class ModelRouterAutoConfigurationTests {
     }
 
     @Test
-    void withBootsRealRedisAutoConfigurationTheValkeyGuardIsSelected() {
+    void withBootsRealRedisAutoConfigurationTheRedisGuardIsSelected() {
         // A wrong afterName is silently ignored, so this is the only guard on the ordering.
         new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(
@@ -212,7 +212,7 @@ class ModelRouterAutoConfigurationTests {
                 .withPropertyValues("spring.data.redis.host=127.0.0.1", "spring.data.redis.port=1")
                 .run(context -> {
                     assertThat(context).hasNotFailed().hasSingleBean(StringRedisTemplate.class);
-                    assertThat(context.getBean(CostGuard.class)).isInstanceOf(ValkeyCostGuard.class);
+                    assertThat(context.getBean(CostGuard.class)).isInstanceOf(RedisCostGuard.class);
                 });
     }
 }

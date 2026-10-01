@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.sellerapi.testsupport;
 
 import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
+import io.github.orhanyarkin.saiman.testsupport.RedisContainerConfiguration;
 import io.github.orhanyarkin.x402.core.PaymentPayload;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
@@ -20,37 +21,27 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.client.RestTestClient;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Shared wiring for the settlement-record tests: a real Postgres (the imported {@link
- * TestcontainersConfiguration}), a real Valkey for the nonce store and a {@link FakeFacilitator}, all JVM singletons
+ * TestcontainersConfiguration}), the shared Redis for the nonce store and a {@link FakeFacilitator}, all JVM singletons
  * so Spring's context cache stays valid across test classes.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, classes = SellerApiApplication.class)
 @AutoConfigureRestTestClient
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, RedisContainerConfiguration.class})
 public abstract class SettlementTestBase {
 
-    public static final GenericContainer<?> VALKEY =
-            new GenericContainer<>(DockerImageName.parse("valkey/valkey:9.1.2-alpine")).withExposedPorts(6379);
     public static final FakeFacilitator FACILITATOR = new FakeFacilitator();
     public static final String PAY_TO = TestWallets.OTHER_PAYER.address();
     public static final String PRICE = "10000";
-
-    static {
-        VALKEY.start();
-    }
 
     @DynamicPropertySource
     static void wiring(DynamicPropertyRegistry registry) {
         registry.add("x402.server.pay-to", () -> PAY_TO);
         registry.add("x402.server.facilitator.url", FACILITATOR::url);
-        registry.add("spring.data.redis.host", VALKEY::getHost);
-        registry.add("spring.data.redis.port", () -> VALKEY.getMappedPort(6379));
     }
 
     @Autowired

@@ -13,7 +13,7 @@ dependencies {
     implementation(libs.spring.boot.autoconfigure)
     // Circuit breaker per route for the OpenAI primary -> fallback model switch; core module only.
     implementation(libs.resilience4j.circuitbreaker)
-    // Daily USD cap lives in Valkey; the counter is only touched when a StringRedisTemplate exists.
+    // Daily USD cap lives in Redis; the counter is only touched when a StringRedisTemplate exists.
     compileOnly(libs.spring.boot.starter.data.redis)
     compileOnly(libs.micrometer.core)
     // Money (USD micro-dollars) appears in the public API of CostGuard.
@@ -28,7 +28,5 @@ dependencies {
 
     testImplementation(libs.spring.boot.starter.data.redis)
     testImplementation(libs.micrometer.core)
-    testImplementation(libs.spring.boot.testcontainers)
-    testImplementation(libs.testcontainers)
-    testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(project(":libs:test-support")) // one Redis per test JVM (ADR-0020)
 }

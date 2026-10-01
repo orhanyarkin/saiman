@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.github.orhanyarkin.saiman.testsupport.SharedContainers;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -15,29 +16,21 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 /**
- * {@link ValkeyCostGuard} against a real Valkey server. The connection is wired by hand, as in the
+ * {@link RedisCostGuard} against a real Redis server. The connection is wired by hand, as in the
  * x402 starter's nonce-store tests.
  */
-@Testcontainers
-class ValkeyCostGuardTests {
-
-    @Container
-    static final GenericContainer<?> VALKEY =
-            new GenericContainer<>(DockerImageName.parse("valkey/valkey:9.1.2-alpine")).withExposedPorts(6379);
+class RedisCostGuardTests {
 
     private static LettuceConnectionFactory connectionFactory;
     private static StringRedisTemplate template;
 
     @BeforeAll
     static void connect() {
-        connectionFactory = new LettuceConnectionFactory(
-                new RedisStandaloneConfiguration(VALKEY.getHost(), VALKEY.getMappedPort(6379)));
+        connectionFactory = new LettuceConnectionFactory(new RedisStandaloneConfiguration(
+                SharedContainers.redis().getHost(),
+                SharedContainers.redis().getMappedPort(SharedContainers.REDIS_PORT)));
         connectionFactory.afterPropertiesSet();
         template = new StringRedisTemplate(connectionFactory);
         template.afterPropertiesSet();
@@ -60,7 +53,7 @@ class ValkeyCostGuardTests {
 
     @Test
     void reserveRefusesWhenReservationWouldExceedCap() {
-        var guard = new ValkeyCostGuard(template, 1_000, uniqueDay());
+        var guard = new RedisCostGuard(template, 1_000, uniqueDay());
 
         guard.reserve(micros(600));
         assertThatThrownBy(() -> guard.reserve(micros(401))).isInstanceOf(DailyCapExceededException.class);
@@ -73,7 +66,7 @@ class ValkeyCostGuardTests {
 
     @Test
     void reservationIsAdjustedToActualAfterTheCall() {
-        var guard = new ValkeyCostGuard(template, 1_000, uniqueDay());
+        var guard = new RedisCostGuard(template, 1_000, uniqueDay());
 
         var reservation = guard.reserve(micros(500));
         guard.settle(reservation, micros(120));
@@ -86,7 +79,7 @@ class ValkeyCostGuardTests {
 
     @Test
     void settleNeverTakesTheDayBelowZero() {
-        var guard = new ValkeyCostGuard(template, 1_000, uniqueDay());
+        var guard = new RedisCostGuard(template, 1_000, uniqueDay());
         var reservation = guard.reserve(micros(300));
 
         guard.release(reservation);
@@ -99,7 +92,7 @@ class ValkeyCostGuardTests {
     @Test
     void keyIsPerUtcDayAndRollsOverAtMidnight() {
         var clock = new MutableClock(Instant.parse("2999-12-30T23:59:59Z"));
-        var guard = new ValkeyCostGuard(template, 500, clock);
+        var guard = new RedisCostGuard(template, 500, clock);
         template.delete(guard.todayKey());
         assertThat(guard.todayKey()).isEqualTo("router:cost:2999-12-30");
 
@@ -115,7 +108,7 @@ class ValkeyCostGuardTests {
 
     @Test
     void theCounterKeyExpiresEvenWhenTheFirstReservationIsRefused() {
-        var guard = new ValkeyCostGuard(template, 10, uniqueDay());
+        var guard = new RedisCostGuard(template, 10, uniqueDay());
         assertThatThrownBy(() -> guard.reserve(micros(11))).isInstanceOf(DailyCapExceededException.class);
 
         Long ttl = template.getExpire(guard.todayKey());
@@ -127,7 +120,7 @@ class ValkeyCostGuardTests {
     @Test
     void twoHundredVirtualThreadCallersCannotOverspendTheCap() {
         long cap = 10_000;
-        var guard = new ValkeyCostGuard(template, cap, uniqueDay());
+        var guard = new RedisCostGuard(template, cap, uniqueDay());
         var granted = new AtomicInteger();
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             for (int i = 0; i < 200; i++) {
@@ -147,7 +140,7 @@ class ValkeyCostGuardTests {
 
     @Test
     void aCorruptCounterFailsClosedWithoutEchoingTheValue() {
-        var guard = new ValkeyCostGuard(template, 1_000, uniqueDay());
+        var guard = new RedisCostGuard(template, 1_000, uniqueDay());
         template.opsForValue().set(guard.todayKey(), "not-a-number-XYZ");
 
         assertThatThrownBy(guard::todayTotal)
@@ -162,7 +155,7 @@ class ValkeyCostGuardTests {
 
     @Test
     void aNegativeCounterIsCorruptAndFailsClosed() {
-        var guard = new ValkeyCostGuard(template, 1_000, uniqueDay());
+        var guard = new RedisCostGuard(template, 1_000, uniqueDay());
         template.opsForValue().set(guard.todayKey(), "-500");
 
         assertThatThrownBy(guard::todayTotal)

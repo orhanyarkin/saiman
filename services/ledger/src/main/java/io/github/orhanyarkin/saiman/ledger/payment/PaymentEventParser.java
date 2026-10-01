@@ -21,7 +21,7 @@ import tools.jackson.databind.json.JsonMapper;
  * Parses {@code payments.*} payloads (plain JSON strings, no Kafka type headers) into the shared records with
  * Boot's {@link JsonMapper}, made strict: unknown fields, duplicate keys, floats for integers, strings for numbers
  * or booleans (scalar coercion) and nulls for primitives fail, and every field the schema requires must be present
- * (the records validate formats and ranges). On top of the records, because Redpanda is unauthenticated until M6:
+ * (the records validate formats and ranges). On top of the records, because Kafka is unauthenticated until M6:
  *
  * <ul>
  *   <li>{@code meta.occurredAt} is required and within {@code [2025-01-01, now + 1 day]};

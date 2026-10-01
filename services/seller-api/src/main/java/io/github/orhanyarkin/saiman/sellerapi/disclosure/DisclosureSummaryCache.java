@@ -21,14 +21,14 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Valkey cache of generated summaries, keyed by {@code (ticker, corpusVersion)}.
+ * Redis cache of generated summaries, keyed by {@code (ticker, corpusVersion)}.
  *
  * <p>The key uses the opaque {@code corpusVersion} from retrieval, never the watermark: the version
  * changes when a disclosure is blocked or superseded, so a purged disclosure can not keep being
  * served from here. A cache failure is never fatal (it is a miss / a skipped write): the run guard
- * and the router's own Valkey-backed cost guard are what fail closed for spending.
+ * and the router's own Redis-backed cost guard are what fail closed for spending.
  *
- * <p>A cached value is untrusted input (anyone who can reach Valkey can write it): on read it is
+ * <p>A cached value is untrusted input (anyone who can reach Redis can write it): on read it is
  * validated against the same rules a fresh summary must satisfy, and one that fails is a miss.
  *
  * <p>{@link #getOrGenerate} makes a miss single-flight per key and negative-caches a failed
@@ -202,7 +202,7 @@ class DisclosureSummaryCache {
                             llm.deadline().plus(LOCK_MARGIN));
             return acquired == null || acquired;
         } catch (RuntimeException e) {
-            // No lock is not a reason to refuse: the run guard fails closed if Valkey is really down.
+            // No lock is not a reason to refuse: the run guard fails closed if Redis is really down.
             log.warn("summary lock unavailable: {}", e.getClass().getSimpleName());
             return true;
         }

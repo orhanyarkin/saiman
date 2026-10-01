@@ -2,6 +2,7 @@ package io.github.orhanyarkin.x402.autoconfigure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.orhanyarkin.saiman.testsupport.RedisContainerConfiguration;
 import io.github.orhanyarkin.x402.server.PaymentNonceStore;
 import io.github.orhanyarkin.x402.server.RedisPaymentNonceStore;
 import io.github.orhanyarkin.x402.testing.FakeFacilitator;
@@ -10,14 +11,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 /**
  * Blocking review finding: {@code @ConditionalOnBean(StringRedisTemplate.class)} on the Redis
@@ -25,19 +22,14 @@ import org.testcontainers.utility.DockerImageName;
  * {@link org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration} never won
  * the race and {@code InMemoryPaymentNonceStore} was chosen even with a real {@code
  * StringRedisTemplate} present. Fixed with {@code afterName} on {@link
- * X402ServerAutoConfiguration}; this test proves the fix end to end against a real Valkey
- * container, wired the ordinary Boot way with {@link ServiceConnection} (confirmed working in Boot
- * 4.1.1: {@code spring-boot-data-redis} carries its own {@code
+ * X402ServerAutoConfiguration}; this test proves the fix end to end against a real Redis
+ * container, wired the ordinary Boot way with {@code @ServiceConnection} through the shared {@link
+ * RedisContainerConfiguration} ({@code spring-boot-data-redis} carries its own {@code
  * RedisContainerConnectionDetailsFactory}, in a package this starter does not otherwise depend on).
  */
-@Testcontainers
 @SpringBootTest(classes = X402NonceStoreSelectionTests.TestApplication.class)
+@Import(RedisContainerConfiguration.class)
 class X402NonceStoreSelectionTests {
-
-    @Container
-    @ServiceConnection(name = "redis")
-    static final GenericContainer<?> VALKEY =
-            new GenericContainer<>(DockerImageName.parse("valkey/valkey:9.1.2-alpine")).withExposedPorts(6379);
 
     private static final FakeFacilitator FACILITATOR = new FakeFacilitator();
 

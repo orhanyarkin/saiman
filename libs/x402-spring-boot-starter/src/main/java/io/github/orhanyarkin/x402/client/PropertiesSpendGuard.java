@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * single-atomic-operation design here has no such window.
  *
  * <p>This state does not survive a restart and is not shared across instances; M3's
- * Valkey/Postgres-backed {@link SpendGuard} fixes both.
+ * Redis/Postgres-backed {@link SpendGuard} fixes both.
  */
 public final class PropertiesSpendGuard implements SpendGuard {
 

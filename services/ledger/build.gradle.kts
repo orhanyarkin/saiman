@@ -20,9 +20,7 @@ dependencies {
 
     testImplementation(libs.spring.boot.starter.webmvc.test)
     testImplementation(libs.spring.boot.starter.kafka.test)
-    testImplementation(libs.spring.boot.testcontainers)
-    testImplementation(libs.testcontainers.postgresql)
-    testImplementation(libs.testcontainers.redpanda)
+    testImplementation(project(":libs:test-support")) // one Postgres and Kafka per test JVM (ADR-0020)
 }
 
 // Property tests (ADR-0019): `-Dsaiman.pbt.seed=<base seed>` and `-Dsaiman.pbt.tries=<n>` on the Gradle command

@@ -22,7 +22,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param dailyCapUsdMicros global daily cap in USD micro-dollars (700000 = $0.70)
  * @param prices price per model id
  * @param openai provider credentials and client limits
- * @param costGuard {@code memory} to accept a per-process daily cap when no Valkey is configured;
+ * @param costGuard {@code memory} to accept a per-process daily cap when no Redis is configured;
  *     absent otherwise (see {@link ModelRouterAutoConfiguration})
  * @param requireCostScope {@code true} refuses every chat call that carries no {@link
  *     RouterAdvisorParams#COST_SCOPE} before anything is sent (the orchestrator sets it)

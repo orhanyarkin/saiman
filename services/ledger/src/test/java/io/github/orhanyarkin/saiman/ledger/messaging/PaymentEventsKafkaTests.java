@@ -37,7 +37,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * End to end through a real Redpanda: raw JSON on the {@code payments.*} topics (as the producers' Modulith
+ * End to end through a real Kafka: raw JSON on the {@code payments.*} topics (as the producers' Modulith
  * externalization writes it, no type headers), the ledger books each entry once when a fact arrives late and however
  * often a record is redelivered, publishes {@code ledger.entry-posted.v1} through the outbox, and dead-letters
  * poison records instead of retrying them forever.

@@ -69,7 +69,7 @@ public final class DefaultModelRouter implements ModelRouter {
         }
         if (properties.requireCostScope() && scopedGuard == null) {
             throw new IllegalStateException(
-                    "saiman.router.require-cost-scope=true needs a ScopedCostGuard bean (Valkey, or the in-memory one)");
+                    "saiman.router.require-cost-scope=true needs a ScopedCostGuard bean (Redis, or the in-memory one)");
         }
         if (properties.maxScopeBudgetUsdMicros() <= 0
                 || properties.maxScopeBudgetUsdMicros() > HARD_CEILING_USD_MICROS) {
