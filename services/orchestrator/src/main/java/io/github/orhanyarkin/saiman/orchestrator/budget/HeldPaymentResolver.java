@@ -7,15 +7,21 @@ import io.github.orhanyarkin.saiman.evmrpc.ChainUnavailableException;
 import io.github.orhanyarkin.saiman.orchestrator.payment.IntentAuthorization;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentService;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentStatus;
+import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentView;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Supplier;
+import javax.sql.DataSource;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -36,10 +42,19 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       {@code expired_unused}).
  * </ul>
  *
- * Not yet expired, or any {@link ChainUnavailableException}: untouched until a later pass. Chain reads happen
- * before any row lock; each intent is then resolved in its own transaction under the usual lock order
- * (payment_intent -> run -> spend_day) after re-checking it is still HELD, so a pass is idempotent. One runner at
- * a time across instances: the pass holds a transaction-scoped advisory lock and skips if another holds it.
+ * Not yet expired, or any {@link ChainUnavailableException}: untouched until a later pass.
+ *
+ * <p>HELD intents with no recorded authorization (RESERVED -> HELD after a failure: the signature provably
+ * never left the process) are released locally without a chain read ({@code resolved_by = LOCAL}, no payment
+ * event, nothing was authorized).
+ *
+ * <p>Concurrency: no transaction is open while the RPC is read. One runner at a time across instances: the pass
+ * holds a session advisory lock on a dedicated connection and skips if another holds it; the lock is released
+ * in {@code finally}, and the connection is aborted if the unlock fails. Each intent is then resolved in its own
+ * short transaction under the usual lock order (payment_intent -> run -> spend_day) after re-checking, under
+ * {@code FOR UPDATE}, that it is still HELD, so a pass is idempotent. The work lists are ordered by {@code
+ * resolution_attempted_at} (never attempted first), stamped on every attempt, so intents that keep failing
+ * cannot starve the ones behind them.
  *
  * <p>Runs only when a {@link BaseSepoliaUsdc} client exists ({@code saiman.chain.rpc-url} set); the orchestrator
  * consumes nothing from Kafka for this (a forged "unused" message must not free budget).
@@ -49,7 +64,7 @@ public class HeldPaymentResolver {
 
     private static final Logger LOG = LoggerFactory.getLogger(HeldPaymentResolver.class);
     private static final String METRIC = "saiman.spend.held_resolution";
-    /** Postgres advisory-lock key of the resolver ("SAIMAN" + 0x0002). */
+    /** Postgres session advisory-lock key of the resolver ("SAIMAN" + 0x0002). */
     private static final long RESOLVER_LOCK = 0x5341494D414E0002L;
     /** Base Sepolia block time. */
     static final long BLOCK_SECONDS = 2;
@@ -58,8 +73,7 @@ public class HeldPaymentResolver {
 
     private final ObjectProvider<BaseSepoliaUsdc> chain;
     private final HeldResolutionProperties properties;
-    private final JdbcClient jdbc;
-    private final TransactionTemplate pass;
+    private final DataSource dataSource;
     private final TransactionTemplate perIntent;
     private final PaymentIntentService intents;
     private final BudgetSpendGuard guard;
@@ -68,15 +82,14 @@ public class HeldPaymentResolver {
     HeldPaymentResolver(
             ObjectProvider<BaseSepoliaUsdc> chain,
             HeldResolutionProperties properties,
-            JdbcClient jdbc,
+            DataSource dataSource,
             PlatformTransactionManager transactionManager,
             PaymentIntentService intents,
             BudgetSpendGuard guard,
             MeterRegistry meters) {
         this.chain = chain;
         this.properties = properties;
-        this.jdbc = jdbc;
-        this.pass = new TransactionTemplate(transactionManager);
+        this.dataSource = dataSource;
         this.perIntent = new TransactionTemplate(transactionManager);
         this.perIntent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.intents = intents;
@@ -99,46 +112,93 @@ public class HeldPaymentResolver {
         if (usdc == null) {
             return Pass.EMPTY;
         }
-        return Objects.requireNonNull(pass.execute(status -> {
-            boolean locked = Boolean.TRUE.equals(jdbc.sql("SELECT pg_try_advisory_xact_lock(:key)")
-                    .param("key", RESOLVER_LOCK)
-                    .query(Boolean.class)
-                    .single());
-            if (!locked) {
-                return Pass.EMPTY;
+        Connection lease;
+        try {
+            lease = dataSource.getConnection();
+        } catch (SQLException e) {
+            LOG.warn("HELD resolution skipped: no database connection for the runner lock");
+            return Pass.EMPTY;
+        }
+        boolean locked = false;
+        try {
+            locked = lockLease(lease);
+            return locked ? resolveLocked(usdc) : Pass.EMPTY;
+        } catch (SQLException e) {
+            LOG.warn("HELD resolution skipped: the runner lock failed");
+            return Pass.EMPTY;
+        } finally {
+            releaseLease(lease, locked);
+        }
+    }
+
+    /** Session-level advisory lock on a dedicated connection: held across the RPC reads, no transaction open. */
+    private static boolean lockLease(Connection lease) throws SQLException {
+        try (PreparedStatement st = lease.prepareStatement("SELECT pg_try_advisory_lock(?)")) {
+            st.setLong(1, RESOLVER_LOCK);
+            try (ResultSet rs = st.executeQuery()) {
+                return rs.next() && rs.getBoolean(1);
             }
-            return resolveLocked(usdc);
-        }));
+        }
+    }
+
+    /**
+     * Unlocks and returns the connection. If the unlock fails or says the lock was not held, the connection is
+     * aborted instead of going back to the pool with a session lock possibly still on it.
+     */
+    private static void releaseLease(Connection lease, boolean locked) {
+        try {
+            if (locked) {
+                boolean unlocked = false;
+                try (PreparedStatement st = lease.prepareStatement("SELECT pg_advisory_unlock(?)")) {
+                    st.setLong(1, RESOLVER_LOCK);
+                    try (ResultSet rs = st.executeQuery()) {
+                        unlocked = rs.next() && rs.getBoolean(1);
+                    }
+                } catch (SQLException e) {
+                    LOG.warn("HELD resolver unlock failed; aborting its connection");
+                }
+                if (!unlocked) {
+                    try {
+                        lease.abort(Runnable::run);
+                    } catch (SQLException | RuntimeException e) {
+                        LOG.warn("aborting the HELD resolver connection failed");
+                    }
+                }
+            }
+        } finally {
+            try {
+                lease.close();
+            } catch (SQLException | RuntimeException e) {
+                // already aborted or broken: the pool evicts it
+            }
+        }
     }
 
     private Pass resolveLocked(BaseSepoliaUsdc usdc) {
+        int settled = 0;
+        int released = 0;
+        int skipped = 0;
+        // Never signed: nothing can be on chain, so no chain read is needed (an RPC outage doesn't block it).
+        for (UUID id : intents.claimHeldWithoutAuthorization(properties.batchSize())) {
+            String outcome = guarded(id, () -> releaseUnsigned(id));
+            count(outcome);
+            if ("released_local".equals(outcome)) {
+                released++;
+            } else {
+                skipped++;
+            }
+        }
         ChainBlock safe;
         try {
             safe = usdc.block(BlockTag.SAFE);
         } catch (ChainUnavailableException e) {
             count("chain_unavailable");
             LOG.info("HELD resolution skipped: the chain RPC is unavailable");
-            return Pass.EMPTY;
+            return new Pass(settled, released, skipped);
         }
-        int withoutAuthorization = intents.countHeldWithoutAuthorization();
-        if (withoutAuthorization > 0) {
-            LOG.warn(
-                    "{} HELD payment intent(s) have no recorded authorization and cannot be resolved on chain;"
-                            + " they stay counted",
-                    withoutAuthorization);
-        }
-        List<UUID> due = intents.findHeldExpiredBefore(safe.timestamp(), properties.batchSize());
-        int settled = 0;
-        int released = 0;
-        int skipped = 0;
+        List<UUID> due = intents.claimHeldExpiredBefore(safe.timestamp(), properties.batchSize());
         for (UUID id : due) {
-            String outcome;
-            try {
-                outcome = resolveOne(usdc, id, safe);
-            } catch (RuntimeException e) {
-                LOG.error("HELD resolution of payment intent {} failed; left HELD", id, e);
-                outcome = "error";
-            }
+            String outcome = guarded(id, () -> resolveOne(usdc, id, safe));
             count(outcome);
             switch (outcome) {
                 case "settled" -> settled++;
@@ -157,8 +217,28 @@ public class HeldPaymentResolver {
         return new Pass(settled, released, skipped);
     }
 
+    private String guarded(UUID id, Supplier<String> work) {
+        try {
+            return work.get();
+        } catch (RuntimeException e) {
+            LOG.error("HELD resolution of payment intent {} failed; left HELD", id, e);
+            return "error";
+        }
+    }
+
+    private String releaseUnsigned(UUID id) {
+        return Objects.requireNonNull(perIntent.execute(status -> {
+            PaymentIntentView locked = intents.lockById(id).orElse(null);
+            if (locked == null || !guard.releaseHeldUnsignedLocked(locked)) {
+                return "already_resolved";
+            }
+            return "released_local";
+        }));
+    }
+
     private String resolveOne(BaseSepoliaUsdc usdc, UUID id, ChainBlock safe) {
-        IntentAuthorization held = intents.findAuthorization(id).orElse(null);
+        // Reads first, outside any transaction: no row lock or pooled transaction across RPC latency.
+        IntentAuthorization held = intents.readAuthorization(id).orElse(null);
         if (held == null || held.status() != PaymentIntentStatus.HELD) {
             return "already_resolved";
         }

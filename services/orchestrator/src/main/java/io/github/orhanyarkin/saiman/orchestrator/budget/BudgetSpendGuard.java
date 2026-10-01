@@ -231,6 +231,26 @@ public class BudgetSpendGuard implements SpendGuard {
         events.expiredUnused(held);
     }
 
+    /**
+     * HELD -> RELEASED for an intent that never recorded an authorization (RESERVED -> HELD after a failure,
+     * the signature provably never left the process), for an intent the caller has locked, in the caller's
+     * transaction. The amount leaves the reserved counters; no payment event (nothing was authorized).
+     *
+     * @return false if it was not (or no longer) such an intent
+     */
+    boolean releaseHeldUnsignedLocked(PaymentIntentView view) {
+        if (view.status() != PaymentIntentStatus.HELD || !intents.markHeldUnsignedReleased(view.id())) {
+            return false;
+        }
+        long amount = Objects.requireNonNull(view.amountAtomic());
+        LocalDate day = Objects.requireNonNull(view.reservedDay());
+        lockRun(view.runId());
+        lockDay(day);
+        moveRun(view.runId(), amount, false);
+        moveDay(day, amount, false);
+        return true;
+    }
+
     private static void requireHeld(IntentAuthorization intent) {
         if (intent.status() != PaymentIntentStatus.HELD) {
             throw new IllegalStateException("only a held payment can be resolved from the chain");
