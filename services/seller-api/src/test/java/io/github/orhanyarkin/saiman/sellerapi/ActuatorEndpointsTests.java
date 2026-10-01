@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.sellerapi;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.SharedTestFacilitator;
+import io.github.orhanyarkin.saiman.sellerapi.testsupport.TestcontainersConfiguration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -23,6 +25,7 @@ import org.springframework.test.web.servlet.client.RestTestClient;
  * metadata only, and every other Actuator endpoint does not exist at all.
  */
 // No Redis here, so its health indicator is off; the Redis nonce store is tested in DisclosureSummaryEndpointTests.
+@Import(TestcontainersConfiguration.class)
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "management.health.redis.enabled=false")
 @AutoConfigureRestTestClient
 class ActuatorEndpointsTests {

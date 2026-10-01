@@ -3,3 +3,18 @@ management:
   opentelemetry:
     # Keep a developer's exported OTEL_* variables from sending test telemetry to a collector.
     map-environment-variables: false
+spring:
+  # No broker in most tests: publications stay incomplete (which tests inspect); the Redpanda test overrides
+  # these. A refused loopback port fails each send after max.block.ms instead of hanging.
+  kafka:
+    bootstrap-servers: 127.0.0.1:1
+    admin:
+      auto-create: false
+    producer:
+      properties:
+        max.block.ms: 1000
+        request.timeout.ms: 1000
+        delivery.timeout.ms: 2000
+logging:
+  level:
+    org.apache.kafka: error

@@ -11,6 +11,39 @@ spring:
   mvc:
     problemdetails:
       enabled: true # RFC 9457 bodies for ResponseStatusException/ErrorResponseException/validation errors
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/saiman}
+    username: ${SPRING_DATASOURCE_USERNAME:saiman}
+    password: ${SPRING_DATASOURCE_PASSWORD:saiman}
+    hikari:
+      schema: seller_api
+      # A database outage must not hold a paid response for the default 30 s: recording the settlement
+      # gives up quickly (the chain is the safety net, ADR-0016).
+      connection-timeout: 2000 # ms
+  flyway:
+    schemas: seller_api
+    default-schema: seller_api
+    create-schemas: true
+  # Transactional outbox (ADR-0016): libs/eventing sets the registry defaults; V1 owns the table.
+  modulith:
+    events:
+      jdbc:
+        schema: seller_api
+      kafka:
+        # SettlementOutboxConfiguration writes the documented JSON as a String value without __TypeId__.
+        enable-json: false
+  kafka:
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Bounded: an unreachable broker fails a publication quickly; it stays incomplete in the registry and is
+      # resubmitted later or on restart. A paid response never waits for Kafka.
+      properties:
+        max.block.ms: 10000
+        request.timeout.ms: 10000
+        delivery.timeout.ms: 30000
+    admin:
+      operation-timeout: 10s
 
 server:
   port: 8081

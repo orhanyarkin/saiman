@@ -40,7 +40,7 @@ import org.testcontainers.utility.DockerImageName;
         classes = SellerApiApplication.class,
         properties = {"seller.disclosures.source=rag", "seller.ingest.retry-wait=5ms"})
 @AutoConfigureRestTestClient
-@Import(RagTestBase.RouterConfig.class)
+@Import({RagTestBase.RouterConfig.class, TestcontainersConfiguration.class})
 public abstract class RagTestBase {
 
     public static final GenericContainer<?> VALKEY =
