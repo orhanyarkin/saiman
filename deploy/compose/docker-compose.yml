@@ -205,7 +205,9 @@ services:
       <<: *app-common-depends-on
       valkey:
         condition: service_healthy
-      # M4: seller-api publishes payment events to Redpanda (outbox relay).
+      # M4: seller-api records settlements in its own schema (seller_api) and publishes payment events to Redpanda.
+      postgres:
+        condition: service_healthy
       redpanda:
         condition: service_healthy
       ingest:
