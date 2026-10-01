@@ -13,6 +13,7 @@ import io.github.orhanyarkin.x402.client.SpendDeniedException;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
 import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +38,9 @@ class PaidCallSpendControlTests extends SpendTestSupport {
 
     @Autowired
     private BudgetSpendGuard guard;
+
+    @Autowired
+    private SellerProperties sellerProperties;
 
     @Test
     void runBudgetPaysTwiceThenDeniesTheThirdCallBeforeSigning() {
@@ -98,6 +102,20 @@ class PaidCallSpendControlTests extends SpendTestSupport {
         assertThat(signer.calls()).isEqualTo(5);
         assertThat(seller.paidRequests()).isEqualTo(5);
         assertThat(run(run)).isEqualTo(new RunCounters(50_000, 0, 50_000));
+    }
+
+    @Test
+    void aSettledAnswerTheSellerHoldsBackWhileSettlingStillArrives() {
+        assertThat(sellerProperties.readTimeout()).isEqualTo(SellerProperties.MIN_READ_TIMEOUT);
+        UUID run = createRun(50_000);
+        seller.paidDelay(Duration.ofSeconds(2));
+        PaymentIntentHandle handle = newIntent(run);
+
+        PaidResponse response = client.send(handle, null);
+
+        assertThat(response.paid()).isTrue();
+        assertThat(intents.find(handle.id()).orElseThrow().status()).isEqualTo(PaymentIntentStatus.SETTLED);
+        assertThat(run(run)).isEqualTo(new RunCounters(50_000, 0, 10_000));
     }
 
     @Test
