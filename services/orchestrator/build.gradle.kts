@@ -16,12 +16,19 @@ dependencies {
     implementation(libs.datasource.micrometer.spring.boot)
     implementation(libs.resilience4j.circuitbreaker) // breaker on the seller client, wired programmatically
     implementation(libs.resilience4j.retry) // jittered retry on the free ticker catalogue call only (never on a paid call)
+    implementation(project(":libs:eventing")) // Modulith registry defaults (ADR-0016)
+    implementation(project(":libs:evm-rpc")) // safe-block chain reads for HELD resolution (ADR-0018)
+    implementation(platform(libs.spring.modulith.bom))
+    implementation(libs.spring.modulith.starter.jdbc) // transactional outbox: JDBC event publication registry
+    implementation(libs.spring.modulith.events.kafka) // externalizes payments.*.v1 and agent.run-step.v1
+    implementation(libs.spring.boot.starter.kafka)
     runtimeOnly(libs.postgresql)
 
     testImplementation(libs.spring.boot.starter.webmvc.test)
     testImplementation(libs.spring.boot.testcontainers)
     testImplementation(libs.spring.boot.micrometer.tracing.test)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.redpanda)
     testImplementation(libs.opentelemetry.sdk.testing)
     testImplementation(testFixtures(project(":libs:x402-spring-boot-starter"))) // TestWallets
     testImplementation(platform(libs.spring.ai.bom))
