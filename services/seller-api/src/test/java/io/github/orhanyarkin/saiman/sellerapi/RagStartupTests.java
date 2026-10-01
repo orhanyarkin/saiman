@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.github.orhanyarkin.saiman.modelrouter.RouterProperties;
+import io.github.orhanyarkin.saiman.sellerapi.testsupport.StartupDatabase;
 import io.github.orhanyarkin.x402.testing.FakeFacilitator;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -37,12 +38,12 @@ class RagStartupTests {
     void ragModeWithoutAnIngestBaseUrlFailsStartup() {
         Throwable thrown = assertThrows(
                 RuntimeException.class,
-                () -> app().run(
-                                "--server.port=0",
-                                "--x402.server.facilitator.url=" + FACILITATOR.url(),
-                                "--x402.server.pay-to=" + PAY_TO,
-                                "--seller.disclosures.source=rag",
-                                "--seller.ingest.base-url="));
+                () -> app().run(StartupDatabase.with(
+                        "--server.port=0",
+                        "--x402.server.facilitator.url=" + FACILITATOR.url(),
+                        "--x402.server.pay-to=" + PAY_TO,
+                        "--seller.disclosures.source=rag",
+                        "--seller.ingest.base-url=")));
 
         Throwable root = thrown;
         while (root.getCause() != null) {
@@ -55,12 +56,12 @@ class RagStartupTests {
     void ragModeRejectsANonHttpIngestUrl() {
         Throwable thrown = assertThrows(
                 RuntimeException.class,
-                () -> app().run(
-                                "--server.port=0",
-                                "--x402.server.facilitator.url=" + FACILITATOR.url(),
-                                "--x402.server.pay-to=" + PAY_TO,
-                                "--seller.disclosures.source=rag",
-                                "--seller.ingest.base-url=file:///etc/passwd"));
+                () -> app().run(StartupDatabase.with(
+                        "--server.port=0",
+                        "--x402.server.facilitator.url=" + FACILITATOR.url(),
+                        "--x402.server.pay-to=" + PAY_TO,
+                        "--seller.disclosures.source=rag",
+                        "--seller.ingest.base-url=file:///etc/passwd")));
 
         Throwable root = thrown;
         while (root.getCause() != null) {
@@ -96,7 +97,7 @@ class RagStartupTests {
         args[2] = "--x402.server.pay-to=" + PAY_TO;
         System.arraycopy(extraArgs, 0, args, 3, extraArgs.length);
 
-        Throwable thrown = assertThrows(RuntimeException.class, () -> app().run(args));
+        Throwable thrown = assertThrows(RuntimeException.class, () -> app().run(StartupDatabase.with(args)));
 
         Throwable root = thrown;
         while (root.getCause() != null) {
@@ -110,12 +111,12 @@ class RagStartupTests {
         String marker = "sk-test-CONFIGTREE-MARKER";
         Files.writeString(secrets.resolve("openai_api_key"), marker);
 
-        try (ConfigurableApplicationContext context = app().run(
-                        "--server.port=0",
-                        "--x402.server.facilitator.url=" + FACILITATOR.url(),
-                        "--x402.server.pay-to=" + PAY_TO,
-                        "--saiman.secrets-dir=" + secrets + "/",
-                        "--management.health.redis.enabled=false")) {
+        try (ConfigurableApplicationContext context = app().run(StartupDatabase.with(
+                "--server.port=0",
+                "--x402.server.facilitator.url=" + FACILITATOR.url(),
+                "--x402.server.pay-to=" + PAY_TO,
+                "--saiman.secrets-dir=" + secrets + "/",
+                "--management.health.redis.enabled=false"))) {
             assertThat(context.getEnvironment().getProperty("openai_api_key")).isEqualTo(marker);
             RouterProperties router = context.getBean(RouterProperties.class);
             assertThat(router.openai().hasApiKey()).isTrue();
