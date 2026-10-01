@@ -2,11 +2,17 @@
 
 ## Current milestone
 M4 — Ledger + reconciliation: **in progress** on branch `m4-ledger` (not pushed). Architect pass 2026-10-01; human decisions: outbox with Spring Modulith (not hand-rolled), property tests with seeded JUnit 5 generators (jqwik ruled out), settle-first split into M4b, seller-api gets schema `seller_api`, ledger HTTP uses the Host/CSRF guard (authn in M6), public Base Sepolia RPC only. Contract `docs/design/m4-ledger.md`; ADR-0016..0019.
-Status (2026-10-01): T0-T6 integrated, per-task audits (opus T4+T5, sonnet T1+T3+T6) fixed, `make lint` and `make test` green; T7 live verification done (all three acceptance criteria shown on the live stack). Left: T8 milestone audit + reviewer, PR.
+Status (2026-10-01): T0-T8 done on `m4-ledger` (not pushed). Live acceptance shown on Base Sepolia (T7). Milestone audit (opus) and reviewer findings fixed; one security re-review of the close fixes under the `max` profile (no finding on the two questions asked; three Lows fixed). `make lint`, `make test`, script self-tests green; ledger, seller-api and orchestrator images build (`bootBuildImage`, linux/amd64 locally). Usage profiles added (`max` active). Next: push and PR (needs the human's go), then the post-M4 infra branch (Redis, Apache Kafka KRaft, one test container set per JVM) and M4b.
 M3 (orchestrator, spend control) is done and merged (PR #13).
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
+
+### 2026-10-01 — M4 T8: milestone audit, review, close fixes
+- **Milestone audit (opus):** no Critical/High; Mediums fixed: a forged NUL event id could stall a ledger partition forever (event/correlation ids charset-bounded in `libs/shared`; deterministic DB errors quarantined, connection/timeout/lock errors retried, unclassified ones retried up to an hour), and the reconciliation lease aborted its connection too late (abort before close). Lows fixed: due ordering under a forged flood (corroborated first, suspects delayed, backlog gauges), backfill skips a bad historical row, resolver bounds expiry by `min(safe.timestamp, now)`, Redpanda HTTP proxy and schema registry off.
+- **Reviewer:** the design doc now matches the built system (LOCAL release, backfill runner, DLT policy, CONFLICTING_FACT is DB/report only); dead code removed; Kafka out-of-order test made deterministic; properties are one `@Test` each (ADR-0019 addendum, 200 tries, `-Dsaiman.pbt.tries`). Deferred: moving the duplicated Modulith outbox wiring of three services into `libs/eventing` (behaviour-neutral refactor).
+- **Re-review (max profile, one pass):** (a) an RPC failure never releases a HELD intent; (b) no early release at validBefore boundaries or under clock skew: no finding. Lows fixed: schema/permission drift and SQLSTATE 08/53/57 retried instead of quarantined; the ledger uses the same `min(safe, now)` bound and 60 s skip; wrong chain id caught; boundary tests added.
+- **Known residuals (THREAT_MODEL):** Redpanda unauthenticated until M6; one RPC trust root for timestamp and state; shared superuser DB role.
 
 ### 2026-10-01 — Known flaky: Testcontainers Postgres "connection refused" under parallel module runs
 - **Seen once:** `ReconciliationTests` (ledger) failed to load its context: Flyway could not connect to its freshly started Testcontainers Postgres (`Connection to localhost:<port> refused`). That run was `:services:ledger:test :services:orchestrator:test :services:seller-api:test` in parallel (`org.gradle.parallel=true`) while the full compose stack was also up.
