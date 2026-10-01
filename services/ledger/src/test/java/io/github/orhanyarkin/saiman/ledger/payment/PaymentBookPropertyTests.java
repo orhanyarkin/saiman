@@ -9,7 +9,6 @@ import io.github.orhanyarkin.saiman.ledger.journal.LedgerBook;
 import io.github.orhanyarkin.saiman.ledger.journal.Posting;
 import io.github.orhanyarkin.saiman.ledger.journal.UnbalancedEntryException;
 import io.github.orhanyarkin.saiman.ledger.pbt.Pbt;
-import io.github.orhanyarkin.saiman.shared.money.Money;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -133,7 +132,7 @@ class PaymentBookPropertyTests {
             return; // a story of seller failures only posts nothing; nothing to perturb
         }
         JournalEntry entry = entries.get(random.nextInt(entries.size()));
-        List<Posting> perturbed = perturb(entry.postings(), random);
+        List<Posting> perturbed = Stories.perturb(entry.postings(), random);
 
         Pbt.check(
                 tryIndex,
@@ -151,24 +150,6 @@ class PaymentBookPropertyTests {
                                 entry.effectiveAt(),
                                 perturbed))
                         .isInstanceOf(UnbalancedEntryException.class));
-    }
-
-    /** One posting changed by a delta in {@code [-(amount-1), +10^6]} excluding 0, so it stays positive. */
-    public static List<Posting> perturb(List<Posting> postings, SplittableRandom random) {
-        int index = random.nextInt(postings.size());
-        Posting original = postings.get(index);
-        long amount = original.amount().atomicUnits();
-        long delta;
-        if (amount > 1 && random.nextBoolean()) {
-            delta = -random.nextLong(1, amount);
-        } else {
-            delta = random.nextLong(1, 1_000_001);
-        }
-        Money changed = new Money(
-                amount + delta, original.amount().asset(), original.amount().decimals());
-        List<Posting> copy = new ArrayList<>(postings);
-        copy.set(index, new Posting(original.account(), original.side(), changed));
-        return copy;
     }
 
     record Replay(PaymentProjection projection, Map<String, Long> balances, List<JournalEntry> entries) {}

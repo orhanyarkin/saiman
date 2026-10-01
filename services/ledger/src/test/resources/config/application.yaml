@@ -3,3 +3,9 @@ management:
   opentelemetry:
     # Keep a developer's exported OTEL_* variables from sending test telemetry to a collector.
     map-environment-variables: false
+
+logging:
+  level:
+    # Kafka clients log every rebalance and config dump at INFO; keep test output readable.
+    org.apache.kafka: warn
+    org.springframework.kafka: warn

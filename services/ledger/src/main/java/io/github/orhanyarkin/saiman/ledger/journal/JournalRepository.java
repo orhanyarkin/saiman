@@ -1,5 +1,7 @@
 package io.github.orhanyarkin.saiman.ledger.journal;
 
+import java.sql.Timestamp;
+import java.util.Comparator;
 import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -22,7 +24,12 @@ public class JournalRepository {
     /** Posts one entry (creating its accounts on first use) inside the caller's transaction. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void post(JournalEntry entry) {
-        entry.postings().stream().map(Posting::account).distinct().forEach(this::ensureAccount);
+        // Sorted, so concurrent transactions creating the same new accounts take their locks in one order.
+        entry.postings().stream()
+                .map(Posting::account)
+                .distinct()
+                .sorted(Comparator.comparing(Account::code))
+                .forEach(this::ensureAccount);
         jdbc.sql("""
                         INSERT INTO journal_entry (id, payment_id, payment_key, book, kind, source_event_id,
                                                    reverses_entry_id, description, effective_at)
@@ -37,7 +44,7 @@ public class JournalRepository {
                 .param("sourceEventId", entry.sourceEventId())
                 .param("reversesEntryId", entry.reversesEntryId())
                 .param("description", entry.description())
-                .param("effectiveAt", java.sql.Timestamp.from(entry.effectiveAt()))
+                .param("effectiveAt", Timestamp.from(entry.effectiveAt()))
                 .update();
         for (Posting posting : entry.postings()) {
             jdbc.sql("""

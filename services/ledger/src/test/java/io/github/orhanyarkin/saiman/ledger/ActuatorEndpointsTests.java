@@ -8,9 +8,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.test.web.servlet.client.RestTestClient;
 
@@ -19,8 +16,7 @@ import org.springframework.test.web.servlet.client.RestTestClient;
  * and the liveness/readiness probes are up, health hides component details, info carries build
  * metadata only, and every other Actuator endpoint does not exist at all.
  */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
-@AutoConfigureRestTestClient
+@LedgerIntegrationTest
 class ActuatorEndpointsTests {
 
     @Autowired
