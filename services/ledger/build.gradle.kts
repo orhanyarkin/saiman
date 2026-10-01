@@ -13,6 +13,9 @@ dependencies {
     implementation(libs.spring.modulith.events.kafka) // @Externalized -> ledger.entry-posted.v1
     implementation(libs.spring.boot.starter.kafka)
     implementation(libs.spring.boot.starter.webmvc)
+    implementation(libs.spring.boot.starter.restclient) // seller-api credit-note corroboration (ADR-0021)
+    implementation(libs.resilience4j.retry)
+    implementation(libs.resilience4j.circuitbreaker)
     implementation(libs.spring.boot.starter.jdbc)
     implementation(libs.spring.boot.starter.flyway)
     implementation(libs.flyway.database.postgresql)

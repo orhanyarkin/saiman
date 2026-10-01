@@ -213,6 +213,10 @@ services:
       # `x402.server.facilitator.url`, and the starter host-allowlists the facilitator
       # (x402.org + loopback) in code rather than taking it from config.
       X402_SELLER_PAYTO_ADDRESS: ${X402_SELLER_PAYTO_ADDRESS:-}
+      # M4b (ADR-0021): exact Host values for /internal/credit-notes/{key}, which the ledger reads to
+      # corroborate credit notes; the published 127.0.0.1:8081 (Host localhost:8081) is refused.
+      # scripts/check-compose-policy.sh pins it.
+      SELLER_INTERNAL_ALLOWED_HOSTS: seller-api,seller-api:8081
     depends_on:
       <<: *app-common-depends-on
       redis:
@@ -239,6 +243,11 @@ services:
       SAIMAN_CHAIN_ALLOWED_HOSTS: sepolia.base.org
       # DNS-rebinding guard for /api/** (saiman.ledger.api.allowed-hosts, a comma-separated list).
       SAIMAN_LEDGER_API_ALLOWED_HOSTS: localhost,127.0.0.1,[::1],ledger,ledger:8082,localhost:8082,127.0.0.1:8082
+      # M4b (ADR-0021): reconciliation asks seller-api whether a CreditNoteIssued read from Kafka is real.
+      # Plain http only to the compose-internal seller; scripts/check-compose-policy.sh pins both values.
+      # Seller unreachable = the credited payment stays PENDING (no depends_on needed).
+      SAIMAN_LEDGER_SELLER_BASE_URL: http://seller-api:8081
+      SAIMAN_LEDGER_SELLER_ALLOWED_HOSTS: seller-api
     # Topics are created by the producers' NewTopic beans (Spring Kafka KafkaAdmin) at startup;
     # compose does not pre-create them. The ledger consumes payments.* and publishes ledger.*.
     depends_on:

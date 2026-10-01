@@ -1,0 +1,9 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# The published port's Host (localhost:8081) must not reach /internal/credit-notes.
+# expect: SELLER_INTERNAL_ALLOWED_HOSTS must be SELLER_INTERNAL_ALLOWED_HOSTS=seller-api,seller-api:8081
+name: cptest-fail-seller-internal-hosts-localhost
+services:
+  seller-api:
+    image: busybox:1
+    environment:
+      SELLER_INTERNAL_ALLOWED_HOSTS: seller-api,seller-api:8081,localhost:8081

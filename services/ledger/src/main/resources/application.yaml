@@ -62,6 +62,16 @@ saiman:
       receipt-grace: 10m
       batch-size: 50
       min-manual-interval: 30s
+    # Credit-note corroboration (ADR-0021): reconciliation asks seller-api's /internal/credit-notes/{key} whether a
+    # CreditNoteIssued read from Kafka is real. Exact host; plain http only to the compose-internal seller.
+    seller:
+      base-url: ${SAIMAN_LEDGER_SELLER_BASE_URL:http://seller-api:8081}
+      allowed-hosts: ${SAIMAN_LEDGER_SELLER_ALLOWED_HOSTS:seller-api}
+      connect-timeout: 2s
+      read-timeout: 5s
+      retry-attempts: 3
+      retry-wait: 200ms
+      circuit-open-wait: 30s
 
 server:
   port: 8082
