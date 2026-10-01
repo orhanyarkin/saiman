@@ -18,6 +18,8 @@ import org.springframework.messaging.Message;
 import org.springframework.modulith.events.EventExternalizationConfiguration;
 import org.springframework.modulith.events.RoutingTarget;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -30,6 +32,9 @@ import tools.jackson.databind.json.JsonMapper;
 @EnableScheduling
 @EnableConfigurationProperties(SettlementOutboxProperties.class)
 class SettlementOutboxConfiguration {
+
+    /** Transaction timeout of the settlement recorder, which runs on the paid request's thread. */
+    static final int RECORD_TIMEOUT_SECONDS = 2;
 
     private static final Set<Class<?>> EXTERNALIZED = Set.of(PaymentSettled.class, PaymentFailed.class);
 
@@ -47,6 +52,17 @@ class SettlementOutboxConfiguration {
                         event -> RoutingTarget.forTarget(PaymentTopics.FAILED)
                                 .andKey(event.authorization().paymentKey()))
                 .build();
+    }
+
+    /**
+     * Replaces Boot's default {@link TransactionTemplate} (which is {@code @ConditionalOnMissingBean}) with one
+     * that has a timeout: the recorder runs on the paid request's thread and must give up quickly.
+     */
+    @Bean
+    TransactionTemplate transactionTemplate(PlatformTransactionManager transactionManager) {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setTimeout(RECORD_TIMEOUT_SECONDS);
+        return template;
     }
 
     @Bean

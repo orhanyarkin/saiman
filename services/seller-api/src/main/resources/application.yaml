@@ -20,6 +20,16 @@ spring:
       # A database outage must not hold a paid response for the default 30 s: recording the settlement
       # gives up quickly (the chain is the safety net, ADR-0016).
       connection-timeout: 2000 # ms
+      validation-timeout: 1000 # ms: checking an idle pooled connection on a stalled database
+      # The recorder also runs on the request thread: a stalled (not refused) database must not hold the paid
+      # response either. socketTimeout (seconds) bounds any read from a dead connection; the 2 s transaction
+      # timeout (SettlementOutboxConfiguration) makes the driver cancel the statement, and that cancel goes over
+      # a new connection that a stalled server never answers, so cancelSignalTimeout (default 10 s!) is
+      # shortened too. statement_timeout is the server-side cap.
+      data-source-properties:
+        socketTimeout: 2
+        cancelSignalTimeout: 2
+        options: "-c statement_timeout=2500"
   flyway:
     schemas: seller_api
     default-schema: seller_api
