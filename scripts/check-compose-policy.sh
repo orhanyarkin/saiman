@@ -132,6 +132,15 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
     ( ($s.environment // {}) | to_entries[] | select(.key == "X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS")
       | select($svc != "orchestrator" or (.value // "") != "seller-api")
       | "\($svc): X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS must be exactly \"seller-api\" and only on orchestrator (plaintext x402 payments are allowed to the compose-internal seller alone; no wildcard)" ),
+    ( ($s.environment // {}) | to_entries[] | select(.key | test("^SAIMAN_CHAIN_"))
+      | select(($svc == "ledger" or $svc == "orchestrator") | not)
+      | "\($svc): \(.key) is only allowed on ledger and orchestrator (M4, ADR-0018: only they read the chain)" ),
+    ( ($s.environment // {}) | to_entries[] | select(.key == "SAIMAN_CHAIN_RPC_URL")
+      | select((.value // "") | test("^https://sepolia\\.base\\.org(/[^@[:space:]]*)?$") | not)
+      | "\($svc): SAIMAN_CHAIN_RPC_URL must be an https URL whose host is exactly sepolia.base.org (no other host, no http, no userinfo; testnet only, ADR-0018)" ),
+    ( ($s.environment // {}) | to_entries[] | select(.key == "SAIMAN_CHAIN_ALLOWED_HOSTS")
+      | select((.value // "") != "sepolia.base.org")
+      | "\($svc): SAIMAN_CHAIN_ALLOWED_HOSTS must be exactly sepolia.base.org (testnet only, ADR-0018)" ),
     ( ($s.environment // {}) | keys[] | select(contains("$"))
       | "\($svc): environment key \"\(.)\" contains $ (interpolated names would bypass this check)" ),
     ( ($s.configs // [])[]? | .source as $src | (($root.configs // {})[$src] // {})
@@ -150,4 +159,4 @@ if [[ ${violations} -ne 0 ]]; then
   exit 1
 fi
 
-echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, secrets: allowlist enforced, no OPENAI_* env, plaintext-hosts pinned to seller-api)"
+echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, secrets: allowlist enforced, no OPENAI_* env, plaintext-hosts pinned to seller-api, chain RPC pinned to sepolia.base.org on ledger/orchestrator only)"
