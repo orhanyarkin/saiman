@@ -144,6 +144,29 @@ class ReconciliationTests {
     }
 
     @Test
+    void unexpectedFailureSkipsOnlyThatPaymentAndRotatesIt() {
+        TestPayment broken = settledBothBooks(20_000);
+        chain.mine(receipt(broken, broken.txHash(), broken.payTo(), 20_000, true));
+        chain.breakReceipt(broken.txHash());
+        TestPayment healthy = settledBothBooks(20_000);
+        chain.mine(receipt(healthy, healthy.txHash(), healthy.payTo(), 20_000, true));
+        try {
+            ReconciliationReport report = runNow();
+
+            assertThat(report.status()).isEqualTo("PARTIAL");
+            assertThat(item(report, broken).status()).isEqualTo("PENDING");
+            assertThat(item(report, healthy).status()).isEqualTo("MATCHED");
+            assertThat(jdbc.sql("SELECT last_checked_at IS NOT NULL FROM payment WHERE payment_key = :key")
+                            .param("key", broken.key())
+                            .query(Boolean.class)
+                            .single())
+                    .isTrue();
+        } finally {
+            chain.healReceipt(broken.txHash());
+        }
+    }
+
+    @Test
     void failedTransactionIsReportedAndBothBooksMoveToSuspense() {
         TestPayment payment = settledBothBooks(20_000);
         chain.mine(receipt(payment, payment.txHash(), payment.payTo(), 20_000, false));

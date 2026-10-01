@@ -28,6 +28,7 @@ public class FakeChain implements BaseSepoliaUsdc {
     private final Map<String, String> usedBy = new ConcurrentHashMap<>();
     private final Set<String> used = ConcurrentHashMap.newKeySet();
     private final Set<String> unavailableTx = ConcurrentHashMap.newKeySet();
+    private final Set<String> brokenTx = ConcurrentHashMap.newKeySet();
     private volatile @Nullable CountDownLatch safeBlockGate;
     private volatile @Nullable CountDownLatch safeBlockEntered;
 
@@ -62,6 +63,9 @@ public class FakeChain implements BaseSepoliaUsdc {
         if (unavailableTx.contains(tx)) {
             throw new ChainUnavailableException("receipt lookup failed");
         }
+        if (brokenTx.contains(tx)) {
+            throw new IllegalStateException("unexpected failure");
+        }
         return Optional.ofNullable(receipts.get(tx));
     }
 
@@ -88,8 +92,14 @@ public class FakeChain implements BaseSepoliaUsdc {
         unavailableTx.add(txHash.toLowerCase(Locale.ROOT));
     }
 
+    /** The lookup for this tx hash fails with an unexpected (non-RPC) exception. */
+    public void breakReceipt(String txHash) {
+        brokenTx.add(txHash.toLowerCase(Locale.ROOT));
+    }
+
     public void healReceipt(String txHash) {
         unavailableTx.remove(txHash.toLowerCase(Locale.ROOT));
+        brokenTx.remove(txHash.toLowerCase(Locale.ROOT));
     }
 
     /** Makes {@code block(SAFE)} wait until {@link #openGate()}; returns a latch counted down when a run is inside. */

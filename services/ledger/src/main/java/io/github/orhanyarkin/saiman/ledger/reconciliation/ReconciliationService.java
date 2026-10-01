@@ -216,7 +216,7 @@ public class ReconciliationService {
             log.warn("Reconciliation run {}: safe block unavailable, nothing checked", runId);
             status = "FAILED";
         } catch (RuntimeException e) {
-            log.error("Reconciliation run {} failed", runId, e);
+            log.error("Reconciliation run {} failed: {}", runId, e.getClass().getName());
             status = "FAILED";
         }
         repository.finishRun(runId, status, clock.instant(), safeBlock, tally.counters());
@@ -231,19 +231,41 @@ public class ReconciliationService {
         if (snapshot == null) {
             return null;
         }
-        ChainReconciler.Evidence evidence;
         try {
-            evidence = fetch(snapshot, safe, chain);
+            ChainReconciler.Evidence evidence = fetch(snapshot, safe, chain);
+            return transactions.execute(tx -> book(runId, key, evidence));
         } catch (ChainUnavailableException e) {
+            return skipped(runId, snapshot);
+        } catch (RuntimeException e) {
+            // Any other failure (lock timeout, bad row, client bug) skips this item only; it is marked checked, so
+            // it rotates to the back instead of failing every future run. The payment key carries the nonce and
+            // database messages may echo bound values, so only the id and the exception class are logged.
+            log.error(
+                    "Reconciliation run {}: payment {} skipped after {}",
+                    runId,
+                    snapshot.id(),
+                    e.getClass().getName());
+            return skipped(runId, snapshot);
+        }
+    }
+
+    /** Records an item that could not be checked this run: PENDING, run PARTIAL, never a mismatch. */
+    private ItemResult skipped(UUID runId, PaymentProjection snapshot) {
+        try {
             transactions.executeWithoutResult(tx -> {
                 repository.touch(snapshot.id(), clock.instant());
                 repository.insertItem(runId, snapshot.id(), ItemStatus.PENDING, reportedTx(snapshot), null, null);
             });
-            meters.counter("saiman.ledger.reconciliation.items", "status", "PENDING")
-                    .increment();
-            return new ItemResult(ItemStatus.PENDING, false, false, true);
+        } catch (RuntimeException e) {
+            log.error(
+                    "Reconciliation run {}: could not record payment {} as pending ({})",
+                    runId,
+                    snapshot.id(),
+                    e.getClass().getName());
         }
-        return transactions.execute(tx -> book(runId, key, evidence));
+        meters.counter("saiman.ledger.reconciliation.items", "status", "PENDING")
+                .increment();
+        return new ItemResult(ItemStatus.PENDING, false, false, true);
     }
 
     private @Nullable ItemResult book(UUID runId, String key, ChainReconciler.Evidence evidence) {
