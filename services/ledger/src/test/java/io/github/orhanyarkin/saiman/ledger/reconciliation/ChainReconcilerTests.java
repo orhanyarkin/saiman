@@ -12,6 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
 import io.github.orhanyarkin.saiman.evmrpc.ChainBlock;
+import io.github.orhanyarkin.saiman.evmrpc.UsdcAuthorizationUse;
 import io.github.orhanyarkin.saiman.evmrpc.UsdcReceipt;
 import io.github.orhanyarkin.saiman.evmrpc.UsdcTransfer;
 import io.github.orhanyarkin.saiman.ledger.journal.EntryKind;
@@ -26,6 +27,7 @@ import io.github.orhanyarkin.saiman.shared.ledger.Side;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.SplittableRandom;
@@ -111,6 +113,82 @@ class ChainReconcilerTests {
                 .containsExactly(MismatchKind.TX_NOT_FOR_AUTHORIZATION);
         assertThat(outcome.adjustment()).isNull();
         assertThat(outcome.next().chainState()).isEqualTo(real.chainState());
+    }
+
+    /** One relayer transaction carrying two authorizations of the same payer: use, transfer, use, transfer. */
+    private UsdcReceipt batch(String tx, TestPayment first, TestPayment second, boolean indexed) {
+        String payer = first.authorization().payer();
+        long unknown = UsdcTransfer.UNKNOWN_LOG_INDEX;
+        return new UsdcReceipt(
+                tx,
+                999_000,
+                true,
+                List.of(
+                        new UsdcTransfer(payer, first.payTo(), 20_000, indexed ? 11 : unknown),
+                        new UsdcTransfer(payer, second.payTo(), 30_000, indexed ? 13 : unknown)),
+                List.of(key(first), key(second)),
+                List.of(
+                        new UsdcAuthorizationUse(payer.toLowerCase(Locale.ROOT), nonce(first), indexed ? 10 : unknown),
+                        new UsdcAuthorizationUse(
+                                payer.toLowerCase(Locale.ROOT), nonce(second), indexed ? 12 : unknown)));
+    }
+
+    private static String nonce(TestPayment t) {
+        return t.authorization().nonce().toLowerCase(Locale.ROOT);
+    }
+
+    private static String key(TestPayment t) {
+        return t.authorization().payer().toLowerCase(Locale.ROOT) + ":" + nonce(t);
+    }
+
+    @Test
+    void twoAuthorizationsRelayedInOneTransactionAreEachMatchedByLogOrder() {
+        TestPayment second = TestPayment.of(random, payment.authorization().payer(), payment.payTo(), 30_000);
+        String tx = payment.txHash();
+        for (boolean indexed : List.of(true, false)) {
+            UsdcReceipt receipt = batch(tx, payment, second, indexed);
+            for (TestPayment t : List.of(payment, second)) {
+                Books books = Books.of(List.of(PaymentFact.of(t.buyerSettled()), PaymentFact.of(t.sellerSettled())));
+                PaymentProjection p = withTx(books.projection(), tx, null);
+
+                var outcome = ChainReconciler.reconcile(
+                        p,
+                        books.nets(),
+                        evidence(SAFE_LATE, Map.of(tx, Optional.of(receipt)), null),
+                        SETTINGS,
+                        UUID.randomUUID(),
+                        NOW);
+
+                assertThat(outcome.status())
+                        .as("indexed=%s amount=%s", indexed, t.amount())
+                        .isEqualTo(ItemStatus.MATCHED);
+                assertThat(outcome.adjustment()).isNull();
+            }
+        }
+    }
+
+    @Test
+    void anAuthorizationWithoutItsOwnTransferIsAPartyMismatchEvenIfTheBatchHasOne() {
+        TestPayment second = TestPayment.of(random, payment.authorization().payer(), payment.payTo(), 30_000);
+        String tx = payment.txHash();
+        String payer = payment.authorization().payer();
+        // use(first) at 10 is followed directly by use(second) at 11; the only transfer (12) belongs to second.
+        UsdcReceipt receipt = new UsdcReceipt(
+                tx,
+                999_000,
+                true,
+                List.of(new UsdcTransfer(payer, payment.payTo(), 20_000, 12)),
+                List.of(key(payment), key(second)),
+                List.of(
+                        new UsdcAuthorizationUse(payer.toLowerCase(Locale.ROOT), nonce(payment), 10),
+                        new UsdcAuthorizationUse(payer.toLowerCase(Locale.ROOT), nonce(second), 11)));
+        Books books = settledBothBooks();
+
+        var outcome = reconcile(books, evidence(SAFE_LATE, Map.of(tx, Optional.of(receipt)), null));
+
+        assertThat(outcome.findings())
+                .extracting(ChainReconciler.Finding::kind)
+                .containsExactly(MismatchKind.PARTY_MISMATCH);
     }
 
     @Test

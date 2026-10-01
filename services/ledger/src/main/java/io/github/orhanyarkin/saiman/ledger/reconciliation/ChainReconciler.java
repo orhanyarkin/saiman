@@ -5,6 +5,7 @@ import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.seller
 import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.suspense;
 
 import io.github.orhanyarkin.saiman.evmrpc.ChainBlock;
+import io.github.orhanyarkin.saiman.evmrpc.UsdcAuthorizationUse;
 import io.github.orhanyarkin.saiman.evmrpc.UsdcReceipt;
 import io.github.orhanyarkin.saiman.evmrpc.UsdcTransfer;
 import io.github.orhanyarkin.saiman.ledger.journal.Account;
@@ -23,6 +24,7 @@ import io.github.orhanyarkin.saiman.shared.payments.AuthorizationRef;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -54,7 +56,9 @@ import org.jspecify.annotations.Nullable;
  *       used, so the item is PENDING. After it, {@code authorizationState} at the safe block decides: UNUSED means
  *       no money moved; USED with a canonical receipt found by log lookup means that receipt; USED without one is
  *       {@code TX_UNKNOWN} (information, not a mismatch: nothing is compared or posted).
- *   <li>A canonical receipt without a {@code Transfer(payer, payTo)} is a {@code PARTY_MISMATCH}; one whose value
+ *   <li>Only the {@code Transfer} paired with this authorization's {@code AuthorizationUsed} counts (log order, see
+ *       {@link #transfersOf}), so several authorizations relayed in one transaction do not add up. A canonical
+ *       receipt without a paired {@code Transfer(payer, payTo)} is a {@code PARTY_MISMATCH}; one whose value
  *       differs from the authorization is an {@code AMOUNT_MISMATCH}.
  * </ol>
  *
@@ -279,7 +283,7 @@ public final class ChainReconciler {
             long fromPayer = 0;
             long direct = 0;
             boolean anyDirect = false;
-            for (UsdcTransfer t : canonical.transfers()) {
+            for (UsdcTransfer t : transfersOf(canonical, p)) {
                 if (lower(t.from()).equals(p.payer())) {
                     fromPayer = Math.addExact(fromPayer, t.value());
                     if (lower(t.to()).equals(p.payTo())) {
@@ -406,6 +410,56 @@ public final class ChainReconciler {
 
     private static boolean isCanonical(UsdcReceipt receipt, PaymentProjection p, ChainBlock safe) {
         return receipt.succeeded() && receipt.blockNumber() <= safe.number() && usesAuthorization(receipt, p);
+    }
+
+    /**
+     * The {@code Transfer} logs that belong to this authorization. EIP-3009 ({@code _transferWithAuthorization} and
+     * {@code _receiveWithAuthorization} in Circle's FiatToken {@code EIP3009.sol}) emits {@code AuthorizationUsed}
+     * and then its {@code Transfer}, so a relayer batching several authorizations into one transaction produces
+     * (use, transfer) pairs in log order. Rules, in order:
+     *
+     * <ol>
+     *   <li><b>Log indices known</b> (evm-rpc reports them): for each {@code AuthorizationUsed(payer, nonce)} of this
+     *       payment, the first USDC {@code Transfer} after it and before the next {@code AuthorizationUsed}.
+     *   <li><b>No indices, as many transfers as authorization uses:</b> pair them by position (both lists are in
+     *       log order).
+     *   <li><b>Otherwise:</b> every transfer (the caller then counts those from the payer). Conservative: a batch
+     *       with extra transfers may show an AMOUNT_MISMATCH for a human, never hide one.
+     * </ol>
+     */
+    static List<UsdcTransfer> transfersOf(UsdcReceipt receipt, PaymentProjection p) {
+        String wanted = p.payer() + ":" + p.nonce();
+        List<UsdcAuthorizationUse> uses = receipt.authorizationUses();
+        List<UsdcTransfer> transfers = receipt.transfers();
+        boolean indexed = uses.stream().allMatch(u -> u.logIndex() >= 0)
+                && transfers.stream().allMatch(t -> t.logIndex() >= 0);
+        List<UsdcTransfer> paired = new ArrayList<>();
+        if (indexed) {
+            for (UsdcAuthorizationUse use : uses) {
+                if (!lower(use.key()).equals(wanted)) {
+                    continue;
+                }
+                long next = uses.stream()
+                        .mapToLong(UsdcAuthorizationUse::logIndex)
+                        .filter(i -> i > use.logIndex())
+                        .min()
+                        .orElse(Long.MAX_VALUE);
+                transfers.stream()
+                        .filter(t -> t.logIndex() > use.logIndex() && t.logIndex() < next)
+                        .min(Comparator.comparingLong(UsdcTransfer::logIndex))
+                        .ifPresent(paired::add);
+            }
+            return paired;
+        }
+        if (transfers.size() == uses.size()) {
+            for (int i = 0; i < uses.size(); i++) {
+                if (lower(uses.get(i).key()).equals(wanted)) {
+                    paired.add(transfers.get(i));
+                }
+            }
+            return paired;
+        }
+        return transfers;
     }
 
     /** Test USDC on Base Sepolia is the only asset the receipts describe (evm-rpc filters on its address). */
