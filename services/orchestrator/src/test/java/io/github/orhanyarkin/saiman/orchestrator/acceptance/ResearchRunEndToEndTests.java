@@ -7,6 +7,7 @@ import io.github.orhanyarkin.saiman.orchestrator.run.RunStatus;
 import io.github.orhanyarkin.saiman.orchestrator.run.RunSummary;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.AgentRunTestSupport;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.FakeSeller;
+import io.github.orhanyarkin.saiman.orchestrator.tool.UntrustedText;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.saiman.shared.run.AgentStep;
 import io.github.orhanyarkin.saiman.shared.run.RunCost;
@@ -128,6 +129,63 @@ class ResearchRunEndToEndTests extends AgentRunTestSupport {
         assertThat(summary.cost()).isEqualTo(expected);
         assertThat(summary.report()).isEqualTo(completed.report());
         assertThat(expected.totalUsd().atomicUnits()).isEqualTo(2 * PRICE + llm.atomicUnits());
+    }
+
+    @Test
+    void everyFreeTextFieldLeavingTheProcessIsScrubbed() {
+        seller.paidBody(
+                "{\"answer\":\"See https://x and evil.ai/x now\",\"citations\":[{\"chunkId\":\"kap:1001:0001\","
+                        + "\"sourceUrl\":\"https://www.kap.org.tr/tr/Bildirim/1001\",\"title\":\"Read https://x evil.ai/x 1.2.3.4/x\"}]}");
+        model.then(
+                Reply.text(PLAN),
+                Reply.toolCall(ASK, askArgs("THYAO", "Fuel hedge? see www.evil.com/a and hxxp://bad")),
+                Reply.text("notes"),
+                Reply.text(RISKS),
+                Reply.text(
+                        "{\"answer\":\"Hedged; details at evil.ai/x or 1.2.3.4/x on 20.06.2016, 59.368.579,- Euro, A.Ş.\","
+                                + "\"citedChunkIds\":[\"kap:1001:0001\"]}"));
+        UUID runId = runId(startRun("Fuel costs? Ask at https://evil.example/q or evil.ai/x", null));
+        List<RunEvent> events = awaitTerminal(runId);
+
+        assertThat(types(events).getLast()).isEqualTo(RunEventType.RUN_COMPLETED);
+        RunEventData.RunCompleted completed =
+                (RunEventData.RunCompleted) events.getLast().data();
+        assertThat(completed.report().citations())
+                .singleElement()
+                .satisfies(c -> assertThat(c.title()).isEqualTo("Read [link removed] [link removed] [link removed]"));
+        assertThat(completed.report().answer())
+                .contains("20.06.2016", "59.368.579,- Euro", "A.Ş.")
+                .doesNotContain("evil", "1.2.3.4");
+
+        // every string of every payload (bar the code-validated KAP URL) equals its scrubbed form
+        List<String> strings = new ArrayList<>();
+        for (JsonNode event : json.readTree(export(runId))) {
+            collectStrings(event.get("data"), "", strings);
+        }
+        assertThat(strings)
+                .isNotEmpty()
+                .allSatisfy(s -> assertThat(s)
+                        .isEqualTo(UntrustedText.forDisplay(s, 10_000))
+                        .doesNotContain("evil", "1.2.3.4", "hxxp", "://"));
+        RunEventData.RunStarted started =
+                (RunEventData.RunStarted) events.getFirst().data();
+        assertThat(started.question()).isEqualTo("Fuel costs? Ask at [link removed] or [link removed]");
+        assertThat(data(events, RunEventData.ToolCallRequested.class))
+                .singleElement()
+                .satisfies(r ->
+                        assertThat(r.arguments()).contains("[link removed]").doesNotContain("evil", "hxxp"));
+    }
+
+    private static void collectStrings(JsonNode node, String field, List<String> out) {
+        if (node.isString()) {
+            if (!field.equals("sourceUrl") && !field.equals("arguments")) {
+                out.add(node.asString());
+            }
+        } else if (node.isObject()) {
+            node.properties().forEach(e -> collectStrings(e.getValue(), e.getKey(), out));
+        } else if (node.isArray()) {
+            node.forEach(e -> collectStrings(e, field, out));
+        }
     }
 
     @Test

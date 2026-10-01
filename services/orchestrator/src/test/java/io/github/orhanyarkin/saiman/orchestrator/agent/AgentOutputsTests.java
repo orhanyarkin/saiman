@@ -143,6 +143,18 @@ class AgentOutputsTests {
                 .hasSize(AgentOutputs.MAX_ANSWER);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"https://x", "evil.ai/x", "1.2.3.4/x", "www.evil.com", "hxxp://evil"})
+    void aCitationTitleWithALinkIsScrubbed(String link) {
+        RunEventData.Citation citation =
+                AgentOutputs.citation(new EvidenceCitation("kap:7:0001", null, "Report " + link + " end"));
+
+        assertThat(citation.title()).isEqualTo("Report [link removed] end");
+        assertThat(AgentOutputs.citation(new EvidenceCitation("kap:7:0001", null, "https://x"))
+                        .title())
+                .isEqualTo("[link removed]");
+    }
+
     // ---- risks ----
 
     @Test

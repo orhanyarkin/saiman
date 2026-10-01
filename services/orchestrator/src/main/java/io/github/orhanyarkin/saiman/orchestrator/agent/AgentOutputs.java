@@ -46,10 +46,6 @@ final class AgentOutputs {
     private static final Set<String> SEVERITIES = Set.of("LOW", "MEDIUM", "HIGH");
     private static final Pattern FENCE = Pattern.compile("(?s)^```[a-zA-Z]*\\s*(.*?)\\s*```$");
     private static final Pattern CHUNK_ID = Pattern.compile("kap:(\\d{1,10}):\\d{4}");
-    private static final Pattern MARKDOWN_LINK = Pattern.compile("!?\\[([^\\]]{0,500})\\]\\([^)]{0,2000}\\)");
-    private static final Pattern LINK = Pattern.compile(
-            "(?i)\\b(?:https?|ftp|file|data|javascript|vbscript|mailto):\\S+|\\bwww\\.\\S+|\\b[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.(?:com|net|org|io|tr|xyz|info|ru)(?:/\\S*)?");
-    private static final String LINK_REMOVED = "[link removed]";
     private static final String KAP_PAGE = "https://www.kap.org.tr/tr/Bildirim/";
 
     /** Why a model answer was refused; carries only a fixed code. */
@@ -167,25 +163,24 @@ final class AgentOutputs {
     }
 
     /**
-     * Model or seller text made safe to show: {@link UntrustedText#clean} (one line, no control,
-     * format or bidi characters, capped), markdown links reduced to their text, URLs and bare domains
-     * replaced by {@value #LINK_REMOVED}, {@code <}/{@code >} neutralised.
+     * Model or seller text made safe to show: {@link UntrustedText#forDisplay} (one line, no control,
+     * format, bidi or invisible characters, no links, no {@code <}/{@code >}, capped).
      */
     static String scrub(String raw, int maxCodePoints) {
-        String text = UntrustedText.clean(raw, maxCodePoints);
-        text = MARKDOWN_LINK.matcher(text).replaceAll(match -> Matcher.quoteReplacement(match.group(1)));
-        text = LINK.matcher(text).replaceAll(LINK_REMOVED);
-        text = text.replace('<', '‹').replace('>', '›');
-        return UntrustedText.clean(text, maxCodePoints);
+        return UntrustedText.forDisplay(raw, maxCodePoints);
     }
 
-    /** A citation rebuilt from evidence; a missing URL or title is derived from the validated chunk id. */
+    /**
+     * A citation rebuilt from evidence; a missing URL or title is derived from the validated chunk id.
+     * The title is scrubbed again here: whatever produced the evidence, no link leaves the process.
+     */
     static RunEventData.Citation citation(EvidenceCitation evidence) {
         Matcher matcher = CHUNK_ID.matcher(evidence.chunkId());
         String disclosure = matcher.matches() ? matcher.group(1) : "";
         String url = evidence.sourceUrl() != null ? evidence.sourceUrl() : KAP_PAGE + disclosure;
-        String title = evidence.title() != null ? evidence.title() : "KAP disclosure " + disclosure;
-        return new RunEventData.Citation(evidence.chunkId(), url, title);
+        String title = evidence.title() == null ? "" : scrub(evidence.title(), MAX_RISK_TITLE);
+        return new RunEventData.Citation(
+                evidence.chunkId(), url, title.isEmpty() ? "KAP disclosure " + disclosure : title);
     }
 
     private static List<String> validIds(List<String> ids, Function<String, Optional<EvidenceCitation>> evidence) {
