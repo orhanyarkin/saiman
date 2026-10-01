@@ -13,6 +13,24 @@ dependencies {
     implementation(libs.spring.boot.starter.restclient) // x402 server's default facilitator client needs a RestClient.Builder
     implementation(libs.spring.boot.starter.data.redis) // x402 server's Redis-backed payment nonce store (Valkey)
     implementation(libs.spring.boot.starter.validation) // @Pattern on the ticker path variable
+    implementation(libs.spring.boot.starter.jdbc) // settlement records (schema seller_api)
+    implementation(libs.spring.boot.starter.flyway)
+    implementation(libs.flyway.database.postgresql)
+    implementation(project(":libs:eventing")) // Modulith registry defaults (ADR-0016)
+    implementation(platform(libs.spring.modulith.bom))
+    implementation(libs.spring.modulith.starter.jdbc) // transactional outbox: JDBC event publication registry
+    implementation(libs.spring.modulith.events.kafka) // externalizes payments.settled.v1 / payments.failed.v1
+    implementation(libs.spring.boot.starter.kafka)
+    runtimeOnly(libs.postgresql)
+    implementation(libs.spring.boot.starter.jdbc) // settlement records (schema seller_api)
+    implementation(libs.spring.boot.starter.flyway)
+    implementation(libs.flyway.database.postgresql)
+    implementation(project(":libs:eventing")) // Modulith registry defaults (ADR-0016)
+    implementation(platform(libs.spring.modulith.bom))
+    implementation(libs.spring.modulith.starter.jdbc) // transactional outbox: JDBC event publication registry
+    implementation(libs.spring.modulith.events.kafka) // externalizes payments.settled.v1 / payments.failed.v1
+    implementation(libs.spring.boot.starter.kafka)
+    runtimeOnly(libs.postgresql)
 
     testImplementation(platform(libs.spring.ai.bom))
     testImplementation(libs.spring.boot.starter.webmvc.test)
@@ -21,4 +39,8 @@ dependencies {
     testImplementation(libs.spring.boot.testcontainers)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.redpanda)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.redpanda)
 }

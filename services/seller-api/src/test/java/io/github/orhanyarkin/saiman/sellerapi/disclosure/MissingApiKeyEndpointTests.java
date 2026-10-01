@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.FakeIngestServer;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.RagTestBase;
+import io.github.orhanyarkin.saiman.sellerapi.testsupport.TestcontainersConfiguration;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
 import io.github.orhanyarkin.x402.core.X402Codec;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.client.RestTestClient;
@@ -27,6 +29,7 @@ import org.springframework.test.web.servlet.client.RestTestClient;
  * model call fails closed before anything leaves the process, and the buyer gets a 503 that is
  * never settled. No network, no key.
  */
+@Import(TestcontainersConfiguration.class)
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         classes = SellerApiApplication.class,

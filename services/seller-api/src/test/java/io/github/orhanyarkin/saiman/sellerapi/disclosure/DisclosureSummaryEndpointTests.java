@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
+import io.github.orhanyarkin.saiman.sellerapi.testsupport.TestcontainersConfiguration;
 import io.github.orhanyarkin.x402.core.PaymentPayload;
 import io.github.orhanyarkin.x402.core.PaymentRequired;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
@@ -22,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.client.ExchangeResult;
@@ -38,6 +40,7 @@ import org.testcontainers.utility.DockerImageName;
  * {@link FakeFacilitator} (docs/design/m1-x402.md, "seller-api" and "Server flow").
  */
 @Testcontainers
+@Import(TestcontainersConfiguration.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, classes = SellerApiApplication.class)
 @AutoConfigureRestTestClient
 class DisclosureSummaryEndpointTests {
