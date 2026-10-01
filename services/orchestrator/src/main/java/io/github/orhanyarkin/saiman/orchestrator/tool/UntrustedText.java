@@ -15,7 +15,10 @@ import java.util.regex.Pattern;
  *   <li>line breaks, tabs and other whitespace become a single space;
  *   <li>controls (C0 and C1), format characters (including the bidi overrides U+202A-202E and
  *       isolates U+2066-2069, zero-width characters and the Unicode tag block), surrogates,
- *       private-use and unassigned code points are dropped;
+ *       private-use and unassigned code points are dropped, and so are invisible characters filed
+ *       under other categories (variation selectors, the combining grapheme joiner, Hangul fillers,
+ *       Khmer inherent vowels, the braille blank); a run of more than {@value #MAX_COMBINING_RUN}
+ *       non-spacing marks is cut to {@value #MAX_COMBINING_RUN};
  *   <li>runs of spaces collapse, the ends are trimmed, and the result is capped by code points (a
  *       surrogate pair is never split).
  * </ol>
@@ -30,6 +33,9 @@ public final class UntrustedText {
     /** Raw input above this is refused before any work is done on it. */
     private static final int MAX_RAW_QUESTION = 4 * MAX_QUESTION;
 
+    /** Longest run of consecutive non-spacing marks kept ("zalgo" text is capped, not refused). */
+    static final int MAX_COMBINING_RUN = 3;
+
     private static final Pattern DELIMITER = Pattern.compile("tool_data", Pattern.CASE_INSENSITIVE);
 
     private UntrustedText() {}
@@ -39,6 +45,7 @@ public final class UntrustedText {
         String normalised = Normalizer.normalize(raw, Normalizer.Form.NFKC);
         StringBuilder out = new StringBuilder(Math.min(normalised.length(), maxCodePoints * 2));
         int kept = 0;
+        int marks = 0;
         boolean pendingSpace = false;
         for (int i = 0; i < normalised.length() && kept < maxCodePoints; ) {
             int cp = normalised.codePointAt(i);
@@ -49,6 +56,13 @@ public final class UntrustedText {
             }
             if (isDropped(cp)) {
                 continue;
+            }
+            if (Character.getType(cp) == Character.NON_SPACING_MARK) {
+                if (++marks > MAX_COMBINING_RUN) {
+                    continue;
+                }
+            } else {
+                marks = 0;
             }
             if (pendingSpace) {
                 if (kept + 1 >= maxCodePoints) {
@@ -103,7 +117,28 @@ public final class UntrustedText {
         return cp == 0x85 || Character.isWhitespace(cp) || Character.isSpaceChar(cp);
     }
 
+    /**
+     * Characters dropped on top of the general categories below: invisible or filler characters that
+     * Unicode files as marks or letters, so a category check alone keeps them.
+     */
+    static boolean isInvisible(int cp) {
+        return (cp >= 0xFE00 && cp <= 0xFE0F) // variation selectors
+                || (cp >= 0xE0100 && cp <= 0xE01EF) // variation selectors supplement
+                || (cp >= 0x180B && cp <= 0x180F) // Mongolian free variation selectors and vowel separator
+                || cp == 0x034F // combining grapheme joiner
+                || cp == 0x115F
+                || cp == 0x1160
+                || cp == 0x3164
+                || cp == 0xFFA0 // Hangul fillers
+                || cp == 0x17B4
+                || cp == 0x17B5 // Khmer inherent vowels
+                || cp == 0x2800; // braille pattern blank
+    }
+
     private static boolean isDropped(int cp) {
+        if (isInvisible(cp)) {
+            return true;
+        }
         return switch (Character.getType(cp)) {
             case Character.CONTROL,
                     Character.FORMAT,
