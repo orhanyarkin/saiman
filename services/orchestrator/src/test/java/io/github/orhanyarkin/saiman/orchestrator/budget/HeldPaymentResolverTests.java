@@ -15,6 +15,8 @@ import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentStatus;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentTestAccess;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.FakeSeller;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.SpendTestSupport;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -53,6 +55,9 @@ class HeldPaymentResolverTests extends SpendTestSupport {
 
     @Autowired
     private ScriptedChain chain;
+
+    @Autowired
+    private MeterRegistry meters;
 
     @BeforeEach
     void resetChain() {
@@ -206,6 +211,105 @@ class HeldPaymentResolverTests extends SpendTestSupport {
         assertThat(today()).isEqualTo(new RunCounters(0, AMOUNT, 0));
         assertThat(OutboxTestAccess.publications(jdbc, "PaymentSettled")).isEmpty();
         assertThat(OutboxTestAccess.publications(jdbc, "PaymentFailed")).isEmpty();
+    }
+
+    @Test
+    void safeBlockExactlyAtValidBeforeLeavesTheIntentHeld() {
+        UUID run = createRun(50_000);
+        UUID held = heldIntent(run);
+        chain.safe = new ChainBlock(5_000_000, validBefore(held));
+        chain.used = false;
+
+        assertThat(resolver.resolveDue()).isEqualTo(new HeldPaymentResolver.Pass(0, 0, 0));
+
+        assertThat(intents.find(held).orElseThrow().status()).isEqualTo(PaymentIntentStatus.HELD);
+        assertThat(chain.stateBlocks).isEmpty();
+    }
+
+    @Test
+    void localClockExactlyAtValidBeforeLeavesTheIntentHeld() {
+        UUID run = createRun(50_000);
+        UUID held = heldIntent(run);
+        chain.safe = new ChainBlock(5_000_000, validBefore(held) + 20);
+        chain.clockAheadOfSafe = -20; // now == validBefore
+        chain.used = false;
+
+        assertThat(resolver.resolveDue()).isEqualTo(new HeldPaymentResolver.Pass(0, 0, 0));
+
+        assertThat(intents.find(held).orElseThrow().status()).isEqualTo(PaymentIntentStatus.HELD);
+        assertThat(chain.stateBlocks).isEmpty();
+    }
+
+    @Test
+    void safeBlockExactlyTheToleranceAheadOfTheLocalClockStillResolves() {
+        UUID run = createRun(50_000);
+        UUID held = heldIntent(run);
+        double skippedBefore = outcomes("safe_in_future");
+        chain.safeAfter(validBefore(held));
+        chain.clockAheadOfSafe = -HeldPaymentResolver.MAX_SAFE_AHEAD_SECONDS; // S == now + 60
+        chain.used = false;
+
+        assertThat(resolver.resolveDue()).isEqualTo(new HeldPaymentResolver.Pass(0, 1, 0));
+
+        assertThat(intents.find(held).orElseThrow().status()).isEqualTo(PaymentIntentStatus.RELEASED);
+        assertThat(outcomes("safe_in_future")).isEqualTo(skippedBefore);
+    }
+
+    @Test
+    void aWrongChainIdLeavesTheIntentHeldAndReleasesTheRunnerLock() {
+        UUID run = createRun(50_000);
+        UUID held = heldIntent(run);
+        chain.safeAfter(validBefore(held));
+        chain.used = false;
+        double wrongBefore = outcomes(HeldPaymentResolver.WRONG_CHAIN);
+
+        chain.wrongChainOnBlock = true; // the deferred eth_chainId check fails on the first call of the pass
+        assertThat(resolver.resolveDue()).isEqualTo(new HeldPaymentResolver.Pass(0, 0, 0));
+        chain.wrongChainOnBlock = false;
+        chain.wrongChainOnState = true; // or on the per-intent read
+        assertThat(resolver.resolveDue()).isEqualTo(new HeldPaymentResolver.Pass(0, 0, 1));
+
+        assertThat(outcomes(HeldPaymentResolver.WRONG_CHAIN)).isEqualTo(wrongBefore + 2);
+        assertThat(intents.find(held).orElseThrow().status()).isEqualTo(PaymentIntentStatus.HELD);
+        assertThat(run(run)).isEqualTo(new RunCounters(50_000, AMOUNT, 0));
+        assertThat(OutboxTestAccess.publications(jdbc, "PaymentFailed")).isEmpty();
+
+        chain.wrongChainOnState = false;
+        assertThat(resolver.resolveDue())
+                .as("the runner lock was released: the next pass works")
+                .isEqualTo(new HeldPaymentResolver.Pass(0, 1, 0));
+    }
+
+    @Test
+    void aUsedAuthorizationWhoseLogLookupFailsStaysHeldAndIsNeverReleased() {
+        UUID run = createRun(50_000);
+        UUID held = heldIntent(run);
+        chain.safeAfter(validBefore(held));
+        chain.used = true;
+        chain.logsDown = true;
+        double failedBefore = outcomes("used_tx_lookup_failed");
+
+        for (int pass = 0; pass < 3; pass++) {
+            assertThat(resolver.resolveDue()).isEqualTo(new HeldPaymentResolver.Pass(0, 0, 1));
+        }
+
+        assertThat(outcomes("used_tx_lookup_failed")).isEqualTo(failedBefore + 3);
+        assertThat(intents.find(held).orElseThrow().status()).isEqualTo(PaymentIntentStatus.HELD);
+        assertThat(run(run)).isEqualTo(new RunCounters(50_000, AMOUNT, 0));
+        assertThat(OutboxTestAccess.publications(jdbc, "PaymentFailed")).isEmpty();
+        assertThat(OutboxTestAccess.publications(jdbc, "PaymentSettled")).isEmpty();
+
+        chain.logsDown = false;
+        chain.tx = Optional.of(TX);
+        assertThat(resolver.resolveDue()).isEqualTo(new HeldPaymentResolver.Pass(1, 0, 0));
+        assertThat(intents.find(held).orElseThrow().status()).isEqualTo(PaymentIntentStatus.SETTLED);
+    }
+
+    private double outcomes(String outcome) {
+        Counter counter = meters.find("saiman.spend.held_resolution")
+                .tag("outcome", outcome)
+                .counter();
+        return counter == null ? 0 : counter.count();
     }
 
     @Test
@@ -407,6 +511,10 @@ class HeldPaymentResolverTests extends SpendTestSupport {
         volatile Optional<String> tx = Optional.empty();
         volatile boolean down;
         volatile boolean logsDown;
+        /** Throw what the real client's deferred chain-id check throws for an RPC that is not Base Sepolia. */
+        volatile boolean wrongChainOnBlock;
+
+        volatile boolean wrongChainOnState;
         volatile long delayMillis;
         final Map<String, Boolean> usedByNonce = new ConcurrentHashMap<>();
         final Set<String> failingNonces = ConcurrentHashMap.newKeySet();
@@ -419,6 +527,9 @@ class HeldPaymentResolverTests extends SpendTestSupport {
             tx = Optional.empty();
             down = false;
             logsDown = false;
+            wrongChainOnBlock = false;
+            wrongChainOnState = false;
+            clockAheadOfSafe = 0;
             delayMillis = 0;
             usedByNonce.clear();
             failingNonces.clear();
@@ -436,6 +547,9 @@ class HeldPaymentResolverTests extends SpendTestSupport {
             if (down) {
                 throw new ChainUnavailableException("down");
             }
+            if (wrongChainOnBlock) {
+                throw wrongChain();
+            }
             assertThat(tag).isEqualTo(BlockTag.SAFE);
             return safe;
         }
@@ -449,12 +563,19 @@ class HeldPaymentResolverTests extends SpendTestSupport {
                     Thread.currentThread().interrupt();
                 }
             }
+            if (wrongChainOnState) {
+                throw wrongChain();
+            }
             Boolean answer = usedByNonce.getOrDefault(nonce, used);
             if (down || answer == null || failingNonces.contains(nonce)) {
                 throw new ChainUnavailableException("down");
             }
             stateBlocks.add(blockNumber);
             return answer;
+        }
+
+        private static IllegalStateException wrongChain() {
+            return new IllegalStateException("saiman.chain.rpc-url is not Base Sepolia (eth_chainId != 84532)");
         }
 
         @Override
