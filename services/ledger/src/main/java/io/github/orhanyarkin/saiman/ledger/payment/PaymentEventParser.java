@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.ledger.payment;
 
 import io.github.orhanyarkin.saiman.shared.events.EventMetadata;
 import io.github.orhanyarkin.saiman.shared.payments.Book;
+import io.github.orhanyarkin.saiman.shared.payments.CreditNoteIssued;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentAuthorized;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentFailed;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentSettled;
@@ -76,6 +77,14 @@ public class PaymentEventParser {
     public PaymentFailed failed(@Nullable String json) {
         PaymentFailed event = read(json, PaymentFailed.class);
         require(event.meta(), event.authorization(), event.book(), event.finality());
+        checkMeta(event.meta(), event.book());
+        return event;
+    }
+
+    /** A credit note is always the seller's (the record enforces it), so it must come from {@code seller-api}. */
+    public CreditNoteIssued creditNoteIssued(@Nullable String json) {
+        CreditNoteIssued event = read(json, CreditNoteIssued.class);
+        require(event.meta(), event.authorization(), event.book());
         checkMeta(event.meta(), event.book());
         return event;
     }

@@ -18,13 +18,30 @@ public final class Stories {
         BUYER_SETTLED,
         SELLER_SETTLED,
         BUYER_EXPIRED_UNUSED,
-        SELLER_SETTLE_FAILED
+        SELLER_SETTLE_FAILED,
+        SELLER_CREDITED
     }
 
     private Stories() {}
 
-    /** A non-empty random subset of the steps, in a random "canonical" order (any combination, even contradictory). */
+    /**
+     * A non-empty random subset of the steps, in a random "canonical" order: any combination whose outcome does not
+     * depend on delivery order, contradictory ones included (released and settled, settle failed and settled). A
+     * credit note never comes with a settle failure: that pair is a conflict ({@link #anyStory}).
+     */
     public static List<Step> story(SplittableRandom random) {
+        List<Step> steps = anyStory(random);
+        if (steps.contains(Step.SELLER_CREDITED) && steps.contains(Step.SELLER_SETTLE_FAILED)) {
+            steps.remove(random.nextBoolean() ? Step.SELLER_CREDITED : Step.SELLER_SETTLE_FAILED);
+        }
+        return steps;
+    }
+
+    /**
+     * Like {@link #story} but may also hold the conflicting pair (credit note and settle failure), whose second
+     * delivery is rejected with a {@link ConflictingFactException} and therefore depends on the order.
+     */
+    public static List<Step> anyStory(SplittableRandom random) {
         List<Step> steps = new ArrayList<>();
         for (Step step : EnumSet.allOf(Step.class)) {
             if (random.nextInt(3) > 0) {
@@ -50,6 +67,7 @@ public final class Stories {
             case SELLER_SETTLED -> PaymentFact.of(payment.sellerSettled());
             case BUYER_EXPIRED_UNUSED -> PaymentFact.of(payment.buyerExpiredUnused());
             case SELLER_SETTLE_FAILED -> PaymentFact.of(payment.sellerSettleFailed());
+            case SELLER_CREDITED -> PaymentFact.of(payment.creditNoted());
         };
     }
 

@@ -185,7 +185,11 @@ public class LedgerMessagingConfiguration {
 
     @Bean
     KafkaAdmin.NewTopics ledgerTopics() {
-        List<String> payments = List.of(PaymentTopics.AUTHORIZED, PaymentTopics.SETTLED, PaymentTopics.FAILED);
+        List<String> payments = List.of(
+                PaymentTopics.AUTHORIZED,
+                PaymentTopics.SETTLED,
+                PaymentTopics.FAILED,
+                PaymentTopics.CREDIT_NOTE_ISSUED);
         var topics = new java.util.ArrayList<NewTopic>();
         for (String topic : payments) {
             topics.add(topic(topic));

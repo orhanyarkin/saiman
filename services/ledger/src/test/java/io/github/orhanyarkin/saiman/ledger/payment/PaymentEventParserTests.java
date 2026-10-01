@@ -36,6 +36,26 @@ class PaymentEventParserTests {
     }
 
     @Test
+    void creditNoteParsesAndIsBoundToTheSeller() {
+        var credited = payment.creditNoted();
+        String valid = json.writeValueAsString(credited);
+
+        assertThat(parser.creditNoteIssued(valid)).isEqualTo(credited);
+        assertMalformed(() ->
+                parser.creditNoteIssued(valid.replace("\"producer\":\"seller-api\"", "\"producer\":\"orchestrator\"")));
+        assertMalformed(() -> parser.creditNoteIssued(valid.replace("\"book\":\"SELLER\"", "\"book\":\"BUYER\"")));
+        assertMalformed(() -> parser.creditNoteIssued(valid.replace("\"httpStatus\":503", "\"httpStatus\":200")));
+        assertMalformed(() -> parser.creditNoteIssued(valid.replace("\"httpStatus\":503", "\"httpStatus\":503.0")));
+        assertMalformed(() -> parser.creditNoteIssued(
+                valid.replace("\"reasonCode\":\"handler_server_error\"", "\"reasonCode\":\"Free Text\"")));
+        assertMalformed(() -> parser.creditNoteIssued(valid.replace(",\"txHash\":\"" + payment.txHash() + "\"", "")));
+        assertMalformed(() -> parser.creditNoteIssued(
+                valid.replace("\"occurredAt\":\"2026-10-01T10:00:00Z\"", "\"occurredAt\":\"2024-01-01T00:00:00Z\"")));
+        assertMalformed(() -> parser.creditNoteIssued(
+                valid.replace(TestPayment.USDC_ADDRESS, "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")));
+    }
+
+    @Test
     void validBeforeOfLongMaxIsMalformed() {
         String forged = json.writeValueAsString(payment.authorized())
                 .replace("\"validBefore\":1790000060", "\"validBefore\":" + Long.MAX_VALUE);

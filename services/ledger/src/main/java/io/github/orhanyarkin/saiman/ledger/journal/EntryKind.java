@@ -10,7 +10,7 @@ public enum EntryKind {
     RELEASE,
     /** Seller received a payment: revenue into the wallet. */
     SALE,
-    /** Reserved for settle-first refunds (M4b). */
+    /** Seller settled up front and did not serve: revenue credited back as a liability to the buyer (ADR-0021). */
     CREDIT_NOTE,
     /** Reconciliation moved a difference to suspense. */
     ADJUSTMENT,

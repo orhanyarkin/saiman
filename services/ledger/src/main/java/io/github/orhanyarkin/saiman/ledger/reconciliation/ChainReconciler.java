@@ -65,7 +65,7 @@ import org.jspecify.annotations.Nullable;
  * <h2>Suspense rule</h2>
  *
  * The chain is right. For every <em>known</em> wallet — the buyer's once the buyer's book is terminal (SETTLED or
- * RELEASED), the seller's once the seller's book has reported (SETTLED or SETTLE_FAILED) — the ledger's net
+ * RELEASED), the seller's once the seller's book has reported (SETTLED, SETTLE_FAILED or CREDITED) — the ledger's net
  * movement over <em>all</em> entries of this payment (adjustments included) is compared with the chain's movement.
  * A difference is posted between that wallet and suspense, in one ADJUSTMENT entry per run. Because adjustments
  * count towards the net, a rerun finds no difference and posts nothing. A book that has not reported is not
@@ -338,6 +338,9 @@ public final class ChainReconciler {
             if (receiptFinding != null) {
                 kind = receiptFinding.kind();
             } else if (chainState == ChainState.UNUSED) {
+                // Also a CREDITED seller book (ADR-0021): its SALE moved the wallet, so the wallet difference goes
+                // to suspense like any settled-but-unused payment. The CREDIT_NOTE touches no wallet and is left
+                // alone: the customer-credits liability stays until a human posts a REVERSAL of it.
                 kind = MismatchKind.SETTLED_BUT_UNUSED;
             } else if (p.buyerState() == BuyerState.RELEASED || p.sellerState() == SellerState.SETTLE_FAILED) {
                 kind = MismatchKind.UNUSED_BUT_SETTLED;

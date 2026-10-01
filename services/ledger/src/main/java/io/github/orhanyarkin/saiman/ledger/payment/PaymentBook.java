@@ -3,6 +3,8 @@ package io.github.orhanyarkin.saiman.ledger.payment;
 import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.buyerAvailable;
 import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.buyerEncumbered;
 import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.buyerExpense;
+import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.sellerCreditNotes;
+import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.sellerCustomerCredits;
 import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.sellerRevenue;
 import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.sellerWallet;
 import static io.github.orhanyarkin.saiman.ledger.journal.Posting.credit;
@@ -31,6 +33,11 @@ import org.jspecify.annotations.Nullable;
  * before its {@code authorized} posts ENCUMBER and SETTLE, the late {@code authorized} posts nothing, and a
  * duplicate posts nothing. The one non-monotone step, RELEASED followed by SETTLED (contradictory producers; the
  * chain wins), posts a REVERSAL of the RELEASE, so the balances still equal those of the canonical order.
+ *
+ * <p>Credit notes (ADR-0021) follow the same shape: {@code CREDITED} implies SALE and CREDIT_NOTE, so a credit note
+ * before its {@code settled} posts both. Two seller reports that cannot both be true are rejected as a {@link
+ * ConflictingFactException} (nothing posted, reported for a human), whichever arrives second: a credit note and a
+ * settle failure with no settled report in between, or a credit note whose tx hash differs from the settled one.
  *
  * <p>Entry ids are name-based UUIDs of {@code (payment key, book, kind)}, matching the database's unique index:
  * replays produce the same ids.
@@ -81,9 +88,12 @@ public final class PaymentBook {
                     entryId(next.paymentKey(), LedgerBook.BUYER, EntryKind.RELEASE.name()),
                     mirrored));
         }
-        if (next.sellerState().impliedEntries().contains(EntryKind.SALE)
-                && !current.sellerState().impliedEntries().contains(EntryKind.SALE)) {
-            entries.add(entry(next, LedgerBook.SELLER, EntryKind.SALE, fact, null, postings(next, EntryKind.SALE)));
+        Set<EntryKind> sellerBefore = current.sellerState().impliedEntries();
+        Set<EntryKind> sellerAfter = next.sellerState().impliedEntries();
+        for (EntryKind kind : List.of(EntryKind.SALE, EntryKind.CREDIT_NOTE)) {
+            if (sellerAfter.contains(kind) && !sellerBefore.contains(kind)) {
+                entries.add(entry(next, LedgerBook.SELLER, kind, fact, null, postings(next, kind)));
+            }
         }
         return new Outcome(next, entries);
     }
@@ -98,6 +108,7 @@ public final class PaymentBook {
         return switch (fact) {
             case PaymentFact.Authorized a -> BuyerState.AUTHORIZED;
             case PaymentFact.Settled s -> s.book() == Book.BUYER ? BuyerState.SETTLED : BuyerState.NONE;
+            case PaymentFact.CreditNoted c -> BuyerState.NONE;
             case PaymentFact.Failed f -> {
                 if (f.book() != Book.BUYER) {
                     yield BuyerState.NONE;
@@ -113,10 +124,14 @@ public final class PaymentBook {
             case PaymentFact.Authorized a -> SellerState.NONE;
             case PaymentFact.Settled s -> s.book() == Book.SELLER ? SellerState.SETTLED : SellerState.NONE;
             case PaymentFact.Failed f -> f.book() == Book.SELLER ? SellerState.SETTLE_FAILED : SellerState.NONE;
+            case PaymentFact.CreditNoted c -> SellerState.CREDITED;
         };
     }
 
     private static @Nullable String txHash(PaymentFact fact, Book book) {
+        if (fact instanceof PaymentFact.CreditNoted c && book == Book.SELLER) {
+            return PaymentProjection.lower(c.txHash());
+        }
         if (fact instanceof PaymentFact.Settled s
                 && s.book() == book
                 && s.event().txHash() != null) {
@@ -134,7 +149,9 @@ public final class PaymentBook {
             case RELEASE ->
                 List.of(debit(buyerAvailable(p.payer()), amount), credit(buyerEncumbered(p.payer()), amount));
             case SALE -> List.of(debit(sellerWallet(p.payTo()), amount), credit(sellerRevenue(p.payTo()), amount));
-            case CREDIT_NOTE, ADJUSTMENT, REVERSAL, LLM_USAGE ->
+            case CREDIT_NOTE ->
+                List.of(debit(sellerCreditNotes(p.payTo()), amount), credit(sellerCustomerCredits(p.payTo()), amount));
+            case ADJUSTMENT, REVERSAL, LLM_USAGE ->
                 throw new IllegalArgumentException(kind + " is not posted by the payment state machine");
         };
     }
@@ -167,7 +184,8 @@ public final class PaymentBook {
             case RELEASE -> "Authorization expired unused: encumbrance released";
             case SALE -> "Seller settled a paid request";
             case REVERSAL -> "Release reversed: the authorization was used after all";
-            case CREDIT_NOTE, ADJUSTMENT, LLM_USAGE -> kind.name();
+            case CREDIT_NOTE -> "Seller settled up front but did not serve: full amount credited to the buyer";
+            case ADJUSTMENT, LLM_USAGE -> kind.name();
         };
     }
 
@@ -185,6 +203,41 @@ public final class PaymentBook {
         if (p.validBefore() != auth.validBefore()) {
             throw new ConflictingFactException(
                     "validBefore differs from the one already recorded for this payment", p.id());
+        }
+        requireConsistentSellerReports(p, fact);
+    }
+
+    /**
+     * Seller reports that contradict a credit note (ADR-0021). The rule is symmetric, so the conflict is reported
+     * in either delivery order: a credit note proves a successful settlement, a settle failure says there was none
+     * (unless a {@code settled} report already overruled the failure), and the credit note's tx hash is the
+     * settlement's. Two plain {@code settled} reports with different hashes stay as before (first one kept).
+     */
+    private static void requireConsistentSellerReports(PaymentProjection p, PaymentFact fact) {
+        switch (fact) {
+            case PaymentFact.CreditNoted c -> {
+                if (p.sellerState() == SellerState.SETTLE_FAILED) {
+                    throw new ConflictingFactException("credit note for a payment whose settlement failed", p.id());
+                }
+                requireSameSellerTx(p, c.txHash());
+            }
+            case PaymentFact.Failed f
+            when f.book() == Book.SELLER && p.sellerState() == SellerState.CREDITED ->
+                throw new ConflictingFactException("settle failure for a payment the seller credited", p.id());
+            case PaymentFact.Settled s
+            when s.book() == Book.SELLER
+                    && p.sellerState() == SellerState.CREDITED
+                    && s.event().txHash() != null ->
+                requireSameSellerTx(p, Objects.requireNonNull(s.event().txHash()));
+            default -> {}
+        }
+    }
+
+    private static void requireSameSellerTx(PaymentProjection p, String txHash) {
+        String recorded = p.sellerTxHash();
+        if (recorded != null && !recorded.equals(PaymentProjection.lower(txHash))) {
+            throw new ConflictingFactException(
+                    "seller tx hash differs between the credit note and the settlement", p.id());
         }
     }
 

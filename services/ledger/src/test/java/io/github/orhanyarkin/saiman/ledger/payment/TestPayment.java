@@ -4,6 +4,7 @@ import io.github.orhanyarkin.saiman.shared.events.EventMetadata;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.saiman.shared.payments.AuthorizationRef;
 import io.github.orhanyarkin.saiman.shared.payments.Book;
+import io.github.orhanyarkin.saiman.shared.payments.CreditNoteIssued;
 import io.github.orhanyarkin.saiman.shared.payments.Finality;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentAuthorized;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentFailed;
@@ -102,6 +103,24 @@ public record TestPayment(AuthorizationRef authorization, Money amount, String p
                 "settle_failed",
                 null,
                 null);
+    }
+
+    /** The seller settled up front and answered 503 (ADR-0021); same tx hash as {@link #sellerSettled()}. */
+    public CreditNoteIssued creditNoted() {
+        return creditNoted(txHash());
+    }
+
+    public CreditNoteIssued creditNoted(String txHash) {
+        return new CreditNoteIssued(
+                meta("seller-api"),
+                authorization,
+                amount,
+                payTo,
+                RESOURCE,
+                Book.SELLER,
+                txHash,
+                503,
+                "handler_server_error");
     }
 
     /** The lower-case payment key. */
