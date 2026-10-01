@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.ledger.reconciliation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import io.github.orhanyarkin.saiman.evmrpc.ChainBlock;
 import io.github.orhanyarkin.saiman.evmrpc.UsdcReceipt;
 import io.github.orhanyarkin.saiman.evmrpc.UsdcTransfer;
 import io.github.orhanyarkin.saiman.ledger.FakeChain;
@@ -17,9 +18,12 @@ import io.github.orhanyarkin.saiman.shared.ledger.LedgerTopics;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.saiman.shared.payments.AuthorizationRef;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -79,6 +83,9 @@ class ReconciliationTests {
 
     @Autowired
     private FakeChain chain;
+
+    @Autowired
+    private MeterRegistry meters;
 
     @Autowired
     private JdbcClient jdbc;
@@ -170,6 +177,54 @@ class ReconciliationTests {
         } finally {
             chain.healReceipt(broken.txHash());
         }
+    }
+
+    @Test
+    void safeBlockFarAheadOfTheLocalClockSkipsTheChainChecks() {
+        TestPayment payment = settledBothBooks(20_000);
+        chain.mine(receipt(payment, payment.txHash(), payment.payTo(), 20_000, false));
+        double skippedBefore = skippedSafeInFuture();
+        long now = Instant.now().getEpochSecond();
+        chain.overrideSafe(new ChainBlock(FakeChain.SAFE.number(), now + 3600));
+        ReconciliationReport skipped;
+        try {
+            skipped = runNow();
+        } finally {
+            chain.overrideSafe(null);
+        }
+
+        assertThat(skipped.status()).isEqualTo("PARTIAL");
+        assertThat(skipped.items()).isEmpty();
+        assertThat(mismatchKinds(payment)).isEmpty();
+        assertThat(skippedSafeInFuture()).isEqualTo(skippedBefore + 1);
+
+        assertThat(item(runNow(), payment).mismatch().kind())
+                .as("the same payment with a sane safe block")
+                .isEqualTo("SETTLED_BUT_UNUSED");
+    }
+
+    @Test
+    void safeBlockSlightlyAheadIsBoundedByTheLocalClockSoNothingExpiresEarly() {
+        long now = Instant.now().getEpochSecond();
+        TestPayment parties = TestPayment.random(random, 1);
+        TestPayment payment =
+                TestPayment.of(random, parties.authorization().payer(), parties.payTo(), 20_000, now + 30);
+        record(payment);
+        chain.mine(receipt(payment, payment.txHash(), payment.payTo(), 20_000, false));
+        double skippedBefore = skippedSafeInFuture();
+        // Past validBefore by the RPC's clock, not by ours; within the tolerated 60 s.
+        chain.overrideSafe(new ChainBlock(FakeChain.SAFE.number(), now + 55));
+        ReconciliationReport report;
+        try {
+            report = runNow();
+        } finally {
+            chain.overrideSafe(null);
+        }
+
+        assertThat(skippedSafeInFuture()).isEqualTo(skippedBefore);
+        assertThat(item(report, payment).chainState()).isEqualTo("UNKNOWN");
+        assertThat(mismatchKinds(payment)).containsExactly("TX_FAILED");
+        assertThat(adjustmentLegs(payment)).isEmpty();
     }
 
     @Test
@@ -361,7 +416,10 @@ class ReconciliationTests {
     // --- helpers ---
 
     private TestPayment settledBothBooks(long amount) {
-        TestPayment payment = TestPayment.random(random, amount);
+        return record(TestPayment.random(random, amount));
+    }
+
+    private TestPayment record(TestPayment payment) {
         ledger.record(PaymentFact.of(payment.authorized()), PaymentTopics.AUTHORIZED);
         ledger.record(PaymentFact.of(payment.buyerSettled()), PaymentTopics.SETTLED);
         ledger.record(PaymentFact.of(payment.sellerSettled()), PaymentTopics.SETTLED);
@@ -376,6 +434,13 @@ class ReconciliationTests {
                 succeeded,
                 succeeded ? List.of(new UsdcTransfer(payer, to, value)) : List.of(),
                 succeeded ? List.of(payer + ":" + p.authorization().nonce()) : List.of());
+    }
+
+    private double skippedSafeInFuture() {
+        Counter counter = meters.find("saiman.ledger.reconciliation.skipped")
+                .tag("reason", "safe_in_future")
+                .counter();
+        return counter == null ? 0 : counter.count();
     }
 
     private ReconciliationReport runNow() {

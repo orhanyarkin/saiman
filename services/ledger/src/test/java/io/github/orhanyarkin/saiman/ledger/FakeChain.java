@@ -30,6 +30,7 @@ public class FakeChain implements BaseSepoliaUsdc {
     private final Set<String> unavailableTx = ConcurrentHashMap.newKeySet();
     private final Set<String> brokenTx = ConcurrentHashMap.newKeySet();
     private volatile @Nullable CountDownLatch safeBlockGate;
+    private volatile @Nullable ChainBlock safeOverride;
     private volatile @Nullable CountDownLatch safeBlockEntered;
 
     @Override
@@ -49,7 +50,13 @@ public class FakeChain implements BaseSepoliaUsdc {
                 throw new ChainUnavailableException("interrupted");
             }
         }
-        return SAFE;
+        ChainBlock override = safeOverride;
+        return override != null ? override : SAFE;
+    }
+
+    /** Makes {@code block(SAFE)} return this block instead of {@link #SAFE}; null restores the default. */
+    public void overrideSafe(@Nullable ChainBlock block) {
+        safeOverride = block;
     }
 
     @Override

@@ -88,7 +88,9 @@ public final class ChainReconciler {
     public record Settings(Duration receiptGrace, Duration graceAfterValidBefore) {}
 
     /**
-     * What the chain said, all read at or relative to {@code safe}.
+     * What the chain said, all read at or relative to {@code safe}. The caller passes the <em>effective</em> safe
+     * block: its timestamp is {@code min(safe.timestamp, local clock)} (see {@link ReconciliationService}), so a
+     * skewed RPC timestamp cannot make an authorization final before the local clock agrees.
      *
      * @param receipts receipt lookups for the reported tx hashes (empty optional: not found)
      * @param authorizationUsed {@code authorizationState} at the safe block, or null if not read

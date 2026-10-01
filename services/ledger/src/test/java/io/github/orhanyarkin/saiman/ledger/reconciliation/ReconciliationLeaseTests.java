@@ -64,7 +64,7 @@ class ReconciliationLeaseTests {
     private DataSource dataSource;
 
     @Autowired
-    private Clock clock;
+    private ObjectProvider<Clock> clock;
 
     @Autowired
     private MeterRegistry meters;

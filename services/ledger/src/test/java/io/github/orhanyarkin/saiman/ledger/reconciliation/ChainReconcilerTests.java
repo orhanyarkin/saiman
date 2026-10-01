@@ -576,6 +576,89 @@ class ChainReconcilerTests {
         assertThat(rerun.adjustment()).isNull();
     }
 
+    /** A buyer that reported SETTLED without a tx hash: only the authorization state can decide it. */
+    private Books settledWithoutTx() {
+        Books books = Books.of(List.of(PaymentFact.of(payment.authorized()), PaymentFact.of(payment.buyerSettled())));
+        return new Books(withTx(books.projection(), null, null), books.entries());
+    }
+
+    @Test
+    void safeAtExactlyValidBeforeIsPendingEvenForAnUnusedAuthorization() {
+        Books books = settledWithoutTx();
+        ChainBlock atValidBefore = new ChainBlock(SAFE_LATE.number(), VALID_BEFORE);
+        ChainBlock oneSecondLater = new ChainBlock(SAFE_LATE.number(), VALID_BEFORE + 1);
+
+        assertThat(ChainReconciler.needsAuthorizationState(books.projection(), Map.of(), atValidBefore))
+                .isFalse();
+        var atBoundary = reconcile(books, evidence(atValidBefore, Map.of(), false));
+        assertThat(atBoundary.status()).isEqualTo(ItemStatus.PENDING);
+        assertThat(atBoundary.findings()).isEmpty();
+        assertThat(atBoundary.adjustment()).isNull();
+
+        assertThat(reconcile(books, evidence(oneSecondLater, Map.of(), false)).findings())
+                .as("one second later the authorization is final")
+                .extracting(ChainReconciler.Finding::kind)
+                .containsExactly(MismatchKind.SETTLED_BUT_UNUSED);
+    }
+
+    @Test
+    void safeAtExactlyTheGraceAfterValidBeforeIsNotYetBooksOpen() {
+        Books books = Books.of(List.of(PaymentFact.of(payment.authorized())));
+        long grace = SETTINGS.graceAfterValidBefore().toSeconds();
+
+        var atBoundary =
+                reconcile(books, evidence(new ChainBlock(SAFE_LATE.number(), VALID_BEFORE + grace), Map.of(), false));
+        assertThat(atBoundary.findings())
+                .extracting(ChainReconciler.Finding::kind)
+                .doesNotContain(MismatchKind.BOOKS_OPEN);
+
+        var after = reconcile(
+                books, evidence(new ChainBlock(SAFE_LATE.number(), VALID_BEFORE + grace + 1), Map.of(), false));
+        assertThat(after.findings()).extracting(ChainReconciler.Finding::kind).containsExactly(MismatchKind.BOOKS_OPEN);
+    }
+
+    @Test
+    void safeAtExactlyTheReceiptGraceIsNotYetTxNotFound() {
+        Books books = settledBothBooks();
+        Map<String, Optional<UsdcReceipt>> none = Map.of(payment.txHash(), Optional.empty());
+        long receiptGrace = SETTINGS.receiptGrace().toSeconds();
+
+        var atBoundary =
+                reconcile(books, evidence(new ChainBlock(SAFE_LATE.number(), VALID_BEFORE + receiptGrace), none, true));
+        assertThat(atBoundary.status()).isEqualTo(ItemStatus.PENDING);
+        assertThat(atBoundary.findings()).isEmpty();
+
+        var after = reconcile(
+                books, evidence(new ChainBlock(SAFE_LATE.number(), VALID_BEFORE + receiptGrace + 1), none, true));
+        assertThat(after.findings())
+                .extracting(ChainReconciler.Finding::kind)
+                .containsExactly(MismatchKind.TX_NOT_FOUND);
+    }
+
+    @Test
+    void safeTimestampAheadOfTheLocalClockIsBoundedSoNothingExpiresEarly() {
+        Books books = settledWithoutTx();
+        ChainBlock reported = new ChainBlock(SAFE_LATE.number(), VALID_BEFORE + 30);
+        long localNow = VALID_BEFORE - 5;
+
+        ChainBlock effective = ReconciliationService.effective(reported, localNow);
+
+        assertThat(effective.number()).as("the block number is never clamped").isEqualTo(reported.number());
+        assertThat(effective.timestamp()).isEqualTo(localNow);
+        assertThat(ChainReconciler.needsAuthorizationState(books.projection(), Map.of(), effective))
+                .isFalse();
+        var outcome = reconcile(books, evidence(effective, Map.of(), false));
+        assertThat(outcome.status()).isEqualTo(ItemStatus.PENDING);
+        assertThat(outcome.findings())
+                .extracting(ChainReconciler.Finding::kind)
+                .doesNotContain(MismatchKind.SETTLED_BUT_UNUSED);
+        assertThat(outcome.adjustment()).isNull();
+
+        assertThat(ReconciliationService.effective(reported, VALID_BEFORE + 31))
+                .as("a safe block behind the local clock is used as is")
+                .isEqualTo(reported);
+    }
+
     private static List<String> legs(ChainReconciler.Outcome outcome) {
         assertThat(outcome.adjustment()).isNotNull();
         return outcome.adjustment().postings().stream()
