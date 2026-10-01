@@ -9,6 +9,8 @@ import java.time.Clock;
 import java.util.List;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.header.Headers;
+import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
@@ -19,6 +21,7 @@ import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.converter.RecordMessageConverter;
 import org.springframework.kafka.support.converter.StringJacksonJsonMessageConverter;
+import org.springframework.messaging.Message;
 import org.springframework.modulith.events.EventExternalizationConfiguration;
 import org.springframework.modulith.events.RoutingTarget;
 import org.springframework.util.backoff.FixedBackOff;
@@ -32,7 +35,7 @@ import tools.jackson.databind.json.JsonMapper;
  *       key = payment id. The record lives in {@code libs/shared}, which does not depend on Modulith, so the
  *       routing is configured here instead of with {@code @Externalized} on the type.
  *   <li><b>Converter:</b> a String JSON converter replaces Modulith's default byte-array one, so the template keeps
- *       Boot's String serializers (shared with the dead-letter publisher) and no type headers are written.
+ *       String serializers (shared with the dead-letter publisher), and it writes no {@code __TypeId__} header.
  *   <li><b>Errors:</b> a malformed or conflicting record goes straight to {@code <topic>.ledger-dlt}; anything else
  *       (database down, lock timeout) is retried {@value #RETRIES} times, then dead-lettered. Never an endless loop.
  *   <li><b>Topics:</b> single-partition topics for local and compose use; creating one that exists is a no-op.
@@ -64,7 +67,14 @@ public class LedgerMessagingConfiguration {
 
     @Bean
     RecordMessageConverter kafkaMessageConverter(JsonMapper jsonMapper) {
-        return new StringJacksonJsonMessageConverter(jsonMapper);
+        return new StringJacksonJsonMessageConverter(jsonMapper) {
+            @Override
+            protected Headers initialRecordHeaders(Message<?> message) {
+                // The default adds a __TypeId__ header naming the Java class; the contract is the JSON schema in
+                // docs/events, not a class name, so nothing is added.
+                return new RecordHeaders();
+            }
+        };
     }
 
     @Bean

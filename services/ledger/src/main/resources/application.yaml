@@ -24,6 +24,8 @@ spring:
       # A new ledger reads the whole history; the inbox makes redelivery harmless.
       auto-offset-reset: earliest
       enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
     listener:
       ack-mode: record
       observation-enabled: true
@@ -31,6 +33,10 @@ spring:
       observation-enabled: true
     producer:
       acks: all
+      # Plain String JSON on the wire (ADR-0016). Spelled out because spring-modulith-events-kafka's JSON
+      # auto-configuration (disabled below) would otherwise switch both sides to byte arrays.
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
       properties:
         enable.idempotence: true
   # Modulith's registry table is created by Flyway (V1__ledger.sql) in schema `ledger`; the registry
@@ -40,6 +46,10 @@ spring:
       jdbc:
         schema-initialization:
           enabled: false
+      kafka:
+        # Off: its byte-array converter and serializers; the ledger registers a String JSON converter instead
+        # (LedgerMessagingConfiguration), which also keeps type headers off the wire.
+        enable-json: false
 
 server:
   port: 8082
