@@ -15,6 +15,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param batchSize payments checked per run, least recently checked first
  * @param logSearchBlocks blocks searched for {@code AuthorizationUsed} up to {@code validBefore} (capped by
  *     {@code saiman.chain.max-log-range-blocks}; 3600 blocks is two hours on Base)
+ * @param minManualInterval minimum time between two runs started over HTTP (a run in progress is a 409 first;
+ *     a start too soon after the previous one is a 429), so the public RPC cannot be hammered through the API
  */
 @ConfigurationProperties("saiman.ledger.reconciliation")
 public record ReconciliationProperties(
@@ -22,7 +24,8 @@ public record ReconciliationProperties(
         @DefaultValue("30m") Duration graceAfterValidBefore,
         @DefaultValue("10m") Duration receiptGrace,
         @DefaultValue("50") int batchSize,
-        @DefaultValue("3600") long logSearchBlocks) {
+        @DefaultValue("3600") long logSearchBlocks,
+        @DefaultValue("30s") Duration minManualInterval) {
 
     public ReconciliationProperties {
         if (interval.isNegative() || interval.isZero()) {
@@ -33,6 +36,9 @@ public record ReconciliationProperties(
         }
         if (batchSize < 1 || batchSize > 50) {
             throw new IllegalArgumentException("saiman.ledger.reconciliation.batch-size must be between 1 and 50");
+        }
+        if (minManualInterval.isNegative()) {
+            throw new IllegalArgumentException("saiman.ledger.reconciliation.min-manual-interval must not be negative");
         }
         if (logSearchBlocks < 1) {
             throw new IllegalArgumentException("saiman.ledger.reconciliation.log-search-blocks must be positive");

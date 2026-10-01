@@ -24,6 +24,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +33,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.sql.DataSource;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -88,6 +90,7 @@ public class ReconciliationService {
     private final MeterRegistry meters;
     private final ObservationRegistry observations;
     private final AtomicBoolean running = new AtomicBoolean();
+    private final AtomicReference<@Nullable Instant> lastManualStart = new AtomicReference<>();
     private final AtomicLong unbalancedEntries = new AtomicLong();
 
     public ReconciliationService(
@@ -125,6 +128,21 @@ public class ReconciliationService {
         }
     }
 
+    /** A manual run was requested sooner than {@code min-manual-interval} after the previous one (HTTP 429). */
+    public static class TooSoonException extends RuntimeException {
+        private final Duration retryAfter;
+
+        TooSoonException(Duration retryAfter) {
+            super("A reconciliation run was started recently");
+            this.retryAfter = retryAfter;
+        }
+
+        /** How long until a manual run is accepted again. */
+        public Duration retryAfter() {
+            return retryAfter;
+        }
+    }
+
     /** True when a chain client exists, so runs (and the schedule) make sense. */
     public boolean chainConfigured() {
         return chainProvider.getIfAvailable() != null;
@@ -141,6 +159,15 @@ public class ReconciliationService {
         if (lease == null) {
             return Optional.empty();
         }
+        // Checked after "in progress" (a 409 wins), and only successful starts count. Per replica: the advisory
+        // lock already serialises replicas, this only rate-limits the HTTP trigger.
+        Instant now = clock.instant();
+        Instant previous = lastManualStart.get();
+        if (previous != null && now.isBefore(previous.plus(properties.minManualInterval()))) {
+            lease.close();
+            throw new TooSoonException(Duration.between(now, previous.plus(properties.minManualInterval())));
+        }
+        lastManualStart.set(now);
         UUID runId = begin(lease);
         Thread.ofVirtual().name("reconciliation-" + runId).start(() -> {
             try (lease) {
@@ -394,8 +421,19 @@ public class ReconciliationService {
                     unlock.execute();
                 }
             } catch (SQLException e) {
-                // Closing the connection would release a session lock, but a pooled connection stays open.
-                log.error("Could not release the reconciliation lock", e);
+                // Closing returns a pooled connection that may still hold the session lock, blocking every future
+                // run. Abort it instead: the pool evicts an aborted connection and Postgres ends the session,
+                // which releases the lock.
+                log.error(
+                        "Could not release the reconciliation lock; aborting its connection ({})",
+                        e.getClass().getName());
+                try {
+                    connection.abort(Runnable::run);
+                } catch (SQLException abortFailed) {
+                    log.error(
+                            "Could not abort the reconciliation lock connection ({})",
+                            abortFailed.getClass().getName());
+                }
             } finally {
                 running.set(false);
             }
