@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.TestcontainersConfiguration;
+import io.github.orhanyarkin.saiman.testsupport.RedisContainerConfiguration;
 import io.github.orhanyarkin.x402.core.PaymentPayload;
 import io.github.orhanyarkin.x402.core.PaymentRequired;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
@@ -22,33 +23,22 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.client.ExchangeResult;
 import org.springframework.test.web.servlet.client.RestTestClient;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 /**
  * End-to-end acceptance for the first paid seller-api resource, {@code GET
  * /v1/disclosures/{ticker}/summary}: no payment, a valid payment, a replayed payment, an unknown
- * ticker and a malformed ticker, against a real Valkey-backed {@link PaymentNonceStore} and a
+ * ticker and a malformed ticker, against a real Redis-backed {@link PaymentNonceStore} and a
  * {@link FakeFacilitator} (docs/design/m1-x402.md, "seller-api" and "Server flow").
  */
-@Testcontainers
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, RedisContainerConfiguration.class})
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, classes = SellerApiApplication.class)
 @AutoConfigureRestTestClient
 class DisclosureSummaryEndpointTests {
-
-    @Container
-    @ServiceConnection(name = "redis")
-    static final GenericContainer<?> VALKEY =
-            new GenericContainer<>(DockerImageName.parse("valkey/valkey:9.1.2-alpine")).withExposedPorts(6379);
 
     private static final FakeFacilitator FACILITATOR = new FakeFacilitator();
     private static final String PAY_TO = TestWallets.OTHER_PAYER.address();

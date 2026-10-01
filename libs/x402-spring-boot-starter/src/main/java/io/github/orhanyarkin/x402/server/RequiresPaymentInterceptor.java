@@ -52,7 +52,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * malformed client input -- see the design's "Server flow"): a missing header gets the full {@code
  * PAYMENT-REQUIRED} offer; every other rejection gets the same, so a client can always recover by
  * reading the current offer and retrying. The one exception is the nonce store itself failing (e.g.
- * Valkey unreachable): that is infrastructure unavailability, not "please pay", so it gets a plain
+ * Redis unreachable): that is infrastructure unavailability, not "please pay", so it gets a plain
  * {@code 503}. None of the Problem Details {@code detail} messages below echo any part of the
  * request (ADR-0006 amendment).
  */

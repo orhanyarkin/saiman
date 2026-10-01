@@ -4,9 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.orhanyarkin.saiman.modelrouter.testing.FakeEmbeddingModel;
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.github.orhanyarkin.saiman.testsupport.SharedContainers;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -24,16 +29,11 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 /**
  * 200 concurrent callers through the real router against a slow fake model: the counter (settled
- * costs plus outstanding reservations) never exceeds the cap, at any moment, in-memory and Valkey.
+ * costs plus outstanding reservations) never exceeds the cap, at any moment, in-memory and Redis.
  */
-@Testcontainers
 class RouterCapConcurrencyTests {
 
     private static final int CALLERS = 200;
@@ -41,17 +41,14 @@ class RouterCapConcurrencyTests {
     /** 1000 in + 100 out on tier0 (gpt-5-nano): 100 + 50 micro-dollars. */
     private static final long ACTUAL_PER_CALL = 150;
 
-    @Container
-    static final GenericContainer<?> VALKEY =
-            new GenericContainer<>(DockerImageName.parse("valkey/valkey:9.1.2-alpine")).withExposedPorts(6379);
-
     private static LettuceConnectionFactory connectionFactory;
     private static StringRedisTemplate template;
 
     @BeforeAll
     static void connect() {
-        connectionFactory = new LettuceConnectionFactory(
-                new RedisStandaloneConfiguration(VALKEY.getHost(), VALKEY.getMappedPort(6379)));
+        connectionFactory = new LettuceConnectionFactory(new RedisStandaloneConfiguration(
+                SharedContainers.redis().getHost(),
+                SharedContainers.redis().getMappedPort(SharedContainers.REDIS_PORT)));
         connectionFactory.afterPropertiesSet();
         template = new StringRedisTemplate(connectionFactory);
         template.afterPropertiesSet();
@@ -138,8 +135,10 @@ class RouterCapConcurrencyTests {
     }
 
     @Test
-    void valkeyGuardNeverExceedsTheCapUnderConcurrentCallers() throws Exception {
-        template.delete(new ValkeyCostGuard(template, CAP, Clock.systemUTC()).todayKey());
-        run(new ValkeyCostGuard(template, CAP, Clock.systemUTC()));
+    void redisGuardNeverExceedsTheCapUnderConcurrentCallers() throws Exception {
+        // A far-future day of its own: the shared Redis may hold other tests' counters for today.
+        Instant day = Instant.parse("2100-01-01T12:00:00Z")
+                .plus(Duration.ofDays(ThreadLocalRandom.current().nextInt(300_000)));
+        run(new RedisCostGuard(template, CAP, Clock.fixed(day, ZoneOffset.UTC)));
     }
 }

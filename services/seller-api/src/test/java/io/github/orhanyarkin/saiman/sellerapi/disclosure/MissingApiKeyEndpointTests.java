@@ -6,6 +6,7 @@ import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.FakeIngestServer;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.RagTestBase;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.TestcontainersConfiguration;
+import io.github.orhanyarkin.saiman.testsupport.RedisContainerConfiguration;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
 import io.github.orhanyarkin.x402.core.X402Codec;
@@ -25,11 +26,11 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.client.RestTestClient;
 
 /**
- * The REAL model router (Valkey cost guard, OpenAI adapter) with no API key configured: the first
+ * The REAL model router (Redis cost guard, OpenAI adapter) with no API key configured: the first
  * model call fails closed before anything leaves the process, and the buyer gets a 503 that is
  * never settled. No network, no key.
  */
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, RedisContainerConfiguration.class})
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         classes = SellerApiApplication.class,
@@ -43,8 +44,6 @@ class MissingApiKeyEndpointTests {
         registry.add("x402.server.pay-to", () -> RagTestBase.PAY_TO);
         registry.add("x402.server.facilitator.url", RagTestBase.FACILITATOR::url);
         registry.add("seller.ingest.base-url", RagTestBase.INGEST::url);
-        registry.add("spring.data.redis.host", RagTestBase.VALKEY::getHost);
-        registry.add("spring.data.redis.port", () -> RagTestBase.VALKEY.getMappedPort(6379));
     }
 
     @Autowired

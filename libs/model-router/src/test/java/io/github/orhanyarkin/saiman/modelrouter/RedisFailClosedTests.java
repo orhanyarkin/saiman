@@ -14,11 +14,11 @@ import org.springframework.data.redis.connection.lettuce.LettuceClientConfigurat
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
-/** A dead Valkey must stop model calls (fail closed), not let them through. */
-class ValkeyFailClosedTests {
+/** A dead Redis must stop model calls (fail closed), not let them through. */
+class RedisFailClosedTests {
 
     @Test
-    void deadValkeyBlocksTheCallBeforeTheModelIsReached() {
+    void deadRedisBlocksTheCallBeforeTheModelIsReached() {
         var config = LettuceClientConfiguration.builder()
                 .commandTimeout(Duration.ofMillis(500))
                 .build();
@@ -26,7 +26,7 @@ class ValkeyFailClosedTests {
         factory.afterPropertiesSet();
         try {
             var template = new StringRedisTemplate(factory);
-            var guard = new ValkeyCostGuard(template, 700_000, new MutableClock(Instant.parse("2026-09-29T10:00:00Z")));
+            var guard = new RedisCostGuard(template, 700_000, new MutableClock(Instant.parse("2026-09-29T10:00:00Z")));
             var chat = new FakeChatModel("ok");
             var embedding = new FakeEmbeddingModel(1536);
             var router = TestRouters.over(chat, embedding, guard);
@@ -50,14 +50,14 @@ class ValkeyFailClosedTests {
     }
 
     @Test
-    void deadValkeyBlocksAScopedCallBeforeTheModelIsReached() {
+    void deadRedisBlocksAScopedCallBeforeTheModelIsReached() {
         var config = LettuceClientConfiguration.builder()
                 .commandTimeout(Duration.ofMillis(500))
                 .build();
         var factory = new LettuceConnectionFactory(new RedisStandaloneConfiguration("127.0.0.1", 1), config);
         factory.afterPropertiesSet();
         try {
-            var scoped = new ValkeyScopedCostGuard(new StringRedisTemplate(factory));
+            var scoped = new RedisScopedCostGuard(new StringRedisTemplate(factory));
             var chat = new FakeChatModel("ok");
             var router = new DefaultModelRouter(
                     io.github.orhanyarkin.saiman.modelrouter.RouterProperties.defaults(),

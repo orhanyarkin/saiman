@@ -24,7 +24,7 @@ import org.springframework.test.web.servlet.client.ExchangeResult;
 
 /**
  * {@code POST /v1/disclosures/{ticker}/questions} end to end: payment, grounding, prompt hygiene and
- * every failure that must never be settled. Real Valkey nonce store and a {@code FakeFacilitator};
+ * every failure that must never be settled. Real Redis nonce store and a {@code FakeFacilitator};
  * ingest and the model router are fakes (no network, no key).
  */
 class DisclosureQuestionEndpointTests extends RagTestBase {
@@ -271,7 +271,7 @@ class DisclosureQuestionEndpointTests extends RagTestBase {
 
     @Test
     void anyOtherRouterFailureIs503AndNeverSettled() {
-        router.failWith(new IllegalStateException("valkey down " + KEY_MARKER));
+        router.failWith(new IllegalStateException("redis down " + KEY_MARKER));
         assertRejected(postPaid(URI, PRICE, BODY), 503);
     }
 
@@ -311,7 +311,7 @@ class DisclosureQuestionEndpointTests extends RagTestBase {
                 .doesNotContain("SECRETQUESTIONMARKER")
                 .doesNotContain("CHUNKTEXTMARKER")
                 .doesNotContain(KEY_MARKER)
-                .doesNotContain("valkey down")
+                .doesNotContain("redis down")
                 .doesNotContain("no key configured")
                 .doesNotContain("cap reached");
     }

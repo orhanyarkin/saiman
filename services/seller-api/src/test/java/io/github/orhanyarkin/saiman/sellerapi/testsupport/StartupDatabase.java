@@ -1,30 +1,26 @@
 package io.github.orhanyarkin.saiman.sellerapi.testsupport;
 
+import io.github.orhanyarkin.saiman.testsupport.SharedContainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
-import org.testcontainers.utility.DockerImageName;
 
 /**
- * One Postgres per test JVM for tests that start the application with {@code SpringApplicationBuilder} instead of
- * {@code @SpringBootTest} (startup-failure tests). seller-api needs a database since M4 (schema {@code seller_api});
- * without this these tests silently used whatever Postgres listened on localhost:5432 (the compose stack) and failed
- * in CI. Started once, stopped by Testcontainers' reaper when the JVM exits.
+ * The JVM's shared Postgres ({@link SharedContainers#postgres()}) as command-line arguments, for tests that start the
+ * application with {@code SpringApplicationBuilder} instead of {@code @SpringBootTest} (startup-failure tests).
+ * seller-api needs a database since M4 (schema {@code seller_api}); without this these tests silently used whatever
+ * Postgres listened on localhost:5432 (the compose stack) and failed in CI. They share the container's default database
+ * (not one per context): they run one at a time and the migrations are idempotent.
  */
 public final class StartupDatabase {
-
-    private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(
-            DockerImageName.parse("pgvector/pgvector:0.8.6-pg17-trixie").asCompatibleSubstituteFor("postgres"));
 
     private StartupDatabase() {}
 
     /** Command-line arguments that point the application at the shared container. */
-    public static synchronized String[] args() {
-        if (!POSTGRES.isRunning()) {
-            POSTGRES.start();
-        }
+    public static String[] args() {
+        PostgreSQLContainer postgres = SharedContainers.postgres();
         return new String[] {
-            "--spring.datasource.url=" + POSTGRES.getJdbcUrl(),
-            "--spring.datasource.username=" + POSTGRES.getUsername(),
-            "--spring.datasource.password=" + POSTGRES.getPassword()
+            "--spring.datasource.url=" + postgres.getJdbcUrl(),
+            "--spring.datasource.username=" + postgres.getUsername(),
+            "--spring.datasource.password=" + postgres.getPassword()
         };
     }
 

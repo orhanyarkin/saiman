@@ -10,7 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
-/** F1: when the guard can not decide (Valkey down) the endpoint answers 503 without a model call. */
+/** F1: when the guard can not decide (Redis down) the endpoint answers 503 without a model call. */
 class RunGuardFailClosedEndpointTests extends RagTestBase {
 
     @MockitoSpyBean

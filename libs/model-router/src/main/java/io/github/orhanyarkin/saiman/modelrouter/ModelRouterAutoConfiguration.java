@@ -21,7 +21,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
  *
  * <ul>
  *   <li>The router exists even without an OpenAI key; the first call then fails closed.
- *   <li>The daily cap lives in Valkey when a {@code StringRedisTemplate} bean exists, otherwise in
+ *   <li>The daily cap lives in Redis when a {@code StringRedisTemplate} bean exists, otherwise in
  *       memory (with a startup warning): that guard is per process and does not protect a shared
  *       budget.
  *   <li>Meters are registered only when a {@link MeterRegistry} bean exists.
@@ -74,22 +74,22 @@ public class ModelRouterAutoConfiguration {
 
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(StringRedisTemplate.class)
-    static class ValkeyCostGuardConfiguration {
+    static class RedisCostGuardConfiguration {
 
         @Bean
         @ConditionalOnMissingBean(CostGuard.class)
         @ConditionalOnBean(StringRedisTemplate.class)
-        CostGuard valkeyCostGuard(
+        CostGuard redisCostGuard(
                 StringRedisTemplate redisTemplate, RouterProperties properties, ObjectProvider<Clock> clock) {
-            return new ValkeyCostGuard(
+            return new RedisCostGuard(
                     redisTemplate, properties.dailyCapUsdMicros(), clock.getIfAvailable(Clock::systemUTC));
         }
 
         @Bean
         @ConditionalOnMissingBean(ScopedCostGuard.class)
         @ConditionalOnBean(StringRedisTemplate.class)
-        ScopedCostGuard valkeyScopedCostGuard(StringRedisTemplate redisTemplate) {
-            return new ValkeyScopedCostGuard(redisTemplate);
+        ScopedCostGuard redisScopedCostGuard(StringRedisTemplate redisTemplate) {
+            return new RedisScopedCostGuard(redisTemplate);
         }
     }
 
@@ -110,7 +110,7 @@ public class ModelRouterAutoConfiguration {
     CostGuard inMemoryCostGuard(RouterProperties properties, ObjectProvider<Clock> clock) {
         if (!"memory".equals(properties.costGuard())) {
             throw new IllegalStateException("No StringRedisTemplate bean, so the model router has no shared daily"
-                    + " cost cap. Configure Valkey (spring.data.redis.*), or set saiman.router.cost-guard=memory"
+                    + " cost cap. Configure Redis (spring.data.redis.*), or set saiman.router.cost-guard=memory"
                     + " to accept a per-process cap (tests, single-process demos only).");
         }
         log.warn("saiman.router.cost-guard=memory: the daily cost cap is counted in memory, per process,"

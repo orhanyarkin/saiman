@@ -3,6 +3,7 @@ package io.github.orhanyarkin.x402.server;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import io.github.orhanyarkin.saiman.testsupport.SharedContainers;
 import java.time.Duration;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -11,26 +12,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 /**
- * {@link RedisPaymentNonceStore} against a real Valkey server (Redis-protocol-compatible), per the
+ * {@link RedisPaymentNonceStore} against a real Redis server (the JVM's shared container), per the
  * acceptance criteria: claim/replay/TTL/release-is-compare-and-delete.
  *
- * <p>No {@code @ServiceConnection} here: as of Spring Boot 4.1.1, neither {@code
- * spring-boot-testcontainers} nor {@code spring-boot-autoconfigure} ships a Redis {@code
- * ConnectionDetailsFactory} for a generic container (unlike Postgres/Kafka), so the connection is
- * wired directly with a plain {@link LettuceConnectionFactory} instead.
+ * <p>No Spring context here: the store is built on a plain {@link LettuceConnectionFactory}.
  */
-@Testcontainers
 class RedisPaymentNonceStoreTests {
-
-    @Container
-    static final GenericContainer<?> VALKEY =
-            new GenericContainer<>(DockerImageName.parse("valkey/valkey:9.1.2-alpine")).withExposedPorts(6379);
 
     private static LettuceConnectionFactory connectionFactory;
 
@@ -38,8 +27,9 @@ class RedisPaymentNonceStoreTests {
 
     @BeforeAll
     static void startConnectionFactory() {
-        RedisStandaloneConfiguration configuration =
-                new RedisStandaloneConfiguration(VALKEY.getHost(), VALKEY.getMappedPort(6379));
+        RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration(
+                SharedContainers.redis().getHost(),
+                SharedContainers.redis().getMappedPort(SharedContainers.REDIS_PORT));
         connectionFactory = new LettuceConnectionFactory(configuration);
         connectionFactory.afterPropertiesSet();
     }

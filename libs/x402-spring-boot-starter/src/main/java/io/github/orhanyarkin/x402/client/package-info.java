@@ -8,7 +8,7 @@
  * always runs before any signing (rule 3 in {@code CLAUDE.md}: spend limits are deterministic code,
  * never a prompt instruction, and live outside the signature). {@link
  * io.github.orhanyarkin.x402.client.PropertiesSpendGuard} is the M1 default; M3 replaces it with a
- * Valkey/Postgres-backed implementation without changing {@link
+ * Redis/Postgres-backed implementation without changing {@link
  * io.github.orhanyarkin.x402.client.SpendGuard}'s contract.
  */
 @NullMarked

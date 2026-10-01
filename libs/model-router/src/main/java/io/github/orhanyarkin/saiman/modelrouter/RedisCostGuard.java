@@ -11,16 +11,16 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 
 /**
- * Daily counter shared by every service that talks to the same Valkey: key {@code
+ * Daily counter shared by every service that talks to the same Redis: key {@code
  * router:cost:{yyyy-MM-dd UTC}}, value in USD micro-dollars (settled costs plus outstanding
  * reservations). A new UTC day is a new key, so the cap rolls over without a job; keys expire after
  * two days. Reserving and settling are single Lua scripts, so check-and-add is atomic across
  * processes and a crash can never leave a counter without a TTL.
  *
- * <p>Fails closed: if Valkey is unreachable, or the counter is not a non-negative number, the
+ * <p>Fails closed: if Redis is unreachable, or the counter is not a non-negative number, the
  * exception propagates and the call is not made.
  */
-public final class ValkeyCostGuard implements CostGuard {
+public final class RedisCostGuard implements CostGuard {
 
     static final String KEY_PREFIX = "router:cost:";
     private static final Duration KEY_TTL = Duration.ofDays(2);
@@ -49,7 +49,7 @@ public final class ValkeyCostGuard implements CostGuard {
     private final long capUsdMicros;
     private final Clock clock;
 
-    public ValkeyCostGuard(StringRedisTemplate redis, long capUsdMicros, Clock clock) {
+    public RedisCostGuard(StringRedisTemplate redis, long capUsdMicros, Clock clock) {
         this.redis = redis;
         this.capUsdMicros = capUsdMicros;
         this.clock = clock;
@@ -65,13 +65,13 @@ public final class ValkeyCostGuard implements CostGuard {
                 Long.toString(capUsdMicros),
                 Long.toString(KEY_TTL.toSeconds()));
         if (result == null) {
-            throw new IllegalStateException("Valkey returned no value for the cost reservation");
+            throw new IllegalStateException("Redis returned no value for the cost reservation");
         }
         if (result == REFUSED) {
             throw new DailyCapExceededException("daily model cost cap reached (" + capUsdMicros + " USD micros)");
         }
         if (result == CORRUPT) {
-            throw new IllegalStateException("the daily cost counter in Valkey is negative");
+            throw new IllegalStateException("the daily cost counter in Redis is negative");
         }
         return new Reservation(day, estimate);
     }
@@ -97,10 +97,10 @@ public final class ValkeyCostGuard implements CostGuard {
             parsed = Long.parseLong(value);
         } catch (NumberFormatException e) {
             // never echo the stored value
-            throw new IllegalStateException("the daily cost counter in Valkey is not a number");
+            throw new IllegalStateException("the daily cost counter in Redis is not a number");
         }
         if (parsed < 0) {
-            throw new IllegalStateException("the daily cost counter in Valkey is negative");
+            throw new IllegalStateException("the daily cost counter in Redis is negative");
         }
         return Money.usdMicros(parsed);
     }

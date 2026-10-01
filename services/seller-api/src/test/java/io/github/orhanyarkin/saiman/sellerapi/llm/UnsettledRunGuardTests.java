@@ -3,7 +3,7 @@ package io.github.orhanyarkin.saiman.sellerapi.llm;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.orhanyarkin.saiman.sellerapi.testsupport.RagTestBase;
+import io.github.orhanyarkin.saiman.testsupport.SharedContainers;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.server.X402PaymentSettledEvent;
 import java.time.Clock;
@@ -23,7 +23,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
-/** The guard's atomic accounting against a real Valkey, and its fail-closed behaviour without one. */
+/** The guard's atomic accounting against a real Redis, and its fail-closed behaviour without one. */
 class UnsettledRunGuardTests {
 
     private static final String PAYER = "0xAbCdEf0000000000000000000000000000000001";
@@ -37,7 +37,8 @@ class UnsettledRunGuardTests {
     void connect() {
         if (factory == null) {
             factory = new LettuceConnectionFactory(new RedisStandaloneConfiguration(
-                    RagTestBase.VALKEY.getHost(), RagTestBase.VALKEY.getMappedPort(6379)));
+                    SharedContainers.redis().getHost(),
+                    SharedContainers.redis().getMappedPort(SharedContainers.REDIS_PORT)));
             factory.afterPropertiesSet();
             redis = new StringRedisTemplate(factory);
             redis.afterPropertiesSet();
@@ -162,7 +163,7 @@ class UnsettledRunGuardTests {
     }
 
     @Test
-    void failsClosedWhenValkeyIsUnavailable() {
+    void failsClosedWhenRedisIsUnavailable() {
         LettuceConnectionFactory dead = new LettuceConnectionFactory(new RedisStandaloneConfiguration("127.0.0.1", 1));
         dead.afterPropertiesSet();
         try {

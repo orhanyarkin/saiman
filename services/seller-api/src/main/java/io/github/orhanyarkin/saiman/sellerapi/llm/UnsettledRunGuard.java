@@ -35,7 +35,7 @@ import org.springframework.web.context.request.RequestContextHolder;
  * </ul>
  *
  * Every operation is one Lua script, so the checks and the counter updates are atomic across
- * concurrent requests and instances. All keys live under {@code seller:runs:}. When Valkey is
+ * concurrent requests and instances. All keys live under {@code seller:runs:}. When Redis is
  * unavailable the guard fails closed ({@link RunGuardUnavailableException}): no state, no model call.
  *
  * <p>Residual risk (documented, accepted for M2): an attacker with many funded wallets can still

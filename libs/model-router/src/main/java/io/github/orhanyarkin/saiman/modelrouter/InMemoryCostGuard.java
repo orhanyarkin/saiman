@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * Per-process daily counter, used only when explicitly requested with {@code
  * saiman.router.cost-guard=memory} (tests, single-process demos). Not shared between services, so a
- * shared budget is only enforced by {@link ValkeyCostGuard}. All operations run under one lock.
+ * shared budget is only enforced by {@link RedisCostGuard}. All operations run under one lock.
  */
 public final class InMemoryCostGuard implements CostGuard {
 

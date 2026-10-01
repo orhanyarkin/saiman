@@ -4,7 +4,7 @@ management:
     # Keep a developer's exported OTEL_* variables from sending test telemetry to a collector.
     map-environment-variables: false
 spring:
-  # No broker in most tests: publications stay incomplete (which tests inspect); the Redpanda test overrides
+  # No broker in most tests: publications stay incomplete (which tests inspect); the Kafka test overrides
   # these. A refused loopback port fails each send after max.block.ms instead of hanging.
   kafka:
     bootstrap-servers: 127.0.0.1:1

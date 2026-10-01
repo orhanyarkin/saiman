@@ -7,6 +7,7 @@ import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentHandle;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentStatus;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.SpendTestSupport;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
+import io.github.orhanyarkin.saiman.testsupport.KafkaContainerConfiguration;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,20 +19,19 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.modulith.events.IncompleteEventPublications;
 import org.springframework.test.context.TestPropertySource;
-import org.testcontainers.redpanda.RedpandaContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * The outbox against a real broker (Redpanda): published events reach their topics keyed by the payment key, and
+ * The outbox against a real broker (Kafka): published events reach their topics keyed by the payment key, and
  * with the broker unreachable a paid call still completes, its publications stay incomplete and are delivered
  * once the broker is back and they are resubmitted.
  */
+@Import(KafkaContainerConfiguration.class)
 @TestPropertySource(
         properties = {
             "spring.kafka.admin.auto-create=true",
@@ -39,10 +39,10 @@ import tools.jackson.databind.json.JsonMapper;
             "spring.kafka.producer.properties.request.timeout.ms=2000",
             "spring.kafka.producer.properties.delivery.timeout.ms=3000"
         })
-class RedpandaExternalizationTests extends SpendTestSupport {
+class KafkaExternalizationTests extends SpendTestSupport {
 
     @Autowired
-    private RedpandaContainer redpanda;
+    private KafkaContainer kafka;
 
     @Autowired
     private IncompleteEventPublications incomplete;
@@ -83,9 +83,7 @@ class RedpandaExternalizationTests extends SpendTestSupport {
                     .untilAsserted(() -> assertThat(incompleteCount()).isZero());
 
             // Broker unreachable: the paid call is not affected, the publications wait in the registry.
-            redpanda.getDockerClient()
-                    .pauseContainerCmd(redpanda.getContainerId())
-                    .exec();
+            kafka.getDockerClient().pauseContainerCmd(kafka.getContainerId()).exec();
             PaymentIntentHandle second;
             try {
                 second = newIntent(run);
@@ -95,8 +93,8 @@ class RedpandaExternalizationTests extends SpendTestSupport {
                         .atMost(Duration.ofSeconds(20))
                         .untilAsserted(() -> assertThat(incompleteCount()).isGreaterThanOrEqualTo(2));
             } finally {
-                redpanda.getDockerClient()
-                        .unpauseContainerCmd(redpanda.getContainerId())
+                kafka.getDockerClient()
+                        .unpauseContainerCmd(kafka.getContainerId())
                         .exec();
             }
 
@@ -126,7 +124,7 @@ class RedpandaExternalizationTests extends SpendTestSupport {
     private KafkaConsumer<String, String> consumer() {
         return new KafkaConsumer<>(Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
-                redpanda.getBootstrapServers(),
+                kafka.getBootstrapServers(),
                 ConsumerConfig.GROUP_ID_CONFIG,
                 "test-" + UUID.randomUUID(),
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
@@ -135,15 +133,5 @@ class RedpandaExternalizationTests extends SpendTestSupport {
                 StringDeserializer.class,
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
                 StringDeserializer.class));
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class RedpandaConfiguration {
-
-        @Bean
-        @ServiceConnection
-        RedpandaContainer redpanda() {
-            return new RedpandaContainer("redpandadata/redpanda:v26.2.3");
-        }
     }
 }

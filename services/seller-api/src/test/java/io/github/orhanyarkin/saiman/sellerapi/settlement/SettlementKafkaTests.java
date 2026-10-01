@@ -5,6 +5,7 @@ import static org.awaitility.Awaitility.await;
 
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.SettlementTestBase;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
+import io.github.orhanyarkin.saiman.testsupport.KafkaContainerConfiguration;
 import io.github.orhanyarkin.x402.core.PaymentPayload;
 import java.io.IOException;
 import java.time.Duration;
@@ -21,22 +22,19 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.test.context.TestPropertySource;
-import org.testcontainers.redpanda.RedpandaContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import tools.jackson.databind.JsonNode;
 
 /** The outbox against a real broker: the value is String JSON without {@code __TypeId__}, keyed by payment key. */
-@Import(SettlementRedpandaTests.RedpandaConfiguration.class)
+@Import(KafkaContainerConfiguration.class)
 @TestPropertySource(properties = "spring.kafka.admin.auto-create=true")
-class SettlementRedpandaTests extends SettlementTestBase {
+class SettlementKafkaTests extends SettlementTestBase {
 
     @Autowired
-    private RedpandaContainer redpanda;
+    private KafkaContainer kafka;
 
     @Test
     void aSettledPaymentReachesKafkaMatchingTheGoldenFixtureShape() throws IOException {
@@ -83,7 +81,7 @@ class SettlementRedpandaTests extends SettlementTestBase {
     private KafkaConsumer<String, String> consumer() {
         return new KafkaConsumer<>(Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
-                redpanda.getBootstrapServers(),
+                kafka.getBootstrapServers(),
                 ConsumerConfig.GROUP_ID_CONFIG,
                 "test-" + UUID.randomUUID(),
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
@@ -92,15 +90,5 @@ class SettlementRedpandaTests extends SettlementTestBase {
                 StringDeserializer.class,
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
                 StringDeserializer.class));
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class RedpandaConfiguration {
-
-        @Bean
-        @ServiceConnection
-        RedpandaContainer redpanda() {
-            return new RedpandaContainer("redpandadata/redpanda:v26.2.3");
-        }
     }
 }

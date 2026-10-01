@@ -9,7 +9,7 @@ dependencies {
 
     implementation(libs.spring.boot.starter.webmvc)
     implementation(libs.spring.boot.starter.restclient)
-    // Valkey holds the model router's daily USD cap (ADR-0011); the router refuses to start without a shared guard.
+    // Redis holds the model router's daily USD cap (ADR-0011); the router refuses to start without a shared guard.
     implementation(libs.spring.boot.starter.data.redis)
     implementation(libs.spring.boot.starter.jdbc)
     implementation(libs.spring.boot.starter.flyway)
@@ -25,6 +25,5 @@ dependencies {
 
     testImplementation(platform(libs.spring.ai.bom))
     testImplementation(libs.spring.boot.starter.webmvc.test)
-    testImplementation(libs.spring.boot.testcontainers)
-    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":libs:test-support")) // one Postgres per test JVM (ADR-0020)
 }

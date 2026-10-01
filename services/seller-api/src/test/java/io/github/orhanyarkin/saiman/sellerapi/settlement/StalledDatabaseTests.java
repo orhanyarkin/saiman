@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.sellerapi.settlement;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.SettlementTestBase;
+import io.github.orhanyarkin.saiman.testsupport.SharedContainers;
 import io.github.orhanyarkin.x402.core.X402Headers;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
@@ -21,8 +22,8 @@ class StalledDatabaseTests extends SettlementTestBase {
     /** Validation 1 s + insert 2 s + rollback 2 s of socket timeout, plus the settle call and margin. */
     private static final Duration BOUND = Duration.ofSeconds(9);
 
-    @Autowired
-    private PostgreSQLContainer postgres;
+    /** The JVM's shared Postgres server; nothing else runs while it is paused (test classes run one at a time). */
+    private final PostgreSQLContainer postgres = SharedContainers.postgres();
 
     @Autowired
     private MeterRegistry meters;

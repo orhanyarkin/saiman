@@ -1,23 +1,13 @@
 package io.github.orhanyarkin.saiman.sellerapi.testsupport;
 
+import io.github.orhanyarkin.saiman.testsupport.PostgresContainerConfiguration;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
-import org.testcontainers.postgresql.PostgreSQLContainer;
-import org.testcontainers.utility.DockerImageName;
+import org.springframework.context.annotation.Import;
 
 /**
- * Postgres for integration tests as a Spring bean: its lifecycle follows the (cached) application context, so
- * every test class sharing a context shares one container, and {@code @ServiceConnection} supplies the datasource
- * properties. Import it into every {@code @SpringBootTest}: the application now has a database.
+ * The shared Postgres (ADR-0020): one container per test JVM; each application context gets its own database on it.
+ * Import it into every {@code @SpringBootTest}: the application has a database. Same images as deploy/compose.
  */
 @TestConfiguration(proxyBeanMethods = false)
-public class TestcontainersConfiguration {
-
-    @Bean
-    @ServiceConnection
-    PostgreSQLContainer postgres() {
-        return new PostgreSQLContainer(
-                DockerImageName.parse("pgvector/pgvector:0.8.6-pg17-trixie").asCompatibleSubstituteFor("postgres"));
-    }
-}
+@Import(PostgresContainerConfiguration.class)
+public class TestcontainersConfiguration {}

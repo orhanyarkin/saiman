@@ -61,9 +61,7 @@ dependencies {
     testImplementation(libs.spring.boot.starter.webmvc.test)
     testImplementation(libs.spring.boot.starter.restclient)
     testImplementation(libs.spring.boot.starter.data.redis)
-    testImplementation(libs.spring.boot.testcontainers)
-    testImplementation(libs.testcontainers)
-    testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(project(":libs:test-support")) // one Redis per test JVM (ADR-0020); test-only, not published
     testImplementation(libs.spring.boot.micrometer.tracing.test)
     testImplementation(libs.opentelemetry.sdk.testing)
 }

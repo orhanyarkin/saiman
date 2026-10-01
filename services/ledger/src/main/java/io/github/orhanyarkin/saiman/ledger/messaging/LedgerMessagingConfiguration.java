@@ -160,7 +160,7 @@ public class LedgerMessagingConfiguration {
     /**
      * The dead-letter record keeps only the recoverer's own {@code kafka_dlt-*} headers, at most
      * {@value #MAX_DLT_HEADERS} of them and each value cut to {@value #MAX_DLT_HEADER_BYTES} bytes. The source
-     * record's headers are attacker-controlled (Redpanda is unauthenticated until M6) and are dropped, so a forged
+     * record's headers are attacker-controlled (Kafka is unauthenticated until M6) and are dropped, so a forged
      * record cannot grow past the broker's size limit on its way to quarantine.
      */
     static Headers boundedHeaders(Headers headers) {

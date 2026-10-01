@@ -8,15 +8,15 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 
 /**
- * Scoped guard shared by every process that talks to the same Valkey: one hash per scope, key
+ * Scoped guard shared by every process that talks to the same Redis: one hash per scope, key
  * {@code run:{scopeId}:llm}, fields {@code budget} (pinned by the first reservation, {@code HSETNX})
  * and {@code spent} (USD micro-dollars). Reserving and settling are single Lua scripts, so
  * check-and-add is atomic and a crash never leaves a hash without a TTL (one day; a run is short).
  *
- * <p>Fails closed: if Valkey is unreachable, or the stored numbers are corrupt, the exception
+ * <p>Fails closed: if Redis is unreachable, or the stored numbers are corrupt, the exception
  * propagates and the call is not made.
  */
-public final class ValkeyScopedCostGuard implements ScopedCostGuard {
+public final class RedisScopedCostGuard implements ScopedCostGuard {
 
     static final Duration TTL = Duration.ofDays(1);
     private static final long REFUSED = -1;
@@ -42,7 +42,7 @@ public final class ValkeyScopedCostGuard implements ScopedCostGuard {
 
     private final StringRedisTemplate redis;
 
-    public ValkeyScopedCostGuard(StringRedisTemplate redis) {
+    public RedisScopedCostGuard(StringRedisTemplate redis) {
         this.redis = redis;
     }
 
@@ -56,13 +56,13 @@ public final class ValkeyScopedCostGuard implements ScopedCostGuard {
                 Long.toString(budget.atomicUnits()),
                 Long.toString(TTL.toSeconds()));
         if (result == null) {
-            throw new IllegalStateException("Valkey returned no value for the scope reservation");
+            throw new IllegalStateException("Redis returned no value for the scope reservation");
         }
         if (result == REFUSED) {
             throw new ScopeBudgetExceededException("model cost budget of the run is exhausted");
         }
         if (result == CORRUPT) {
-            throw new IllegalStateException("the scope cost counter in Valkey is corrupt");
+            throw new IllegalStateException("the scope cost counter in Redis is corrupt");
         }
         return new ScopeReservation(scopeId, estimate);
     }
@@ -92,7 +92,7 @@ public final class ValkeyScopedCostGuard implements ScopedCostGuard {
         } catch (NumberFormatException e) {
             // fall through: never echo the stored value
         }
-        throw new IllegalStateException("the scope cost counter in Valkey is corrupt");
+        throw new IllegalStateException("the scope cost counter in Redis is corrupt");
     }
 
     static String key(String scopeId) {
