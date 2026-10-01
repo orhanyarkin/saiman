@@ -67,6 +67,34 @@ class PaymentEventParserTests {
         assertMalformed(() -> parser.authorized(forged));
     }
 
+    /**
+     * Control characters and other bytes outside the id charsets would fail in Postgres (a NUL in a text column) on
+     * every redelivery; the shared record rejects them, and the parser must surface that as malformed.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"\\u0000", "\\n", "\\u007f", " ", "%", "\\u00e9"})
+    void controlOrForeignCharacterInEventIdIsMalformed(String injected) {
+        var authorized = payment.authorized();
+        String eventId = authorized.meta().eventId();
+        String forged = json.writeValueAsString(authorized)
+                .replace("\"eventId\":\"" + eventId + "\"", "\"eventId\":\"" + injected + eventId.substring(1) + "\"");
+        assertThat(forged).contains("\"eventId\":\"" + injected + eventId.substring(1) + "\"");
+
+        assertMalformed(() -> parser.authorized(forged));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\\u0000", "\\t", "\\u2028", "a b", "'"})
+    void controlOrForeignCharacterInCorrelationIdIsMalformed(String injected) {
+        var settled = payment.buyerSettled();
+        String correlationId = settled.meta().correlationId();
+        String forged = json.writeValueAsString(settled)
+                .replace("\"correlationId\":\"" + correlationId + "\"", "\"correlationId\":\"run" + injected + "\"");
+        assertThat(forged).contains("\"correlationId\":\"run" + injected + "\"");
+
+        assertMalformed(() -> parser.settled(forged));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"null", "\"2024-12-31T23:59:59Z\"", "\"2026-10-02T12:00:01Z\""})
     void occurredAtMissingOrOutOfRangeIsMalformed(String occurredAt) {

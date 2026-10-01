@@ -8,11 +8,14 @@ import io.github.orhanyarkin.saiman.ledger.LedgerIntegrationTest;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentProjection;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentRepository;
 import io.github.orhanyarkin.saiman.ledger.payment.TestPayment;
+import io.github.orhanyarkin.saiman.ledger.pbt.Pbt;
 import io.github.orhanyarkin.saiman.shared.ledger.EntryPosted;
 import io.github.orhanyarkin.saiman.shared.ledger.LedgerTopics;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentAuthorized;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentSettled;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -44,6 +47,16 @@ class PaymentEventsKafkaTests {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
 
+    /**
+     * Payments are generated from the run's base seed ({@code -Dsaiman.pbt.seed}), split per payment so tests
+     * sharing the database never generate the same payment.
+     */
+    private static final SplittableRandom SEEDS = new SplittableRandom(Pbt.seedOf(1_000_000));
+
+    private static synchronized SplittableRandom random() {
+        return SEEDS.split();
+    }
+
     @Autowired
     private KafkaTemplate<String, String> kafka;
 
@@ -59,9 +72,12 @@ class PaymentEventsKafkaTests {
     @Autowired
     private JdbcClient jdbc;
 
+    @Autowired
+    private MeterRegistry meters;
+
     @Test
     void reorderedAndDuplicatedDeliveryPostsEachEntryOnceAndPublishesEntryPosted() throws Exception {
-        TestPayment payment = TestPayment.random(new SplittableRandom(), 20_000);
+        TestPayment payment = TestPayment.random(random(), 20_000);
         PaymentSettled buyerSettled = payment.buyerSettled();
         PaymentSettled sellerSettled = payment.sellerSettled();
         PaymentAuthorized authorized = payment.authorized();
@@ -144,7 +160,7 @@ class PaymentEventsKafkaTests {
 
     @Test
     void unknownFieldIsRejectedToTheDeadLetterTopicAndBooksNothing() throws Exception {
-        TestPayment payment = TestPayment.random(new SplittableRandom(), 20_000);
+        TestPayment payment = TestPayment.random(random(), 20_000);
         String valid = json.writeValueAsString(payment.authorized());
         String withExtra = valid.substring(0, valid.length() - 1) + ",\"surprise\":1}";
 
@@ -157,7 +173,7 @@ class PaymentEventsKafkaTests {
 
     @Test
     void forgedNonUsdcTwinOfABookedPaymentIsDeadLetteredAndBooksNothing() throws Exception {
-        TestPayment payment = TestPayment.random(new SplittableRandom(), 20_000);
+        TestPayment payment = TestPayment.random(random(), 20_000);
         String real = json.writeValueAsString(payment.buyerSettled());
         send(PaymentTopics.SETTLED, payment.key(), real);
         await().atMost(TIMEOUT)
@@ -195,7 +211,7 @@ class PaymentEventsKafkaTests {
 
     @Test
     void conflictingFactIsDeadLetteredAndLeavesAConflictingFactMismatch() throws Exception {
-        TestPayment payment = TestPayment.random(new SplittableRandom(), 20_000);
+        TestPayment payment = TestPayment.random(random(), 20_000);
         send(PaymentTopics.AUTHORIZED, payment.key(), json.writeValueAsString(payment.authorized()));
         await().atMost(TIMEOUT)
                 .untilAsserted(() -> assertThat(kinds(payment.key())).containsExactly("ENCUMBER"));
@@ -215,41 +231,130 @@ class PaymentEventsKafkaTests {
     }
 
     /**
-     * A non-deterministic failure (here: the inbox insert raises, as a dead or failing database would) is retried
-     * with back-off, never dead-lettered; once the database recovers, the same record is booked.
+     * A record whose event id carries a NUL (Postgres rejects it in a text column on every attempt) is malformed:
+     * quarantined on its first delivery, so the valid record behind it on the same partition is booked at once.
      */
     @Test
-    void transientDatabaseFailureIsRetriedNotDeadLetteredAndBooksAfterRecovery() throws Exception {
-        TestPayment payment = TestPayment.random(new SplittableRandom(), 20_000);
+    void nulInEventIdIsQuarantinedAndTheNextRecordIsBookedRightAway() throws Exception {
+        TestPayment forged = TestPayment.random(random(), 20_000);
+        PaymentAuthorized authorized = forged.authorized();
+        String eventId = authorized.meta().eventId();
+        String poison = json.writeValueAsString(authorized)
+                .replace("\"eventId\":\"" + eventId + "\"", "\"eventId\":\"\\u0000" + eventId.substring(1) + "\"");
+        assertThat(poison).contains("\"eventId\":\"\\u0000" + eventId.substring(1) + "\"");
+        double quarantinedBefore = dltCount(PaymentTopics.AUTHORIZED, "published");
+        TestPayment next = TestPayment.random(random(), 20_000);
+
+        send(PaymentTopics.AUTHORIZED, forged.key(), poison);
+        send(PaymentTopics.AUTHORIZED, next.key(), json.writeValueAsString(next.authorized()));
+
+        await().atMost(Duration.ofSeconds(15))
+                .untilAsserted(() -> assertThat(kinds(next.key())).containsExactly("ENCUMBER"));
+        assertThat(drainValues(PaymentTopics.AUTHORIZED + LedgerMessagingConfiguration.DLT_SUFFIX, poison))
+                .containsExactly(poison);
+        assertThat(dltCount(PaymentTopics.AUTHORIZED, "published")).isEqualTo(quarantinedBefore + 1);
+        assertThat(payments.findByKey(forged.key())).isEmpty();
+    }
+
+    /**
+     * A constraint violation raised by the database fails the same way on every delivery: it is quarantined on the
+     * first attempt (the trigger runs exactly once), not retried.
+     */
+    @Test
+    void dataIntegrityViolationIsQuarantinedWithoutRetry() throws Exception {
+        TestPayment payment = TestPayment.random(random(), 20_000);
         PaymentAuthorized authorized = payment.authorized();
         String value = json.writeValueAsString(authorized);
-        String suffix = UUID.randomUUID().toString().replace("-", "");
-        jdbc.sql("""
-                        CREATE FUNCTION outage_%1$s() RETURNS trigger LANGUAGE plpgsql AS $$
-                        BEGIN
-                            IF NEW.event_id = '%2$s' THEN
-                                RAISE EXCEPTION 'simulated outage' USING ERRCODE = '08006';
-                            END IF;
-                            RETURN NEW;
-                        END $$
-                        """.formatted(suffix, authorized.meta().eventId())).update();
-        jdbc.sql("CREATE TRIGGER outage_%1$s BEFORE INSERT ON inbox FOR EACH ROW EXECUTE FUNCTION outage_%1$s()"
-                        .formatted(suffix))
-                .update();
+        String trigger = failingInboxTrigger(authorized.meta().eventId(), "23514", "simulated check violation");
         try {
             send(PaymentTopics.AUTHORIZED, payment.key(), value);
-            await().pollDelay(Duration.ofSeconds(4))
-                    .atMost(TIMEOUT)
-                    .untilAsserted(() -> assertThat(kinds(payment.key())).isEmpty());
+
+            assertThat(drainValues(PaymentTopics.AUTHORIZED + LedgerMessagingConfiguration.DLT_SUFFIX, value))
+                    .containsExactly(value);
+            assertThat(attempts(trigger)).isEqualTo(1L);
         } finally {
-            jdbc.sql("DROP TRIGGER outage_%1$s ON inbox".formatted(suffix)).update();
-            jdbc.sql("DROP FUNCTION outage_%1$s()".formatted(suffix)).update();
+            dropFailingInboxTrigger(trigger);
+        }
+        assertThat(inboxed(authorized.meta().eventId())).isFalse();
+        assertThat(kinds(payment.key())).isEmpty();
+    }
+
+    /**
+     * A lost connection (SQLSTATE 08006, which Spring translates to DataAccessResourceFailureException, a
+     * NonTransientDataAccessException subtype) is retried with back-off, never dead-lettered; once the database
+     * recovers, the same record is booked.
+     */
+    @Test
+    void connectionFailureIsRetriedNotDeadLetteredAndBooksAfterRecovery() throws Exception {
+        TestPayment payment = TestPayment.random(random(), 20_000);
+        PaymentAuthorized authorized = payment.authorized();
+        String value = json.writeValueAsString(authorized);
+        double dltBefore = quarantined(PaymentTopics.AUTHORIZED);
+        String trigger = failingInboxTrigger(authorized.meta().eventId(), "08006", "simulated outage");
+        try {
+            send(PaymentTopics.AUTHORIZED, payment.key(), value);
+            await().atMost(TIMEOUT)
+                    .untilAsserted(() -> assertThat(attempts(trigger)).isGreaterThanOrEqualTo(3L));
+            assertThat(kinds(payment.key())).isEmpty();
+        } finally {
+            dropFailingInboxTrigger(trigger);
         }
 
         await().atMost(TIMEOUT)
                 .untilAsserted(() -> assertThat(kinds(payment.key())).containsExactly("ENCUMBER"));
+        assertThat(quarantined(PaymentTopics.AUTHORIZED)).isEqualTo(dltBefore);
         assertThat(valuesOn(PaymentTopics.AUTHORIZED + LedgerMessagingConfiguration.DLT_SUFFIX, Duration.ofSeconds(3)))
                 .doesNotContain(value);
+    }
+
+    /**
+     * Installs a BEFORE INSERT trigger on the inbox that raises {@code sqlState} for {@code eventId}. Every attempt
+     * first bumps a sequence, which a rollback does not undo, so the test can count deliveries. Returns the suffix
+     * of the created objects.
+     */
+    private String failingInboxTrigger(String eventId, String sqlState, String message) {
+        String suffix = UUID.randomUUID().toString().replace("-", "");
+        jdbc.sql("CREATE SEQUENCE attempts_%s".formatted(suffix)).update();
+        jdbc.sql("""
+                        CREATE FUNCTION fail_%1$s() RETURNS trigger LANGUAGE plpgsql AS $$
+                        BEGIN
+                            IF NEW.event_id = '%2$s' THEN
+                                PERFORM nextval('attempts_%1$s');
+                                RAISE EXCEPTION '%4$s' USING ERRCODE = '%3$s';
+                            END IF;
+                            RETURN NEW;
+                        END $$
+                        """.formatted(suffix, eventId, sqlState, message)).update();
+        jdbc.sql("CREATE TRIGGER fail_%1$s BEFORE INSERT ON inbox FOR EACH ROW EXECUTE FUNCTION fail_%1$s()"
+                        .formatted(suffix))
+                .update();
+        return suffix;
+    }
+
+    private void dropFailingInboxTrigger(String suffix) {
+        jdbc.sql("DROP TRIGGER fail_%1$s ON inbox".formatted(suffix)).update();
+        jdbc.sql("DROP FUNCTION fail_%1$s()".formatted(suffix)).update();
+        jdbc.sql("DROP SEQUENCE attempts_%s".formatted(suffix)).update();
+    }
+
+    /** Delivery attempts that reached the failing trigger (0 before the first one). */
+    private long attempts(String suffix) {
+        return jdbc.sql("SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM attempts_%s".formatted(suffix))
+                .query(Long.class)
+                .single();
+    }
+
+    /** Records of {@code topic} the recoverer dead-lettered, deterministic or exhausted. */
+    private double quarantined(String topic) {
+        return dltCount(topic, "published") + dltCount(topic, "exhausted");
+    }
+
+    private double dltCount(String topic, String outcome) {
+        Counter counter = meters.find(QuarantineRecoverer.METRIC)
+                .tag("topic", topic)
+                .tag("outcome", outcome)
+                .counter();
+        return counter == null ? 0 : counter.count();
     }
 
     /**
@@ -264,7 +369,7 @@ class PaymentEventsKafkaTests {
             record.headers().add("junk-" + i, new byte[4096]);
         }
         kafka.send(record).get();
-        TestPayment next = TestPayment.random(new SplittableRandom(), 20_000);
+        TestPayment next = TestPayment.random(random(), 20_000);
         send(PaymentTopics.AUTHORIZED, next.key(), json.writeValueAsString(next.authorized()));
 
         await().atMost(TIMEOUT)

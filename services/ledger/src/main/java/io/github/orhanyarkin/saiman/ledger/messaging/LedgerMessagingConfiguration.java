@@ -33,7 +33,9 @@ import org.springframework.kafka.support.converter.StringJacksonJsonMessageConve
 import org.springframework.messaging.Message;
 import org.springframework.modulith.events.EventExternalizationConfiguration;
 import org.springframework.modulith.events.RoutingTarget;
+import org.springframework.util.backoff.BackOff;
 import org.springframework.util.backoff.ExponentialBackOff;
+import org.springframework.util.backoff.FixedBackOff;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -45,11 +47,13 @@ import tools.jackson.databind.json.JsonMapper;
  *       routing is configured here instead of with {@code @Externalized} on the type.
  *   <li><b>Converter:</b> a String JSON converter replaces Modulith's default byte-array one, so the template keeps
  *       String serializers (shared with the dead-letter publisher), and it writes no {@code __TypeId__} header.
- *   <li><b>Errors:</b> a malformed or conflicting record is quarantined at once to {@code <topic>.ledger-dlt}
- *       (bounded headers, no stack trace; counter {@code saiman.ledger.dlt}); if even that send fails the record is
- *       counted and skipped, so poison never blocks the partition. Anything else (database down, lock timeout) is
- *       non-deterministic and retried with exponential back-off (1 s doubling to 30 s, jittered) until it succeeds:
- *       a transient error never dead-letters a valid fact.
+ *   <li><b>Errors</b> ({@link RecordFailure}): a record that fails the same way on every delivery (malformed,
+ *       conflicting, a constraint or data error from the database) is quarantined at once to {@code
+ *       <topic>.ledger-dlt} (bounded headers, no stack trace; counter {@code saiman.ledger.dlt}); if even that send
+ *       fails the record is counted and skipped, so poison never blocks the partition. Connection, timeout and lock
+ *       errors are retried with exponential back-off (1 s doubling to 30 s, jittered) until they succeed: an outage
+ *       never dead-letters a valid fact. Anything unclassified (a bug) is retried the same way for at most
+ *       {@link #UNKNOWN_RETRY_LIMIT}, then quarantined with {@code outcome=exhausted}.
  *   <li><b>Topics:</b> single-partition topics for local and compose use; creating one that exists is a no-op.
  * </ul>
  */
@@ -64,6 +68,9 @@ public class LedgerMessagingConfiguration {
 
     /** Well below {@code max.poll.interval.ms} (5 min), so a retry sleep never gets the consumer evicted. */
     static final Duration MAX_BACKOFF = Duration.ofSeconds(30);
+
+    /** How long a failure that is neither deterministic nor transient is retried before it is quarantined. */
+    static final Duration UNKNOWN_RETRY_LIMIT = Duration.ofHours(1);
 
     static final int MAX_DLT_HEADERS = 16;
     static final int MAX_DLT_HEADER_BYTES = 256;
@@ -123,12 +130,31 @@ public class LedgerMessagingConfiguration {
                 DeadLetterPublishingRecoverer.HeaderNames.HeadersToAdd.EX_MSG,
                 DeadLetterPublishingRecoverer.HeaderNames.HeadersToAdd.EX_CAUSE,
                 DeadLetterPublishingRecoverer.HeaderNames.HeadersToAdd.EX_STACKTRACE);
+        BackOff transientBackOff = backOff(null);
+        BackOff unknownBackOff = backOff(UNKNOWN_RETRY_LIMIT);
+        var handler = new DefaultErrorHandler(new QuarantineRecoverer(publisher, meters), transientBackOff);
+        handler.addNotRetryableExceptions(MalformedPaymentEventException.class, ConflictingFactException.class);
+        // The handler's own classification only knows exception types; RecordFailure also walks the causes and
+        // separates a lost connection (a NonTransientDataAccessException subtype in Spring) from a constraint
+        // violation. A deterministic failure gets a back-off that stops at once, so it is quarantined on the first
+        // delivery.
+        handler.setBackOffFunction((record, exception) -> switch (RecordFailure.classify(exception)) {
+            case DETERMINISTIC -> new FixedBackOff(0, 0);
+            case TRANSIENT -> transientBackOff;
+            case UNKNOWN -> unknownBackOff;
+        });
+        return handler;
+    }
+
+    /** Exponential back-off, 1 s doubling to 30 s, jittered; unlimited unless {@code maxElapsed} is given. */
+    private static BackOff backOff(@Nullable Duration maxElapsed) {
         var backOff = new ExponentialBackOff(INITIAL_BACKOFF.toMillis(), 2.0);
         backOff.setMaxInterval(MAX_BACKOFF.toMillis());
         backOff.setJitter(INITIAL_BACKOFF.toMillis() / 2);
-        var handler = new DefaultErrorHandler(new QuarantineRecoverer(publisher, meters), backOff);
-        handler.addNotRetryableExceptions(MalformedPaymentEventException.class, ConflictingFactException.class);
-        return handler;
+        if (maxElapsed != null) {
+            backOff.setMaxElapsedTime(maxElapsed.toMillis());
+        }
+        return backOff;
     }
 
     /**

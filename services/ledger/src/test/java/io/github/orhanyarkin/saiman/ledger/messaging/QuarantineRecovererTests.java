@@ -26,6 +26,14 @@ class QuarantineRecovererTests {
     }
 
     @Test
+    void recordWhoseBoundedRetriesRanOutIsCountedAsExhausted() {
+        new QuarantineRecoverer((r, c, e) -> {}, meters).accept(record, null, new IllegalStateException("bug"));
+
+        assertThat(count("exhausted")).isEqualTo(1.0);
+        assertThat(count("published")).isZero();
+    }
+
+    @Test
     void failedDeadLetterSendIsCountedAndSkippedInsteadOfThrown() {
         var recoverer = new QuarantineRecoverer(
                 (r, c, e) -> {
