@@ -64,6 +64,15 @@ RUN_QUESTION='...'` starts a run and streams its events; `make research-approve`
 Then `make infra-up && make ingest-backfill` loads disclosures, `make ingest-status` shows
 per-ticker progress, and `make rag-ask` pays (test USDC) for a question.
 
+## M4: ledger and reconciliation
+
+With `make up`, the ledger (port 8082, loopback only, no authentication until M6) books payment
+events into a double-entry ledger and reconciles them against Base Sepolia through the public
+RPC. `make recon-run` triggers a run, `make recon-report` prints and saves the latest report
+(`build/reports/reconciliation/latest.json`), `make ledger-balance` shows the trial balance, and
+`make ledger-tamper-demo` (local compose only) corrupts a SALE entry on purpose so the next
+`make recon-run recon-report` shows a mismatch.
+
 ## Quickstart (x402, Base Sepolia testnet)
 
 The x402 starter is fail-closed: `make up` refuses to start without a valid seller payout
