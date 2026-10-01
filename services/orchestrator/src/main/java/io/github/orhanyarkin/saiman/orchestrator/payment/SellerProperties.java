@@ -12,14 +12,23 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param baseUrl scheme, host and optional port of the seller-api, e.g. {@code
  *     http://seller-api:8081}; no path, query, fragment or user info
  * @param connectTimeout TCP connect timeout
- * @param readTimeout read timeout; above the seller's own handler deadline, so a slow answer is not
- *     cut off while the seller still settles (a cut-off paid call becomes a held reservation)
+ * @param readTimeout read timeout of the paying client, at least {@link #MIN_READ_TIMEOUT}: the
+ *     seller buffers a paid answer until the facilitator's {@code /settle} returns, so a settled 200
+ *     can arrive as late as the authorization's {@code validBefore}, which the starter sets at most
+ *     60 s ahead ({@code X402PaymentInterceptor.MAX_VALIDITY_SECONDS}). A shorter timeout cuts off
+ *     answers the seller has already settled (the paid call then becomes a held reservation)
  */
 @ConfigurationProperties("saiman.orchestrator.seller")
 public record SellerProperties(
         @DefaultValue("http://seller-api:8081") URI baseUrl,
         @DefaultValue("5s") Duration connectTimeout,
-        @DefaultValue("35s") Duration readTimeout) {
+        @DefaultValue("65s") Duration readTimeout) {
+
+    /**
+     * The smallest read timeout startup accepts: the starter's 60 s authorization validity (the
+     * latest a settled answer can arrive) plus a 5 s margin for the response to travel.
+     */
+    public static final Duration MIN_READ_TIMEOUT = Duration.ofSeconds(65);
 
     public SellerProperties {
         String scheme = baseUrl.getScheme();
@@ -41,6 +50,11 @@ public record SellerProperties(
                 || readTimeout.isNegative()
                 || readTimeout.isZero()) {
             throw new IllegalArgumentException("saiman.orchestrator.seller timeouts must be positive");
+        }
+        if (readTimeout.compareTo(MIN_READ_TIMEOUT) < 0) {
+            throw new IllegalArgumentException("saiman.orchestrator.seller.read-timeout must be at least "
+                    + MIN_READ_TIMEOUT.toSeconds()
+                    + "s: a settled answer can arrive up to the authorization's validBefore (at most 60 s ahead)");
         }
     }
 }

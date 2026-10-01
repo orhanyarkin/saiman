@@ -28,6 +28,9 @@ saiman:
   orchestrator:
     seller:
       base-url: ${SAIMAN_SELLER_BASE_URL:http://seller-api:8081} # config only; no tool takes a URL
+      # The seller answers a paid call only after /settle, up to validBefore (<= 60 s ahead): startup
+      # refuses anything below 65s.
+      read-timeout: 65s
     # Spend control (ADR-0013). USDC atomic units (6 decimals): 10000 = 0.01 USDC.
     spend:
       daily-cap-atomic: 1000000

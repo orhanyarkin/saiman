@@ -19,6 +19,7 @@ import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -67,6 +68,7 @@ public final class FakeSeller {
     private volatile String paidBody = DEFAULT_PAID_BODY;
     private volatile List<String> tickers = DEFAULT_TICKERS;
     private volatile boolean tickersFail;
+    private volatile Duration paidDelay = Duration.ZERO;
     private final Map<String, Long> pricePerPath = new ConcurrentHashMap<>();
     private final Map<String, String> payToPerPath = new ConcurrentHashMap<>();
     private final List<SeenRequest> requests = new CopyOnWriteArrayList<>();
@@ -117,6 +119,7 @@ public final class FakeSeller {
         paidBody = DEFAULT_PAID_BODY;
         tickers = DEFAULT_TICKERS;
         tickersFail = false;
+        paidDelay = Duration.ZERO;
         pricePerPath.clear();
         payToPerPath.clear();
         requests.clear();
@@ -164,6 +167,14 @@ public final class FakeSeller {
     /** The JSON body a settled paid request answers with (untrusted tool output in the tests). */
     public void paidBody(String json) {
         this.paidBody = json;
+    }
+
+    /**
+     * Holds a settled answer back this long before sending it, as the real seller does while it
+     * waits for the facilitator's {@code /settle}.
+     */
+    public void paidDelay(Duration delay) {
+        this.paidDelay = delay;
     }
 
     /** The free ticker catalogue. */
@@ -293,6 +304,7 @@ public final class FakeSeller {
                         null);
                 exchange.getResponseHeaders()
                         .add(X402Headers.PAYMENT_RESPONSE, codec.encodeSettlementResponse(settled));
+                sleep(paidDelay);
                 write(exchange, 200, paidBody);
             }
         }
@@ -305,6 +317,18 @@ public final class FakeSeller {
                         "http://127.0.0.2:" + redirectTarget.getAddress().getPort() + "/steal");
         exchange.sendResponseHeaders(302, -1);
         exchange.close();
+    }
+
+    private static void sleep(Duration delay) throws IOException {
+        if (delay.isZero()) {
+            return;
+        }
+        try {
+            Thread.sleep(delay);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("interrupted while delaying the paid answer", e);
+        }
     }
 
     private static void write(HttpExchange exchange, int status, String json) throws IOException {
