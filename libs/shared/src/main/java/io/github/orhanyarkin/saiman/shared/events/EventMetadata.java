@@ -15,16 +15,20 @@ import java.util.regex.Pattern;
 public record EventMetadata(String eventId, Instant occurredAt, String producer, String correlationId) {
 
     private static final Pattern PRODUCER = Pattern.compile("[a-z][a-z-]{1,31}");
+    /** Ids reach database text columns: a bounded charset keeps one forged record from failing a consumer forever. */
+    private static final Pattern ID = Pattern.compile("[A-Za-z0-9-]{1,64}");
+
+    private static final Pattern CORRELATION = Pattern.compile("[A-Za-z0-9:_-]{0,64}");
 
     public EventMetadata {
-        if (eventId.isBlank() || eventId.length() > 64) {
-            throw new IllegalArgumentException("eventId must be 1-64 characters");
+        if (!ID.matcher(eventId).matches()) {
+            throw new IllegalArgumentException("eventId must be 1-64 letters, digits or hyphens");
         }
         if (!PRODUCER.matcher(producer).matches()) {
             throw new IllegalArgumentException("producer must be a lower-case service name");
         }
-        if (correlationId.length() > 64) {
-            throw new IllegalArgumentException("correlationId must be at most 64 characters");
+        if (!CORRELATION.matcher(correlationId).matches()) {
+            throw new IllegalArgumentException("correlationId must be at most 64 letters, digits, ':', '_' or '-'");
         }
     }
 }

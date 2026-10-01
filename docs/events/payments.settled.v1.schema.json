@@ -25,8 +25,7 @@
       "properties": {
         "eventId": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 64
+          "pattern": "^[A-Za-z0-9-]{1,64}$"
         },
         "occurredAt": {
           "type": "string",
@@ -38,7 +37,7 @@
         },
         "correlationId": {
           "type": "string",
-          "maxLength": 64
+          "pattern": "^[A-Za-z0-9:_-]{0,64}$"
         }
       }
     },
