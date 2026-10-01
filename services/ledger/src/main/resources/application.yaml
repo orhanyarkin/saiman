@@ -4,6 +4,42 @@ spring:
   threads:
     virtual:
       enabled: true
+  mvc:
+    problemdetails:
+      enabled: true
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/saiman}
+    username: ${SPRING_DATASOURCE_USERNAME:saiman}
+    password: ${SPRING_DATASOURCE_PASSWORD:saiman}
+    hikari:
+      schema: ledger
+  flyway:
+    schemas: ledger
+    default-schema: ledger
+    create-schemas: true
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ledger
+      # A new ledger reads the whole history; the inbox makes redelivery harmless.
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    listener:
+      ack-mode: record
+      observation-enabled: true
+    template:
+      observation-enabled: true
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+  # Modulith's registry table is created by Flyway (V1__ledger.sql) in schema `ledger`; the registry
+  # trigger annotation, republish-on-restart and completion mode come from libs/eventing (ADR-0016).
+  modulith:
+    events:
+      jdbc:
+        schema-initialization:
+          enabled: false
 
 server:
   port: 8082
