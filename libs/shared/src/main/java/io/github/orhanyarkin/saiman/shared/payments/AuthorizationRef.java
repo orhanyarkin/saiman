@@ -17,6 +17,12 @@ public record AuthorizationRef(String network, String asset, String payer, Strin
 
     public static final String BASE_SEPOLIA = "eip155:84532";
 
+    /** Test USDC on Base Sepolia, the only asset this system pays or books. */
+    public static final String USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+
+    /** 2100-01-01T00:00:00Z: an upper bound so a forged validBefore cannot overflow date arithmetic downstream. */
+    public static final long MAX_VALID_BEFORE = 4_102_444_800L;
+
     private static final Pattern ADDRESS = Pattern.compile("0x[0-9a-fA-F]{40}");
     private static final Pattern NONCE = Pattern.compile("0x[0-9a-fA-F]{64}");
 
@@ -30,8 +36,11 @@ public record AuthorizationRef(String network, String asset, String payer, Strin
         if (!NONCE.matcher(nonce).matches()) {
             throw new IllegalArgumentException("nonce must be 32 bytes of hex");
         }
-        if (validBefore <= 0) {
-            throw new IllegalArgumentException("validBefore must be positive");
+        if (!USDC.equalsIgnoreCase(asset)) {
+            throw new IllegalArgumentException("only Base Sepolia test USDC is supported");
+        }
+        if (validBefore <= 0 || validBefore >= MAX_VALID_BEFORE) {
+            throw new IllegalArgumentException("validBefore must be positive and before 2100");
         }
     }
 

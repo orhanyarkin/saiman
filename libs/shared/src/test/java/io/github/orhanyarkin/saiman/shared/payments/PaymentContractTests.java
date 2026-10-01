@@ -96,4 +96,21 @@ class PaymentContractTests {
                         META, UUID.randomUUID(), UUID.randomUUID(), "SALE", List.of(debit, credit), Instant.EPOCH))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void forgedBoundsAreRejected() {
+        assertThatThrownBy(() -> new AuthorizationRef("eip155:84532", USDC, PAYER, NONCE, Long.MAX_VALUE))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new AuthorizationRef("eip155:84532", PAYER, PAYER, NONCE, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new PaymentAuthorized(
+                        META,
+                        auth(),
+                        Money.usdc(9_007_199_254_740_992L),
+                        PAYER,
+                        "r",
+                        UUID.randomUUID(),
+                        UUID.randomUUID()))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

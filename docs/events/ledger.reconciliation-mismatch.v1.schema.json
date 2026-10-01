@@ -62,7 +62,9 @@
         "SETTLED_BUT_UNUSED",
         "UNUSED_BUT_SETTLED",
         "CONFLICTING_TX",
-        "ENCUMBRANCE_NOT_CLEARED"
+        "ENCUMBRANCE_NOT_CLEARED",
+        "BOOKS_OPEN",
+        "CONFLICTING_FACT"
       ]
     },
     "ledgerAmount": {

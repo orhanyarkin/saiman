@@ -10,5 +10,9 @@ public enum MismatchKind {
     SETTLED_BUT_UNUSED,
     UNUSED_BUT_SETTLED,
     CONFLICTING_TX,
-    ENCUMBRANCE_NOT_CLEARED
+    ENCUMBRANCE_NOT_CLEARED,
+    /** The chain is final past validBefore + grace but the books never reached a terminal state. */
+    BOOKS_OPEN,
+    /** A fact contradicted an earlier fact for the same authorization (amount, payTo or validBefore). */
+    CONFLICTING_FACT
 }
