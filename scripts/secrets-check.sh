@@ -31,6 +31,6 @@ for entry in mkk_credentials:644 openai_api_key:644 x402_buyer_private_key:644 b
     echo "  WARNING: ${path} should be mode ${want}" >&2
   fi
   if [[ "$state" == "empty" && "$name" == "x402_buyer_private_key" ]]; then
-    echo "  WARNING: ${path} is empty; the orchestrator's paid runs fail closed until it holds a testnet key" >&2
+    echo "  WARNING: ${path} is empty; the orchestrator fails closed at startup until it holds a testnet key" >&2
   fi
 done

@@ -6,8 +6,9 @@
 # clone. The apps fail closed on an empty credential when they first need it. Never
 # overwrites an existing file and never prints file contents (ADR-0009 M2 amendment).
 # x402_buyer_private_key (M3) gets the same empty placeholder ONLY so compose can start; this
-# script never generates, derives or copies a key. While it is empty the orchestrator's paid
-# orchestrator fails closed at startup (blank key), and a warning says so on every run.
+# script never generates, derives or copies a key. While it is empty the orchestrator fails
+# closed at startup (blank key, ADR-0008) and restarts until you fill it; a warning says so on
+# every run.
 set -euo pipefail
 
 readonly SECRET_NAMES=(mkk_credentials openai_api_key x402_buyer_private_key)

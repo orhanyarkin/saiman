@@ -333,10 +333,10 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
         wrappedResponse.reset();
         restoreHeaders(wrappedResponse, headerSnapshot);
         attempt.outcome("settlement_failed");
-        // The facilitator's reason is untrusted text: log it only as a bounded code, never echo it.
-        log.warn(
-                "x402 settlement failed: reason={}",
-                errorReason != null && REASON_CODE.matcher(errorReason).matches() ? errorReason : "unrecognised");
+        // The facilitator's reason is untrusted text: log and publish it only as a bounded code.
+        String reasonCode =
+                errorReason != null && REASON_CODE.matcher(errorReason).matches() ? errorReason : "unrecognised";
+        log.warn("x402 settlement failed: reason={}", reasonCode);
         RequiresPaymentInterceptor.writePaymentRequired(
                 wrappedResponse,
                 codec,
@@ -353,7 +353,7 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
                 authorization.value(),
                 authorization.validBefore(),
                 attempt.payer(),
-                errorReason,
+                reasonCode,
                 clock.instant()));
     }
 
