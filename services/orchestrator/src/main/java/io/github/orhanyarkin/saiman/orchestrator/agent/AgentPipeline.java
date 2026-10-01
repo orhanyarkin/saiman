@@ -31,7 +31,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.json.JsonMapper;
@@ -75,6 +75,7 @@ public class AgentPipeline implements ResearchPipeline {
     private final int maxToolCalls;
     private final Tier synthesisTier;
 
+    @Autowired
     public AgentPipeline(
             ModelRouter router,
             ResearchToolCallbacks toolCallbacks,
@@ -85,15 +86,38 @@ public class AgentPipeline implements ResearchPipeline {
             RunLimitsProperties limits,
             SpendProperties spend,
             AgentProperties agents) {
+        this(
+                router,
+                toolCallbacks,
+                tap,
+                prompts,
+                json,
+                observations,
+                limits.llmBudgetUsdMicros(),
+                spend.maxToolCallsPerRun(),
+                agents.synthesisTier());
+    }
+
+    /** For tests: the same pipeline with explicit limits. */
+    AgentPipeline(
+            ModelRouter router,
+            ResearchToolCallbacks toolCallbacks,
+            ModelCallTap tap,
+            AgentPrompts prompts,
+            JsonMapper json,
+            ObservationRegistry observations,
+            long llmBudgetUsdMicros,
+            int maxToolCalls,
+            Tier synthesisTier) {
         this.router = router;
         this.toolCallbacks = toolCallbacks;
         this.tap = tap;
         this.prompts = prompts;
         this.outputs = new AgentOutputs(json);
         this.observations = observations;
-        this.llmBudgetUsdMicros = limits.llmBudgetUsdMicros();
-        this.maxToolCalls = spend.maxToolCallsPerRun();
-        this.synthesisTier = agents.synthesisTier();
+        this.llmBudgetUsdMicros = llmBudgetUsdMicros;
+        this.maxToolCalls = maxToolCalls;
+        this.synthesisTier = synthesisTier;
     }
 
     /** Everything one execution needs; {@link RunContext} with the tools behind {@link RunTools}. */
@@ -243,7 +267,9 @@ public class AgentPipeline implements ResearchPipeline {
                     .system(prompts.system())
                     .user(user);
             if (withTools) {
-                request = request.toolCallbacks(toolCallbacks.callbacks().toArray(ToolCallback[]::new))
+                request = request.tools(toolCallbacks
+                                .callbacks()
+                                .toArray()) // tools(Object...) takes ToolCallbacks; toolCallbacks(..) is deprecated
                         .toolContext(toolCallbacks.toolContext(run.runId()));
             }
             return request.call().content();
