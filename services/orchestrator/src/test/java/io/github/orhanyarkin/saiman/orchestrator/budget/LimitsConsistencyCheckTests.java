@@ -11,10 +11,10 @@ class LimitsConsistencyCheckTests {
 
     @Test
     void aDefaultRunBudgetAboveTheDailyCapFailsStartup() {
-        assertThatThrownBy(() -> new SpendProperties(40_000, 50_000, 200_000, 10_000, Duration.ofMinutes(5), 4, 6))
+        assertThatThrownBy(() -> new SpendProperties(40_000, 50_000, 200_000, 10_000, Duration.ofMinutes(5), 4, 6, 25))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("default-run-budget-atomic must be <= daily-cap-atomic");
-        assertThat(new SpendProperties(50_000, 50_000, 200_000, 10_000, Duration.ofMinutes(5), 4, 6)
+        assertThat(new SpendProperties(50_000, 50_000, 200_000, 10_000, Duration.ofMinutes(5), 4, 6, 25)
                         .defaultRunBudgetAtomic())
                 .isEqualTo(50_000);
     }
@@ -23,6 +23,20 @@ class LimitsConsistencyCheckTests {
     void anLlmBudgetWithinTheRoutersScopeMaximumIsQuiet() {
         assertThat(LimitsConsistencyCheck.llmBudgetWarning(150_000, 200_000)).isNull();
         assertThat(LimitsConsistencyCheck.llmBudgetWarning(200_000, 200_000)).isNull();
+    }
+
+    @Test
+    void anHourlyPaidCallLimitAtOrBelowTheSellersIsQuiet() {
+        assertThat(LimitsConsistencyCheck.hourlyPaidCallsWarning(25, 30)).isNull();
+        assertThat(LimitsConsistencyCheck.hourlyPaidCallsWarning(30, 30)).isNull();
+    }
+
+    @Test
+    void anHourlyPaidCallLimitAboveTheSellersWarns() {
+        assertThat(LimitsConsistencyCheck.hourlyPaidCallsWarning(31, 30))
+                .contains("max-paid-calls-per-hour (31)")
+                .contains("max-paid-calls-per-hour-at-seller (30)")
+                .contains("429");
     }
 
     @Test

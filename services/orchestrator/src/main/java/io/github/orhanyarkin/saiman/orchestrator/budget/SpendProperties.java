@@ -20,6 +20,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param approvalTimeout how long a pending approval waits before it expires
  * @param maxPaidCallsPerRun paid calls (reserved, signed, settled or held) one run may make
  * @param maxToolCallsPerRun tool calls one run may make (counted by the tool gateway)
+ * @param maxPaidCallsPerHour paid calls (reserved, signed, settled or held) the orchestrator's one
+ *     wallet may make in any rolling hour, across all runs; kept below the seller's own per-payer
+ *     hourly limit, so the seller never answers a signed retry with 429
  */
 @ConfigurationProperties("saiman.orchestrator.spend")
 public record SpendProperties(
@@ -29,7 +32,8 @@ public record SpendProperties(
         @DefaultValue("10000") long approvalThresholdAtomic,
         @DefaultValue("5m") Duration approvalTimeout,
         @DefaultValue("4") int maxPaidCallsPerRun,
-        @DefaultValue("6") int maxToolCallsPerRun) {
+        @DefaultValue("6") int maxToolCallsPerRun,
+        @DefaultValue("25") int maxPaidCallsPerHour) {
 
     public SpendProperties {
         requirePositive(dailyCapAtomic, "daily-cap-atomic");
@@ -38,6 +42,7 @@ public record SpendProperties(
         requirePositive(approvalThresholdAtomic, "approval-threshold-atomic");
         requirePositive(maxPaidCallsPerRun, "max-paid-calls-per-run");
         requirePositive(maxToolCallsPerRun, "max-tool-calls-per-run");
+        requirePositive(maxPaidCallsPerHour, "max-paid-calls-per-hour");
         if (maxRunBudgetAtomic < defaultRunBudgetAtomic) {
             throw new IllegalArgumentException(
                     "saiman.orchestrator.spend.max-run-budget-atomic must be >= default-run-budget-atomic");

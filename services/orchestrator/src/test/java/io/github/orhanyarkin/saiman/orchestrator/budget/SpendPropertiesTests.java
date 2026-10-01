@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class SpendPropertiesTests {
 
     private static SpendProperties props(long defaultBudget, long maxBudget) {
-        return new SpendProperties(1_000_000, defaultBudget, maxBudget, 20_000, Duration.ofMinutes(5), 4, 6);
+        return new SpendProperties(1_000_000, defaultBudget, maxBudget, 20_000, Duration.ofMinutes(5), 4, 6, 25);
     }
 
     @Test
@@ -21,9 +21,9 @@ class SpendPropertiesTests {
 
     @Test
     void limitsMustBePositive() {
-        assertThatThrownBy(() -> new SpendProperties(0, 1, 1, 1, Duration.ofMinutes(1), 1, 1))
+        assertThatThrownBy(() -> new SpendProperties(0, 1, 1, 1, Duration.ofMinutes(1), 1, 1, 1))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new SpendProperties(1, 1, 1, 1, Duration.ZERO, 1, 1))
+        assertThatThrownBy(() -> new SpendProperties(1, 1, 1, 1, Duration.ZERO, 1, 1, 1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
