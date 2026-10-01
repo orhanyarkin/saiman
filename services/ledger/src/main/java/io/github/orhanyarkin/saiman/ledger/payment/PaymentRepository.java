@@ -31,7 +31,9 @@ public class PaymentRepository {
     /**
      * Inserts the row unless the payment key exists, then locks and returns the current row. Two consumers racing
      * on a new payment both get past the insert (the loser waits for the winner's commit, then does nothing), and
-     * both then see exactly one row; the lock serialises them for the rest of the transaction.
+     * both then see exactly one row; the lock serialises them for the rest of the transaction. The ON CONFLICT has
+     * no target on purpose: the id is derived from the key, so a racing insert can hit either unique index first,
+     * and a targeted clause arbitrates only its own (the racing-consumers test caught exactly that).
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public PaymentProjection insertIfAbsentAndLock(PaymentProjection initial) {
@@ -42,7 +44,7 @@ public class PaymentRepository {
                         VALUES (:id, :key, :network, :assetAddress, :payer, :nonce, :payTo,
                                 :amount, :asset, :decimals, :validBefore, :intentId, :runId,
                                 :buyerState, :sellerState, :chainState)
-                        ON CONFLICT (payment_key) DO NOTHING
+                        ON CONFLICT DO NOTHING
                         """)
                 .param("id", initial.id())
                 .param("key", initial.paymentKey())

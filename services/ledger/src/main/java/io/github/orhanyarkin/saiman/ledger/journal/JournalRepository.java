@@ -93,7 +93,7 @@ public class JournalRepository {
         jdbc.sql("""
                         INSERT INTO account (code, book, type, asset, decimals, wallet)
                         VALUES (:code, :book, :type, :asset, :decimals, :wallet)
-                        ON CONFLICT (code, asset) DO NOTHING
+                        ON CONFLICT DO NOTHING
                         """)
                 .param("code", account.code())
                 .param("book", account.book().name())
