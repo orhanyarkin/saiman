@@ -86,5 +86,8 @@ Seller-api allows at most 2 in-flight runs per payer and the orchestrator is one
 
 Approval threshold: the shipped value is 10000 (strictly above), so the 0.01 USDC summary tool never waits and the 0.02 USDC questions tool waits for a human; `ResearchRunApprovalTests` uses a 16000 price against a 15000 threshold. OpenAPI (springdoc) for the orchestrator and seller-api is deferred to M5, when the typed web client needs it.
 
+## Runtime limits added after the T4 audit
+A run has a wall-clock deadline (`saiman.orchestrator.runs.deadline`, default 15 min; checked at step start, tool-call start and approval waits, failing with `RUN_DEADLINE`); `/api` request bodies above 16 KB (or of unknown length) get 413; SSE allows 4 streams per run (a new one evicts the run's oldest) and 64 overall; a finished run is replayed from the database (204 when nothing is left after `Last-Event-ID`); every free-text field leaving the process goes through `UntrustedText.forDisplay`.
+
 ## Deferred
 MCP tools -> Stretch. Non-OpenAI adapters and the LLM response cache -> M6. Settle-before-serve implementation, on-chain reconciliation of held reservations, Kafka `agent.run-step.v1` via the outbox -> M4. Per-IP `/verify` limits, separate verify/settle breakers, Valkey ACLs, ingest shared secret, orchestrator auth -> M6 hardening. `GET /internal/v1/corpus-version`, cache/422 metrics -> M6. Web run view -> M5.

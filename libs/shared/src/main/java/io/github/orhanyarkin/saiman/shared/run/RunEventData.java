@@ -57,7 +57,7 @@ public sealed interface RunEventData {
     /** RUN_COMPLETED. */
     record RunCompleted(Report report, RunCost cost) implements RunEventData {}
 
-    /** RUN_FAILED: a fixed code (for example {@code BUDGET_EXHAUSTED}, {@code INTERRUPTED}), never a message. */
+    /** RUN_FAILED: a fixed code (a {@code FailureCode} name of the orchestrator, for example {@code RUN_DEADLINE} or {@code INTERRUPTED}), never a message. */
     record RunFailed(String failureCode, RunCost costSoFar) implements RunEventData {}
 
     /** The final answer; every citation was validated against the evidence the run actually retrieved. */
