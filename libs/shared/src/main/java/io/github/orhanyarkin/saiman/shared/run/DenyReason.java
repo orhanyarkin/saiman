@@ -12,5 +12,6 @@ public enum DenyReason {
     APPROVAL_MISMATCH,
     OFFER_NOT_PAYABLE,
     MAX_PAID_CALLS,
+    HOURLY_PAID_CALLS,
     INVALID_ARGS
 }
