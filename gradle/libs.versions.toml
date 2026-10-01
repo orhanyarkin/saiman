@@ -11,9 +11,17 @@ web3j = "6.0.0"                    # crypto module only (secp256k1, EIP-712); Ja
 bouncycastle = "1.86"               # pinned above web3j's 1.80 (CVE fixes in >= 1.85); published in the starter POM
 jsoup = "1.23.2"                   # HTML -> text for KAP disclosure bodies (ADR-0010)
 resilience4j = "2.4.0"             # core modules only; wired programmatically, no Spring integration module
+spring-modulith = "2.1.1"          # built against Boot 4.1.1 / Spring Kafka 4.1.1; event publication registry + Kafka externalization (ADR-0016)
 
 [libraries]
 spring-boot-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
+spring-modulith-bom = { module = "org.springframework.modulith:spring-modulith-bom", version.ref = "spring-modulith" }
+spring-modulith-starter-jdbc = { module = "org.springframework.modulith:spring-modulith-starter-jdbc" }
+spring-modulith-events-kafka = { module = "org.springframework.modulith:spring-modulith-events-kafka" }
+spring-modulith-events-api = { module = "org.springframework.modulith:spring-modulith-events-api" }
+spring-boot-starter-kafka = { module = "org.springframework.boot:spring-boot-starter-kafka" }
+spring-boot-starter-kafka-test = { module = "org.springframework.boot:spring-boot-starter-kafka-test" }
+testcontainers-redpanda = { module = "org.testcontainers:testcontainers-redpanda" }
 spring-ai-bom = { module = "org.springframework.ai:spring-ai-bom", version.ref = "spring-ai" }
 # Versions managed by the Spring AI BOM (apply `platform(libs.spring.ai.bom)` in the module)
 spring-ai-client-chat = { module = "org.springframework.ai:spring-ai-client-chat" }
@@ -32,6 +40,7 @@ jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 # Versions managed by the Spring Boot BOM
 jspecify = { module = "org.jspecify:jspecify" }
 jackson-databind = { module = "tools.jackson.core:jackson-databind" }
+jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations" }
 micrometer-core = { module = "io.micrometer:micrometer-core" }
 spring-boot-starter-webmvc = { module = "org.springframework.boot:spring-boot-starter-webmvc" }
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }

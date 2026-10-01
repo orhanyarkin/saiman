@@ -17,3 +17,6 @@ The starter verifies, runs the handler, then settles (ADR-0008). For handlers th
 ## Consequences
 + The known limit is stated in the README and threat model, not hidden.
 − Until M4 a burst of funded-wallet requests can make the demo return 429 for a day.
+
+## Amendment (2026-10-01): scheduled as M4b
+By the human's decision the opt-in settle-first mode is split out of M4 into a one-task milestone **M4b** before M5 (opus implementation and opus audit). M4 reserves the `CREDIT_NOTE` entry kind and the `seller:<S>:revenue:credit-notes` / `seller:<S>:liability:customer-credits` accounts so M4b only adds postings.
