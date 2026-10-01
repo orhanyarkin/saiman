@@ -234,15 +234,34 @@ public class PaymentIntentService {
     }
 
     /**
-     * HELD intents whose authorization expired before {@code expiredBefore} (unix seconds: the safe
-     * block's timestamp), oldest first. A HELD intent without a nonce never had a signature recorded and
-     * cannot be read on chain; it is not returned (see {@link #countHeldWithoutAuthorization()}).
+     * The authorization of a signed intent, read outside any transaction (the resolver reads chain facts
+     * between short transactions and must not hold a connection while it waits for the RPC).
      */
-    public List<UUID> findHeldExpiredBefore(long expiredBefore, int limit) {
+    public Optional<IntentAuthorization> readAuthorization(UUID id) {
+        return jdbc.sql("SELECT " + AUTHORIZATION_COLUMNS
+                        + " FROM payment_intent WHERE id = :id AND auth_nonce IS NOT NULL")
+                .param("id", id)
+                .query(PaymentIntentService::mapAuthorization)
+                .optional();
+    }
+
+    /**
+     * Picks the HELD intents whose authorization expired before {@code expiredBefore} (unix seconds: the safe
+     * block's timestamp) and stamps {@code resolution_attempted_at}, in one statement. Never-attempted intents
+     * come first, then the least recently attempted, then the earliest {@code validBefore}: intents that keep
+     * failing cannot block the ones behind them. A HELD intent without a nonce is not returned (see {@link
+     * #claimHeldWithoutAuthorization(int)}).
+     */
+    public List<UUID> claimHeldExpiredBefore(long expiredBefore, int limit) {
         return jdbc.sql("""
-                        SELECT id FROM payment_intent
-                         WHERE status = 'HELD' AND auth_nonce IS NOT NULL AND valid_before < :expiredBefore
-                         ORDER BY valid_before, id LIMIT :limit
+                        WITH due AS (
+                            SELECT id FROM payment_intent
+                             WHERE status = 'HELD' AND auth_nonce IS NOT NULL AND valid_before < :expiredBefore
+                             ORDER BY resolution_attempted_at NULLS FIRST, valid_before, id LIMIT :limit
+                        )
+                        UPDATE payment_intent p SET resolution_attempted_at = now()
+                          FROM due WHERE p.id = due.id
+                        RETURNING p.id
                         """)
                 .param("expiredBefore", expiredBefore)
                 .param("limit", limit)
@@ -250,7 +269,41 @@ public class PaymentIntentService {
                 .list();
     }
 
-    /** {@code resolved_by} (FACILITATOR or CHAIN) of a resolved intent. */
+    /**
+     * Picks (and stamps) HELD intents that never recorded an authorization: the signature provably never left
+     * the process, so the resolver releases them without a chain read.
+     */
+    public List<UUID> claimHeldWithoutAuthorization(int limit) {
+        return jdbc.sql("""
+                        WITH due AS (
+                            SELECT id FROM payment_intent
+                             WHERE status = 'HELD' AND auth_nonce IS NULL
+                             ORDER BY resolution_attempted_at NULLS FIRST, updated_at, id LIMIT :limit
+                        )
+                        UPDATE payment_intent p SET resolution_attempted_at = now()
+                          FROM due WHERE p.id = due.id
+                        RETURNING p.id
+                        """)
+                .param("limit", limit)
+                .query((rs, row) -> rs.getObject("id", UUID.class))
+                .list();
+    }
+
+    /**
+     * HELD -> RELEASED for an intent that never recorded an authorization ({@code resolved_by = LOCAL}).
+     *
+     * @return false if the intent is no longer HELD or has an authorization
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean markHeldUnsignedReleased(UUID id) {
+        return jdbc.sql("""
+                        UPDATE payment_intent
+                           SET status = 'RELEASED', resolved_by = 'LOCAL', resolved_at = now(), updated_at = now()
+                         WHERE id = :id AND status = 'HELD' AND auth_nonce IS NULL
+                        """).param("id", id).update() == 1;
+    }
+
+    /** {@code resolved_by} (FACILITATOR, CHAIN or LOCAL) of a resolved intent. */
     public Optional<String> resolvedBy(UUID id) {
         return jdbc.sql("SELECT resolved_by FROM payment_intent WHERE id = :id AND resolved_by IS NOT NULL")
                 .param("id", id)
