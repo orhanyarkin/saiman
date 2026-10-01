@@ -85,17 +85,25 @@ The main session is the **orchestrator**: it plans, delegates, integrates and ve
 2. Split work into tasks touching **disjoint directories** and delegate to the owner:
    `payments-engineer` (libs/x402-spring-boot-starter, services/seller-api, services/ledger) · `agent-engineer` (services/orchestrator, libs/model-router) · `ai-engineer` (services/ingest, services/evals, prompts, router configs) · `frontend` (web) · `infra` (deploy, CI, Makefile).
    Shared contracts in `libs/shared` and `gradle/libs.versions.toml` change only through the orchestrator, before parallel work starts.
-3. After each task: `test-runner` verifies and `reviewer` reviews the diff **once**. `security-auditor` reviews **once per task**, and only for code touching payments, wallets, budgets or auth; plus **one audit at the end of each milestone**.
-4. Send blocking findings back to the owner. **No re-check rounds**: `test-runner` verifies the fixes; re-review (reviewer or security-auditor) only for **Critical** findings. Then merge, run `make test && make lint`, update `docs/PROGRESS.md`.
+3. After each task: `test-runner` verifies and `reviewer` reviews the diff **once**. `security-auditor` reviews **once per task**, and only for code touching payments, wallets, budgets or auth; plus **one audit at the end of each milestone** (`security-auditor-milestone`).
+4. Send blocking findings back to the owner; `test-runner` verifies the fixes. Re-review follows the active profile's `reReview` policy (see Usage profiles). Then merge, run `make test && make lint`, update `docs/PROGRESS.md`.
 5. **Stop and ask the human** before: pushing to remote, anything in rule 7, adding a paid external service, changing an accepted ADR, or when blocked by a missing tool or credential.
 
 Delegation prompts must be self-contained (goal, owned dirs, acceptance criteria, relevant ADRs) and must **list the exact files to read** (paths, not "read the docs"): subagents don't see this conversation.
 
-### Lean mode (usage limits)
-- Main session model `opusplan` (Opus in plan mode, Sonnet when executing); at most 2 concurrent subagents (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`).
-- Agent models and effort live in `.claude/agents/*.md`: `architect` opus/high; `security-auditor` sonnet/high; `reviewer` and implementers sonnet/medium; `test-runner` sonnet/low. Each has a `maxTurns` cap.
-- Invoke `security-auditor` with `model: opus` for any change to signing, signature verification, nonce/replay handling or payment settlement code.
-- Per-invocation effort can't be set: for signing/crypto implementation tasks, invoke `payments-engineer` with `model: opus` instead.
+### Usage profiles (lean mode)
+The active profile is in `.claude/profile` (`pro` or `max`); its values live in `.claude/profiles/<name>.json`.
+Switch with `make profile-pro` / `make profile-max` (shows the diff, then rewrites agent frontmatter and settings); `make profile-show` prints the active one.
+
+Profile-dependent (read them from the active profile, never hard-code them here):
+- Concurrent subagents (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` in `.claude/settings.json`) and each agent's model, effort and `maxTurns` (`.claude/agents/*.md` frontmatter).
+- The milestone-end audit uses `security-auditor-milestone` (its own `maxTurns`); per-task audits use `security-auditor`.
+- Per-invocation model overrides (`invocationOverrides`): which tasks call `payments-engineer` or `security-auditor` with `model: opus`.
+- Re-review policy (`reReview`): `pro` = no re-check rounds, re-review only for Critical findings; `max` = additionally one security-auditor re-review of the fix commits after High or Medium findings in payment, ledger or budget code.
+- Advisor use (`advisor.consultOn`): `max` consults the advisor on architecture decisions and the milestone-end audit.
+
+Profile-independent:
+- Main session model `opusplan` (Opus in plan mode, Sonnet when executing).
 - A PreToolUse hook (`.claude/hooks/filter-test-output.sh`) rewrites a plain `./gradlew` check/test/build, `make test|lint` or `pnpm test|lint|typecheck` command into one literal call of `.claude/hooks/run-filtered.sh`, which prints only failures/errors and the final summary and keeps the exit status. Compound commands (`;`, `&&`, `|`, `$(…)`, redirects) are never rewritten; append `# nofilter` for full output.
 - **Same error twice → stop.** An agent (or the orchestrator) that gets the same tool error twice must stop and report it instead of retrying the same command.
 

@@ -25,7 +25,7 @@
   },
   "env": {
     "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "2",
-    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "2"
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "3"
   },
   "hooks": {
     "PreToolUse": [

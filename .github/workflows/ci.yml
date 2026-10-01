@@ -96,6 +96,8 @@ jobs:
         run: scripts/check-compose-policy.sh
       - name: Self-test compose/x402-env policy scripts
         run: scripts/test-check-compose-policy.sh
+      - name: Self-test the agent usage-profile switch
+        run: scripts/test-usage-profile.sh
 
   images:
     name: images (bootBuildImage, ${{ matrix.runs-on }})

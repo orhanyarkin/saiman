@@ -1,0 +1,28 @@
+{
+  "name": "pro",
+  "description": "Lean mode for the Pro plan: the values used through M4.",
+  "maxConcurrentSubagents": 2,
+  "agents": {
+    "architect": { "model": "opus", "effort": "high", "maxTurns": 40 },
+    "security-auditor": { "model": "sonnet", "effort": "high", "maxTurns": 40 },
+    "security-auditor-milestone": { "model": "sonnet", "effort": "high", "maxTurns": 40 },
+    "reviewer": { "model": "sonnet", "effort": "medium", "maxTurns": 30 },
+    "agent-engineer": { "model": "sonnet", "effort": "medium", "maxTurns": 80 },
+    "ai-engineer": { "model": "sonnet", "effort": "medium", "maxTurns": 80 },
+    "payments-engineer": { "model": "sonnet", "effort": "medium", "maxTurns": 80 },
+    "frontend": { "model": "sonnet", "effort": "medium", "maxTurns": 80 },
+    "infra": { "model": "sonnet", "effort": "medium", "maxTurns": 60 },
+    "test-runner": { "model": "sonnet", "effort": "low", "maxTurns": 15 }
+  },
+  "invocationOverrides": [
+    "security-auditor with model: opus for signing, signature verification, nonce/replay handling or payment settlement code",
+    "payments-engineer with model: opus for signing/crypto implementation tasks"
+  ],
+  "reReview": {
+    "policy": "critical-only",
+    "rule": "No re-check rounds; re-review (reviewer or security-auditor) only for Critical findings."
+  },
+  "advisor": {
+    "consultOn": []
+  }
+}
