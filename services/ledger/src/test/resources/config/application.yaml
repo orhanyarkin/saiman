@@ -9,3 +9,9 @@ logging:
     # Kafka clients log every rebalance and config dump at INFO; keep test output readable.
     org.apache.kafka: warn
     org.springframework.kafka: warn
+
+saiman:
+  ledger:
+    reconciliation:
+      # Tests start runs themselves; a scheduled run must never race them.
+      interval: 1h

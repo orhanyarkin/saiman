@@ -4,6 +4,7 @@ import io.github.orhanyarkin.saiman.ledger.payment.ConflictingFactException;
 import io.github.orhanyarkin.saiman.ledger.payment.MalformedPaymentEventException;
 import io.github.orhanyarkin.saiman.shared.ledger.EntryPosted;
 import io.github.orhanyarkin.saiman.shared.ledger.LedgerTopics;
+import io.github.orhanyarkin.saiman.shared.ledger.ReconciliationMismatch;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
 import java.time.Clock;
 import java.util.List;
@@ -31,8 +32,8 @@ import tools.jackson.databind.json.JsonMapper;
  * Kafka wiring of the ledger (ADR-0016).
  *
  * <ul>
- *   <li><b>Outbox:</b> {@link EntryPosted} is externalized by Spring Modulith to {@code ledger.entry-posted.v1},
- *       key = payment id. The record lives in {@code libs/shared}, which does not depend on Modulith, so the
+ *   <li><b>Outbox:</b> {@link EntryPosted} is externalized by Spring Modulith to {@code ledger.entry-posted.v1}
+ *       and {@link ReconciliationMismatch} to {@code ledger.reconciliation-mismatch.v1}, key = payment id. The record lives in {@code libs/shared}, which does not depend on Modulith, so the
  *       routing is configured here instead of with {@code @Externalized} on the type.
  *   <li><b>Converter:</b> a String JSON converter replaces Modulith's default byte-array one, so the template keeps
  *       String serializers (shared with the dead-letter publisher), and it writes no {@code __TypeId__} header.
@@ -57,10 +58,14 @@ public class LedgerMessagingConfiguration {
     @Bean
     EventExternalizationConfiguration eventExternalizationConfiguration() {
         return EventExternalizationConfiguration.externalizing()
-                .select(event -> event instanceof EntryPosted)
+                .select(event -> event instanceof EntryPosted || event instanceof ReconciliationMismatch)
                 .route(
                         EntryPosted.class,
                         event -> RoutingTarget.forTarget(LedgerTopics.ENTRY_POSTED)
+                                .andKey(event.paymentId().toString()))
+                .route(
+                        ReconciliationMismatch.class,
+                        event -> RoutingTarget.forTarget(LedgerTopics.RECONCILIATION_MISMATCH)
                                 .andKey(event.paymentId().toString()))
                 .build();
     }
