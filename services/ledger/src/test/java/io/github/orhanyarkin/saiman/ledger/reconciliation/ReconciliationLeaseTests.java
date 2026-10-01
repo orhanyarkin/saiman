@@ -76,6 +76,9 @@ class ReconciliationLeaseTests {
     private ReconciliationService service;
 
     @Autowired
+    private SellerCreditNoteClient sellers;
+
+    @Autowired
     private JdbcClient jdbc;
 
     @Test
@@ -93,7 +96,8 @@ class ReconciliationLeaseTests {
                 unlockFailing(dataSource, failedUnlocks),
                 clock,
                 meters,
-                observations);
+                observations,
+                sellers);
 
         assertThat(failingUnlock.runNow()).isPresent();
 

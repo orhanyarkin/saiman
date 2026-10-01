@@ -12,6 +12,9 @@ import io.github.orhanyarkin.saiman.ledger.payment.ChainState;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentLedgerService;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentProjection;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentRepository;
+import io.github.orhanyarkin.saiman.ledger.payment.SellerState;
+import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerCreditNote;
+import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerUnavailableException;
 import io.github.orhanyarkin.saiman.shared.events.EventMetadata;
 import io.github.orhanyarkin.saiman.shared.ledger.ReconciliationMismatch;
 import io.github.orhanyarkin.saiman.shared.payments.AuthorizationRef;
@@ -68,6 +71,24 @@ import org.springframework.transaction.support.TransactionTemplate;
  * run still performs its internal checks, skips the chain part, ends PARTIAL and counts {@code
  * saiman.ledger.reconciliation.skipped{reason=safe_in_future}}. The block <em>number</em> is never clamped, so
  * receipts and {@code authorizationState} are still read at the safe block.
+ *
+ * <p><b>Credit notes (ADR-0021, M4b audit).</b> A credit note touches no wallet account, so the chain cannot
+ * contradict a forged one. For every payment whose seller book is CREDITED, the run therefore asks seller-api
+ * ({@link SellerCreditNoteClient}, outside any transaction, like the chain reads) whether it recorded that credit
+ * note:
+ *
+ * <ul>
+ *   <li><b>Corroborated</b> (same tx hash, case-insensitive, and amount): cached in {@code
+ *       credit_note_corroboration}, never asked again; the item is decided by the chain as before.
+ *   <li><b>No row, or another tx hash or amount:</b> a {@value #CREDIT_NOTE_UNCORROBORATED} mismatch, never MATCHED.
+ *       <em>Nothing is posted</em>: the chain did not move, so there is no wallet difference for suspense, and
+ *       reversing the CREDIT_NOTE automatically would let one unauthenticated record (or a seller-side data loss)
+ *       rewrite the books. The liability stays until a human posts a REVERSAL. The kind is not a {@code
+ *       MismatchKind} and not in the {@code ledger.reconciliation-mismatch.v1} enum, so it is recorded in {@code
+ *       reconciliation_mismatch} and the report only (and counted), not published.
+ *   <li><b>Seller unreachable or no definite answer:</b> the item is PENDING and the run PARTIAL, exactly like an
+ *       unavailable chain: never MATCHED by default, never a false finding.
+ * </ul>
  */
 @Service
 @EnableConfigurationProperties(ReconciliationProperties.class)
@@ -84,6 +105,9 @@ public class ReconciliationService {
     /** A safe block further ahead of the local clock than this is not trusted: the run skips its chain part. */
     static final long MAX_SAFE_AHEAD_SECONDS = 60;
 
+    /** A CREDITED payment whose credit note seller-api does not confirm (ledger-only kind, V5). */
+    static final String CREDIT_NOTE_UNCORROBORATED = "CREDIT_NOTE_UNCORROBORATED";
+
     /** Base produces a block every two seconds; used only to aim the bounded log search. */
     private static final long SECONDS_PER_BLOCK = 2;
 
@@ -99,6 +123,7 @@ public class ReconciliationService {
     private final Clock clock;
     private final MeterRegistry meters;
     private final ObservationRegistry observations;
+    private final SellerCreditNoteClient sellers;
     private final AtomicBoolean running = new AtomicBoolean();
     private final AtomicReference<@Nullable Instant> lastManualStart = new AtomicReference<>();
     private final AtomicLong unbalancedEntries = new AtomicLong();
@@ -117,7 +142,8 @@ public class ReconciliationService {
             DataSource dataSource,
             ObjectProvider<Clock> clock,
             MeterRegistry meters,
-            ObjectProvider<ObservationRegistry> observations) {
+            ObjectProvider<ObservationRegistry> observations,
+            SellerCreditNoteClient sellers) {
         this.chainProvider = chainProvider;
         this.chainProperties = chainProperties;
         this.properties = properties;
@@ -130,6 +156,7 @@ public class ReconciliationService {
         this.clock = clock.getIfAvailable(Clock::systemUTC);
         this.meters = meters;
         this.observations = observations.getIfAvailable(() -> ObservationRegistry.NOOP);
+        this.sellers = sellers;
         meters.gauge("saiman.ledger.reconciliation.unbalanced.entries", unbalancedEntries);
         // Set at the start of each run (after the safe block is read): the backlog the run starts from.
         meters.gauge("saiman.ledger.reconciliation.due", dueBacklog);
@@ -308,9 +335,17 @@ public class ReconciliationService {
             return null;
         }
         try {
+            CreditNoteAnswer creditNote = askSeller(snapshot);
             ChainReconciler.Evidence evidence = fetch(snapshot, safe, chain);
-            return transactions.execute(tx -> book(runId, key, evidence));
+            return transactions.execute(tx -> book(runId, key, evidence, creditNote));
         } catch (ChainUnavailableException e) {
+            return skipped(runId, snapshot);
+        } catch (SellerUnavailableException e) {
+            log.warn(
+                    "Reconciliation run {}: credit note of payment {} not corroborated yet (seller: {})",
+                    runId,
+                    snapshot.id(),
+                    e.getMessage());
             return skipped(runId, snapshot);
         } catch (RuntimeException e) {
             // Any other failure (lock timeout, bad row, client bug) skips this item only; it is marked checked, so
@@ -344,7 +379,57 @@ public class ReconciliationService {
         return new ItemResult(ItemStatus.PENDING, false, false, true);
     }
 
-    private @Nullable ItemResult book(UUID runId, String key, ChainReconciler.Evidence evidence) {
+    /**
+     * What the seller said about a CREDITED payment's credit note, read before the transaction.
+     *
+     * @param cached the ledger already holds a matching corroboration (the seller was not asked)
+     * @param note the seller's credit note, or null when it definitely has none
+     */
+    private record CreditNoteAnswer(
+            boolean cached, @Nullable SellerCreditNote note) {}
+
+    /** Null when the payment is not CREDITED; throws {@link SellerUnavailableException} without a definite answer. */
+    private @Nullable CreditNoteAnswer askSeller(PaymentProjection p) {
+        if (p.sellerState() != SellerState.CREDITED) {
+            return null;
+        }
+        String tx = p.sellerTxHash();
+        if (tx != null
+                && repository.creditNoteCorroborated(p.id(), tx, p.amount().atomicUnits())) {
+            return new CreditNoteAnswer(true, null);
+        }
+        return new CreditNoteAnswer(false, sellers.find(p.paymentKey()).orElse(null));
+    }
+
+    private enum Corroboration {
+        NOT_CREDITED,
+        CORROBORATED,
+        UNCORROBORATED,
+        /** CREDITED now, but the seller was not asked (the row changed after it was read): decide next run. */
+        UNKNOWN
+    }
+
+    private static Corroboration corroboration(PaymentProjection p, @Nullable CreditNoteAnswer answer) {
+        if (p.sellerState() != SellerState.CREDITED) {
+            return Corroboration.NOT_CREDITED;
+        }
+        if (answer == null) {
+            return Corroboration.UNKNOWN;
+        }
+        if (answer.cached()) {
+            return Corroboration.CORROBORATED;
+        }
+        SellerCreditNote note = answer.note();
+        String ledgerTx = p.sellerTxHash();
+        boolean same = note != null
+                && ledgerTx != null
+                && note.txHash().equals(PaymentProjection.lower(ledgerTx))
+                && note.amountAtomic() == p.amount().atomicUnits();
+        return same ? Corroboration.CORROBORATED : Corroboration.UNCORROBORATED;
+    }
+
+    private @Nullable ItemResult book(
+            UUID runId, String key, ChainReconciler.Evidence evidence, @Nullable CreditNoteAnswer creditNote) {
         PaymentProjection p = payments.lock(key).orElse(null);
         if (p == null) {
             return null;
@@ -386,24 +471,71 @@ public class ReconciliationService {
         }
         ChainReconciler.Finding primary = outcome.primary();
         String txHash = outcome.next().chainTxHash() != null ? outcome.next().chainTxHash() : reportedTx(p);
-        repository.insertItem(
-                runId,
-                p.id(),
-                outcome.status(),
-                txHash,
-                primary,
-                primary != null && primary.adjusted() ? adjustmentId : null);
-        meters.counter(
-                        "saiman.ledger.reconciliation.items",
-                        "status",
-                        outcome.status().name())
+        ItemStatus status = outcome.status();
+        Corroboration corroboration = corroboration(p, creditNote);
+        SellerCreditNote sellerNote = creditNote == null ? null : creditNote.note();
+        if (corroboration == Corroboration.CORROBORATED && sellerNote != null) {
+            repository.insertCreditNoteCorroboration(p.id(), sellerNote.txHash(), sellerNote.amountAtomic(), now);
+        } else if (corroboration == Corroboration.UNKNOWN && status == ItemStatus.MATCHED) {
+            status = ItemStatus.PENDING;
+        } else if (corroboration == Corroboration.UNCORROBORATED) {
+            status = ItemStatus.MISMATCH;
+            uncorroborated(runId, p, sellerNote);
+        }
+        if (primary == null && corroboration == Corroboration.UNCORROBORATED) {
+            repository.insertItem(
+                    runId,
+                    p.id(),
+                    status,
+                    txHash,
+                    CREDIT_NOTE_UNCORROBORATED,
+                    p.amount().atomicUnits(),
+                    sellerNote == null ? null : sellerNote.amountAtomic(),
+                    null);
+        } else {
+            repository.insertItem(
+                    runId,
+                    p.id(),
+                    status,
+                    txHash,
+                    primary,
+                    primary != null && primary.adjusted() ? adjustmentId : null);
+        }
+        meters.counter("saiman.ledger.reconciliation.items", "status", status.name())
                 .increment();
         boolean wasUnknown = p.chainState() == ChainState.UNKNOWN;
         return new ItemResult(
-                outcome.status(),
+                status,
                 wasUnknown && outcome.next().chainState() == ChainState.USED,
                 wasUnknown && outcome.next().chainState() == ChainState.UNUSED,
                 false);
+    }
+
+    /**
+     * Records a {@value #CREDIT_NOTE_UNCORROBORATED} finding once per payment: the seller has no credit note for it,
+     * or one with another tx hash or amount. Reported and counted only; nothing is posted (see the class comment).
+     */
+    private void uncorroborated(UUID runId, PaymentProjection p, @Nullable SellerCreditNote seller) {
+        UUID mismatchId = mismatchId(p.id(), CREDIT_NOTE_UNCORROBORATED);
+        boolean inserted = repository.insertMismatch(
+                mismatchId,
+                runId,
+                p,
+                CREDIT_NOTE_UNCORROBORATED,
+                p.amount().atomicUnits(),
+                seller == null ? null : seller.amountAtomic(),
+                p.sellerTxHash(),
+                seller == null ? null : seller.txHash(),
+                null);
+        if (inserted) {
+            log.warn(
+                    "Reconciliation run {}: payment {} is CREDITED but seller-api {} the credit note",
+                    runId,
+                    p.id(),
+                    seller == null ? "has no record of" : "records different values for");
+            meters.counter("saiman.ledger.reconciliation.mismatches", "kind", CREDIT_NOTE_UNCORROBORATED)
+                    .increment();
+        }
     }
 
     /** Reads what the chain says about one payment; every call may throw {@link ChainUnavailableException}. */
@@ -449,8 +581,12 @@ public class ReconciliationService {
 
     /** One id per payment and kind, like the table's unique key: a replayed check names the same mismatch. */
     static UUID mismatchId(UUID paymentId, ChainReconciler.Finding finding) {
+        return mismatchId(paymentId, finding.kind().name());
+    }
+
+    static UUID mismatchId(UUID paymentId, String kind) {
         return UUID.nameUUIDFromBytes(
-                ("saiman-ledger:mismatch:" + paymentId + ":" + finding.kind()).getBytes(StandardCharsets.UTF_8));
+                ("saiman-ledger:mismatch:" + paymentId + ":" + kind).getBytes(StandardCharsets.UTF_8));
     }
 
     /** The single-runner lock: an advisory lock held by one dedicated connection until closed. */

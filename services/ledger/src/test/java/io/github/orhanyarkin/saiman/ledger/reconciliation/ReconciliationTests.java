@@ -7,6 +7,7 @@ import io.github.orhanyarkin.saiman.evmrpc.ChainBlock;
 import io.github.orhanyarkin.saiman.evmrpc.UsdcReceipt;
 import io.github.orhanyarkin.saiman.evmrpc.UsdcTransfer;
 import io.github.orhanyarkin.saiman.ledger.FakeChain;
+import io.github.orhanyarkin.saiman.ledger.FakeSellerCreditNotes;
 import io.github.orhanyarkin.saiman.ledger.LedgerIntegrationTest;
 import io.github.orhanyarkin.saiman.ledger.api.LedgerApiGuardFilter;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentFact;
@@ -85,6 +86,9 @@ class ReconciliationTests {
     private FakeChain chain;
 
     @Autowired
+    private FakeSellerCreditNotes sellers;
+
+    @Autowired
     private MeterRegistry meters;
 
     @Autowired
@@ -130,7 +134,8 @@ class ReconciliationTests {
 
     /**
      * ADR-0021: a credited payment (seller settled up front, then did not serve) matches its receipt like any
-     * settled one. The credit note touches no wallet, so nothing is adjusted and the liability stays.
+     * settled one once seller-api corroborates the credit note. The credit note touches no wallet, so nothing is
+     * adjusted and the liability stays.
      */
     @Test
     void creditedPaymentWithMatchingReceiptIsMatched() {
@@ -140,6 +145,7 @@ class ReconciliationTests {
         ledger.record(PaymentFact.of(payment.creditNoted()), PaymentTopics.CREDIT_NOTE_ISSUED);
         ledger.record(PaymentFact.of(payment.sellerSettled()), PaymentTopics.SETTLED);
         chain.mine(receipt(payment, payment.txHash(), payment.payTo(), 20_000, true));
+        sellers.issue(payment.key(), payment.txHash(), 20_000); // seller-api corroborates it
         int entries = entryCount(payment);
 
         ReconciliationReport.Item item = item(runNow(), payment);

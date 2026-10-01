@@ -97,6 +97,10 @@ seller:
     deadline: 25s
     single-flight-wait: 5s
     negative-cache-ttl: 120s
+  # GET /internal/credit-notes/{paymentKey}, read by the ledger to corroborate credit notes (ADR-0021): exact
+  # Host values only, so the published port (localhost:8081) and rebound browser names are refused.
+  internal:
+    allowed-hosts: seller-api,seller-api:8081
   http:
     max-body-bytes: 4096
     max-json-string-length: 65536

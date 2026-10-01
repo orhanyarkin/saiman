@@ -98,7 +98,10 @@ fi
 #    The buyer key reaches only the orchestrator, from M3,
 #    via `secrets:` mounted at /run/secrets/, read with
 #    `spring.config.import=optional:configtree:/run/secrets/`). X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS
-#    may only be set on the orchestrator and only to exactly `seller-api`.
+#    may only be set on the orchestrator and only to exactly `seller-api`. M4b (ADR-0021):
+#    SAIMAN_LEDGER_SELLER_BASE_URL / _ALLOWED_HOSTS only on ledger, exactly
+#    http://seller-api:8081 / seller-api; SELLER_INTERNAL_ALLOWED_HOSTS only on seller-api,
+#    exactly seller-api,seller-api:8081.
 #    This scans every service, regardless of profile, for five patterns:
 #      - an env_file (per-service secrets are explicit env vars only, never a whole file)
 #      - a `secrets:` mount outside the allowlist above
@@ -141,6 +144,18 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
     ( ($s.environment // {}) | to_entries[] | select(.key == "SAIMAN_CHAIN_ALLOWED_HOSTS")
       | select((.value // "") != "sepolia.base.org")
       | "\($svc): SAIMAN_CHAIN_ALLOWED_HOSTS must be exactly sepolia.base.org (testnet only, ADR-0018)" ),
+    ( ($s.environment // {}) | to_entries[] | select(.key | test("^SAIMAN_LEDGER_SELLER_"))
+      | select($svc != "ledger")
+      | "\($svc): \(.key) is only allowed on ledger (M4b, ADR-0021: only the ledger corroborates credit notes)" ),
+    ( ($s.environment // {}) | to_entries[] | select(.key == "SAIMAN_LEDGER_SELLER_BASE_URL")
+      | select((.value // "") != "http://seller-api:8081")
+      | "\($svc): SAIMAN_LEDGER_SELLER_BASE_URL must be exactly http://seller-api:8081 (the compose-internal seller; ADR-0021)" ),
+    ( ($s.environment // {}) | to_entries[] | select(.key == "SAIMAN_LEDGER_SELLER_ALLOWED_HOSTS")
+      | select((.value // "") != "seller-api")
+      | "\($svc): SAIMAN_LEDGER_SELLER_ALLOWED_HOSTS must be exactly seller-api (ADR-0021)" ),
+    ( ($s.environment // {}) | to_entries[] | select(.key | test("^SELLER_INTERNAL_"))
+      | select($svc != "seller-api" or .key != "SELLER_INTERNAL_ALLOWED_HOSTS" or (.value // "") != "seller-api,seller-api:8081")
+      | "\($svc): \(.key) must be SELLER_INTERNAL_ALLOWED_HOSTS=seller-api,seller-api:8081 on seller-api only (the published localhost port must not reach /internal/**; ADR-0021)" ),
     ( ($s.environment // {}) | keys[] | select(contains("$"))
       | "\($svc): environment key \"\(.)\" contains $ (interpolated names would bypass this check)" ),
     ( ($s.configs // [])[]? | .source as $src | (($root.configs // {})[$src] // {})
@@ -177,4 +192,4 @@ if [[ ${violations} -ne 0 ]]; then
   exit 1
 fi
 
-echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, secrets: allowlist enforced, no OPENAI_* env, plaintext-hosts pinned to seller-api, chain RPC pinned to sepolia.base.org on ledger/orchestrator only, Kafka auto-create off and controller local)"
+echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, secrets: allowlist enforced, no OPENAI_* env, plaintext-hosts pinned to seller-api, chain RPC pinned to sepolia.base.org on ledger/orchestrator only, credit-note corroboration pinned to seller-api, Kafka auto-create off and controller local)"

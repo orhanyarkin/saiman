@@ -1,0 +1,8 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: SAIMAN_LEDGER_SELLER_BASE_URL is only allowed on ledger
+name: cptest-fail-ledger-seller-on-orchestrator
+services:
+  orchestrator:
+    image: busybox:1
+    environment:
+      SAIMAN_LEDGER_SELLER_BASE_URL: http://seller-api:8081

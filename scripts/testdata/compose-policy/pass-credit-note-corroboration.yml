@@ -1,0 +1,13 @@
+# Fixture for scripts/test-check-compose-policy.sh: must PASS.
+# M4b shape (ADR-0021): the ledger reads seller-api's /internal/credit-notes over the compose network only.
+name: cptest-pass-credit-note-corroboration
+services:
+  ledger:
+    image: busybox:1
+    environment:
+      SAIMAN_LEDGER_SELLER_BASE_URL: http://seller-api:8081
+      SAIMAN_LEDGER_SELLER_ALLOWED_HOSTS: seller-api
+  seller-api:
+    image: busybox:1
+    environment:
+      SELLER_INTERNAL_ALLOWED_HOSTS: seller-api,seller-api:8081

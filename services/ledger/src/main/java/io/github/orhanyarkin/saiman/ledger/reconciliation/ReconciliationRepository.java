@@ -43,7 +43,8 @@ public class ReconciliationRepository {
     static final String DUE_ORDER = """
             CASE
                 WHEN EXISTS (SELECT 1 FROM reconciliation_mismatch m
-                              WHERE m.payment_id = p.id AND m.kind IN ('TX_NOT_FOUND', 'TX_NOT_FOR_AUTHORIZATION'))
+                              WHERE m.payment_id = p.id AND m.kind IN ('TX_NOT_FOUND', 'TX_NOT_FOR_AUTHORIZATION',
+                                                                'CREDIT_NOTE_UNCORROBORATED'))
                     THEN coalesce(p.last_checked_at, p.created_at) + interval '%s'
                 WHEN p.buyer_state = 'NONE'
                     THEN coalesce(p.last_checked_at, p.created_at) + interval '%s'
@@ -142,7 +143,8 @@ public class ReconciliationRepository {
      * An unused share goes to the other one. Within each share the order is {@link #DUE_ORDER}: least recently
      * checked first, but a payment no buyer fact corroborates (only the unauthenticated seller side reported it)
      * queues as if it had been checked {@link #UNCORROBORATED_DELAY} later, and one whose reported tx was already
-     * found missing or unrelated ({@code TX_NOT_FOUND}, {@code TX_NOT_FOR_AUTHORIZATION}; those mismatch rows are
+     * found missing or unrelated ({@code TX_NOT_FOUND}, {@code TX_NOT_FOR_AUTHORIZATION}), or whose credit note the seller
+     * did not corroborate ({@code CREDIT_NOTE_UNCORROBORATED}; those mismatch rows are
      * never deleted, so a payment stays suspect) {@link #SUSPECT_DELAY} later. Forged facts therefore queue behind
      * real payments yet still age into a batch: they are delayed, never starved. Matched payments stay due, so a
      * record corrupted after its first check is still caught (the tamper demo). The grace is subtracted from the
@@ -279,6 +281,33 @@ public class ReconciliationRepository {
             PaymentProjection payment,
             ChainReconciler.Finding finding,
             @Nullable UUID adjustmentEntryId) {
+        return insertMismatch(
+                id,
+                runId,
+                payment,
+                finding.kind().name(),
+                atomic(finding.ledgerValue()),
+                atomic(finding.chainValue()),
+                finding.reportedTxHash(),
+                finding.chainTxHash(),
+                adjustmentEntryId);
+    }
+
+    /**
+     * Records a mismatch of any kind the table accepts, including the ledger-only {@code CREDIT_NOTE_UNCORROBORATED}
+     * (not a {@code MismatchKind}); true if this call inserted it.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean insertMismatch(
+            UUID id,
+            UUID runId,
+            PaymentProjection payment,
+            String kind,
+            @Nullable Long ledgerAtomic,
+            @Nullable Long otherAtomic,
+            @Nullable String reportedTxHash,
+            @Nullable String otherTxHash,
+            @Nullable UUID adjustmentEntryId) {
         return jdbc.sql("""
                                 INSERT INTO reconciliation_mismatch (id, run_id, payment_id, kind,
                                        ledger_amount_atomic, chain_amount_atomic, asset, decimals,
@@ -290,13 +319,13 @@ public class ReconciliationRepository {
                         .param("id", id)
                         .param("runId", runId)
                         .param("paymentId", payment.id())
-                        .param("kind", finding.kind().name())
-                        .param("ledger", atomic(finding.ledgerValue()))
-                        .param("chain", atomic(finding.chainValue()))
+                        .param("kind", kind)
+                        .param("ledger", ledgerAtomic)
+                        .param("chain", otherAtomic)
                         .param("asset", payment.amount().asset())
                         .param("decimals", payment.amount().decimals())
-                        .param("reportedTx", finding.reportedTxHash())
-                        .param("chainTx", finding.chainTxHash())
+                        .param("reportedTx", reportedTxHash)
+                        .param("chainTx", otherTxHash)
                         .param("adjustment", adjustmentEntryId)
                         .update()
                 == 1;
@@ -311,6 +340,28 @@ public class ReconciliationRepository {
             @Nullable String txHash,
             ChainReconciler.@Nullable Finding finding,
             @Nullable UUID adjustmentEntryId) {
+        insertItem(
+                runId,
+                paymentId,
+                status,
+                txHash,
+                finding == null ? null : finding.kind().name(),
+                finding == null ? null : atomic(finding.ledgerValue()),
+                finding == null ? null : atomic(finding.chainValue()),
+                adjustmentEntryId);
+    }
+
+    /** One item of a run whose main finding is given by kind name (see {@link #insertMismatch}). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void insertItem(
+            UUID runId,
+            UUID paymentId,
+            ItemStatus status,
+            @Nullable String txHash,
+            @Nullable String mismatchKind,
+            @Nullable Long ledgerAtomic,
+            @Nullable Long otherAtomic,
+            @Nullable UUID adjustmentEntryId) {
         jdbc.sql("""
                         INSERT INTO reconciliation_item (run_id, payment_id, status, tx_hash, mismatch_kind,
                                                          ledger_amount_atomic, chain_amount_atomic, adjustment_entry_id)
@@ -321,10 +372,43 @@ public class ReconciliationRepository {
                 .param("paymentId", paymentId)
                 .param("status", status.name())
                 .param("txHash", txHash)
-                .param("kind", finding == null ? null : finding.kind().name())
-                .param("ledger", finding == null ? null : atomic(finding.ledgerValue()))
-                .param("chain", finding == null ? null : atomic(finding.chainValue()))
+                .param("kind", mismatchKind)
+                .param("ledger", ledgerAtomic)
+                .param("chain", otherAtomic)
                 .param("adjustment", adjustmentEntryId)
+                .update();
+    }
+
+    /**
+     * True when the seller already corroborated this payment's credit note with exactly this tx hash and amount
+     * (V5 {@code credit_note_corroboration}), so it need not be asked again.
+     */
+    @Transactional(readOnly = true)
+    public boolean creditNoteCorroborated(UUID paymentId, String txHash, long amountAtomic) {
+        return jdbc.sql("""
+                                SELECT count(*) FROM credit_note_corroboration
+                                 WHERE payment_id = :id AND tx_hash = :tx AND amount_atomic = :amount
+                                """)
+                        .param("id", paymentId)
+                        .param("tx", txHash)
+                        .param("amount", amountAtomic)
+                        .query(Long.class)
+                        .single()
+                > 0;
+    }
+
+    /** Caches a positive corroboration (insert-only; a repeat is ignored). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void insertCreditNoteCorroboration(UUID paymentId, String txHash, long amountAtomic, Instant at) {
+        jdbc.sql("""
+                        INSERT INTO credit_note_corroboration (payment_id, tx_hash, amount_atomic, corroborated_at)
+                        VALUES (:id, :tx, :amount, :at)
+                        ON CONFLICT (payment_id) DO NOTHING
+                        """)
+                .param("id", paymentId)
+                .param("tx", txHash)
+                .param("amount", amountAtomic)
+                .param("at", Timestamp.from(at))
                 .update();
     }
 

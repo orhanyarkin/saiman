@@ -1,0 +1,9 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: SAIMAN_LEDGER_SELLER_ALLOWED_HOSTS must be exactly seller-api
+name: cptest-fail-ledger-seller-allowed-hosts-wide
+services:
+  ledger:
+    image: busybox:1
+    environment:
+      SAIMAN_LEDGER_SELLER_BASE_URL: http://seller-api:8081
+      SAIMAN_LEDGER_SELLER_ALLOWED_HOSTS: seller-api,evil.example
