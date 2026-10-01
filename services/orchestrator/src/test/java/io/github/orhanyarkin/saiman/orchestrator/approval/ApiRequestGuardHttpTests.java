@@ -105,6 +105,37 @@ class ApiRequestGuardHttpTests extends SpendTestSupport {
         assertThat(status("GET", "/api/v1/ping", EVIL_HOST, false, false)).isEqualTo(400);
     }
 
+    @Test
+    void aBodyAboveSixteenKilobytesIsRefusedBeforeItIsRead() throws IOException {
+        String path = "/api/v1/runs/" + run + "/approvals/" + approvalId;
+
+        assertThat(post(path, padded(ApiRequestGuardFilter.MAX_BODY_BYTES + 1))).isEqualTo(413);
+        assertThat(post(path, padded(64 * 1024))).isEqualTo(413);
+        assertThat(postChunked(path, APPROVE)).isEqualTo(413);
+        assertThat(approvalStatus()).isEqualTo(ApprovalStatus.PENDING);
+
+        assertThat(post(path, padded(ApiRequestGuardFilter.MAX_BODY_BYTES))).isEqualTo(200);
+        assertThat(approvalStatus()).isEqualTo(ApprovalStatus.APPROVED);
+    }
+
+    /** The approve body padded with JSON whitespace to exactly {@code size} bytes. */
+    private static String padded(int size) {
+        return APPROVE + " ".repeat(size - APPROVE.length());
+    }
+
+    private int post(String path, String body) throws IOException {
+        return raw("POST " + path + " HTTP/1.1\r\nHost: " + GOOD_HOST + "\r\nContent-Type: application/json\r\n"
+                + ApiRequestGuardFilter.CSRF_HEADER + ": 1\r\nContent-Length: " + body.length()
+                + "\r\nConnection: close\r\n\r\n" + body);
+    }
+
+    private int postChunked(String path, String body) throws IOException {
+        return raw("POST " + path + " HTTP/1.1\r\nHost: " + GOOD_HOST + "\r\nContent-Type: application/json\r\n"
+                + ApiRequestGuardFilter.CSRF_HEADER + ": 1\r\nTransfer-Encoding: chunked"
+                + "\r\nConnection: close\r\n\r\n" + Integer.toHexString(body.length()) + "\r\n" + body
+                + "\r\n0\r\n\r\n");
+    }
+
     private ApprovalStatus approvalStatus() {
         return approvals.find(approvalId).orElseThrow().status();
     }
