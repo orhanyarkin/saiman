@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.orchestrator.agent;
 
+import io.github.orhanyarkin.saiman.modelrouter.ModelCallObservation;
 import io.github.orhanyarkin.saiman.orchestrator.run.ModelCallRecorder;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.saiman.shared.run.AgentStep;
@@ -34,12 +35,12 @@ import org.springframework.stereotype.Component;
 public class ModelCallTap implements ObservationHandler<Observation.Context> {
 
     /** The router's observation name and attribute keys (libs/model-router {@code CostAdvisor}). */
-    static final String OBSERVATION = "saiman.model.call";
+    static final String OBSERVATION = ModelCallObservation.NAME;
 
-    static final String SCOPE = "saiman.cost.scope";
-    static final String COST = "saiman.cost.usd_micros";
-    static final String TOKENS_IN = "tokens.in";
-    static final String TOKENS_OUT = "tokens.out";
+    static final String SCOPE = ModelCallObservation.COST_SCOPE;
+    static final String COST = ModelCallObservation.COST_USD_MICROS;
+    static final String TOKENS_IN = ModelCallObservation.TOKENS_IN;
+    static final String TOKENS_OUT = ModelCallObservation.TOKENS_OUT;
 
     private static final Logger LOG = LoggerFactory.getLogger(ModelCallTap.class);
 

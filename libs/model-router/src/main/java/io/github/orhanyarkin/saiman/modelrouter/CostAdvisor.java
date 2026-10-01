@@ -52,7 +52,7 @@ final class CostAdvisor implements CallAdvisor, StreamAdvisor {
     private static final int ORDER = Ordered.LOWEST_PRECEDENCE - 10;
 
     /** Name of the observation of one model round trip. */
-    static final String OBSERVATION = "saiman.model.call";
+    static final String OBSERVATION = ModelCallObservation.NAME;
 
     /** Scope settings of a router: the optional guard, whether a scope is mandatory, the budget ceiling. */
     record ScopePolicy(@Nullable ScopedCostGuard guard, boolean required, long maxBudgetUsdMicros) {
@@ -83,9 +83,9 @@ final class CostAdvisor implements CallAdvisor, StreamAdvisor {
         }
 
         void usage(long in, long out, long usdMicros) {
-            observation.highCardinalityKeyValue("tokens.in", Long.toString(in));
-            observation.highCardinalityKeyValue("tokens.out", Long.toString(out));
-            observation.highCardinalityKeyValue("saiman.cost.usd_micros", Long.toString(usdMicros));
+            observation.highCardinalityKeyValue(ModelCallObservation.TOKENS_IN, Long.toString(in));
+            observation.highCardinalityKeyValue(ModelCallObservation.TOKENS_OUT, Long.toString(out));
+            observation.highCardinalityKeyValue(ModelCallObservation.COST_USD_MICROS, Long.toString(usdMicros));
         }
 
         void stop(String outcome) {
@@ -214,7 +214,7 @@ final class CostAdvisor implements CallAdvisor, StreamAdvisor {
             observation.start();
             String scope = scopeOf(request);
             if (scope != null) {
-                observation.highCardinalityKeyValue("saiman.cost.scope", scope);
+                observation.highCardinalityKeyValue(ModelCallObservation.COST_SCOPE, scope);
             }
             Money estimate = costing.estimate(request.prompt());
             ScopedCostGuard.ScopeReservation scoped = null;
