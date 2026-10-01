@@ -92,6 +92,8 @@ public class ReconciliationService {
     private final AtomicBoolean running = new AtomicBoolean();
     private final AtomicReference<@Nullable Instant> lastManualStart = new AtomicReference<>();
     private final AtomicLong unbalancedEntries = new AtomicLong();
+    private final AtomicLong dueBacklog = new AtomicLong();
+    private final AtomicLong oldestUncheckedSeconds = new AtomicLong();
 
     public ReconciliationService(
             ObjectProvider<BaseSepoliaUsdc> chainProvider,
@@ -119,6 +121,9 @@ public class ReconciliationService {
         this.meters = meters;
         this.observations = observations.getIfAvailable(() -> ObservationRegistry.NOOP);
         meters.gauge("saiman.ledger.reconciliation.unbalanced.entries", unbalancedEntries);
+        // Set at the start of each run (after the safe block is read): the backlog the run starts from.
+        meters.gauge("saiman.ledger.reconciliation.due", dueBacklog);
+        meters.gauge("saiman.ledger.reconciliation.oldest_unchecked_seconds", oldestUncheckedSeconds);
     }
 
     /** Thrown when no {@link BaseSepoliaUsdc} bean exists ({@code saiman.chain.rpc-url} unset). */
@@ -233,6 +238,7 @@ public class ReconciliationService {
                 log.error("Reconciliation run {}: {} journal entries do not balance per asset", runId, unbalanced);
             }
             unbalancedEntries.set(unbalanced);
+            recordBacklog(safe);
             List<String> due = repository.duePaymentKeys(
                     safe.timestamp(), properties.graceAfterValidBefore().toSeconds(), properties.batchSize());
             for (String key : due) {
@@ -249,6 +255,17 @@ public class ReconciliationService {
         repository.finishRun(runId, status, clock.instant(), safeBlock, tally.counters());
         meters.counter("saiman.ledger.reconciliation.runs", "status", status).increment();
         log.info("Reconciliation run {} {}: {}", runId, status, tally.counters());
+    }
+
+    private void recordBacklog(ChainBlock safe) {
+        ReconciliationRepository.Backlog backlog = repository.backlog(
+                safe.timestamp(), properties.graceAfterValidBefore().toSeconds());
+        dueBacklog.set(backlog.due());
+        Instant oldest = backlog.oldestUnchecked();
+        oldestUncheckedSeconds.set(
+                oldest == null
+                        ? 0
+                        : Math.max(0, Duration.between(oldest, clock.instant()).toSeconds()));
     }
 
     private record ItemResult(ItemStatus status, boolean resolvedUsed, boolean resolvedUnused, boolean unavailable) {}
