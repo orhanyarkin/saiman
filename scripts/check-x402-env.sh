@@ -3,7 +3,7 @@
 # malformed. seller-api's @RequiresPayment endpoint refuses to start without a valid
 # payout address (ADR-0008, ADR-0009), so `make up` checks it before spending time on
 # `./gradlew bootBuildImage`. `make infra-up` does not call this script: it starts only
-# postgres/redpanda/valkey/otel-collector/jaeger, none of which need it.
+# postgres/kafka/redis/otel-collector/jaeger, none of which need it.
 #
 # `make` exports the value from the shell or, failing that, from the repo-root .env
 # (scripts/read-public-env.sh). Run directly, the script needs it exported: docker compose does not read the
@@ -36,7 +36,7 @@ tool of your choice. Keep only the printed "Address" (0x followed by 40 hex char
   X402_SELLER_PAYTO_ADDRESS=0x...        # in .env
   export X402_SELLER_PAYTO_ADDRESS=0x... # or in the shell (wins over .env)
 
-`make infra-up` does not need this: it starts only postgres/redpanda/valkey/otel-collector/jaeger.
+`make infra-up` does not need this: it starts only postgres/kafka/redis/otel-collector/jaeger.
 EOF
   exit 1
 fi

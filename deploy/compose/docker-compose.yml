@@ -1,5 +1,5 @@
 # Local stack for Saiman (ADR-0001, ADR-0004, ADR-0006, ADR-0007).
-# Infra containers (postgres, redpanda, valkey, otel-collector, jaeger) run by default.
+# Infra containers (postgres, kafka, redis, otel-collector, jaeger) run by default.
 # App containers (orchestrator, seller-api, ledger, ingest) run under `--profile apps`;
 # they are built with Spring Boot Buildpacks (`./gradlew bootBuildImage`), not Dockerfiles.
 # All host ports are bound to 127.0.0.1 only. `evals` is a CLI, not a compose service.
@@ -20,8 +20,8 @@ x-app-common: &app-common
     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/saiman
     SPRING_DATASOURCE_USERNAME: saiman
     SPRING_DATASOURCE_PASSWORD: saiman
-    SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
-    SPRING_DATA_REDIS_URL: redis://valkey:6379
+    SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    SPRING_DATA_REDIS_URL: redis://redis:6379
     # Boot 4.1's spring-boot-starter-opentelemetry reads the standard OTEL_* env vars
     # and appends /v1/traces, /v1/metrics, /v1/logs itself (confirmed by T0).
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
@@ -57,61 +57,61 @@ services:
       retries: 20
       start_period: 10s
 
-  redpanda:
-    image: redpandadata/redpanda:v26.2.3
+  kafka:
+    image: apache/kafka:4.3.1
     restart: unless-stopped
-    # HTTP Proxy (pandaproxy, :8082) and Schema Registry (:8081) are off: nothing here uses
-    # them, and both would let any container on the compose network write payments.* topics
-    # over plain HTTP with no auth. The image enables them through the `pandaproxy: {}` and
-    # `schema_registry: {}` sections of its default /etc/redpanda/redpanda.yaml (its comments
-    # say so; rpk has no disable flag), so the container deletes those two lines from its own
-    # copy before the stock entrypoint runs. The Kafka listeners below are unchanged; Kafka
-    # itself stays unauthenticated until M6 (docs/THREAT_MODEL.md).
-    entrypoint:
-      - /bin/sh
-      - -c
-      - sed -i -e '/^pandaproxy:/d' -e '/^schema_registry:/d' /etc/redpanda/redpanda.yaml && exec /entrypoint.sh "$$@"
-      - redpanda-entrypoint
-    command:
-      - redpanda
-      - start
-      - --mode
-      - dev-container
-      - --smp
-      - "1"
-      - --memory
-      - 1G
-      - --kafka-addr
-      - internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr
-      - internal://redpanda:9092,external://localhost:9092
+    # Apache Kafka in KRaft mode, one node acting as broker and controller (ADR-0020). Plain Kafka has
+    # no HTTP proxy or schema registry to switch off; Kafka itself stays unauthenticated until M6
+    # (docs/THREAT_MODEL.md). The KAFKA_* variables map onto server.properties.
+    environment:
+      # Fixed so the persisted log directory keeps matching the cluster across restarts.
+      CLUSTER_ID: c2FpbWFuLWxvY2FsLWthZg
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092,CONTROLLER://localhost:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # A single node can hold one replica of the internal topics only.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Every topic is declared by the services (Spring Kafka NewTopic beans); peers must not create others.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
     ports:
       # Only the external listener (container port 19092) is published, as
-      # 127.0.0.1:9092, so both host tools and the container's own advertised
-      # address agree on "localhost:9092". The internal listener (container port
-      # 9092, advertised as redpanda:9092) is reachable only from other containers
-      # on the compose network.
+      # 127.0.0.1:9092, so both host tools and the broker's advertised address
+      # agree on "localhost:9092". The internal listener (container port 9092,
+      # advertised as kafka:9092) is reachable only from other containers on the
+      # compose network; the controller listener stays inside the container.
       - "127.0.0.1:9092:19092"
     volumes:
-      - redpanda_data:/var/lib/redpanda/data
+      - kafka_data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:\\s+true' || exit 1"]
-      interval: 5s
-      timeout: 5s
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 15s
       retries: 20
-      start_period: 10s
+      start_period: 20s
 
-  valkey:
-    image: valkey/valkey:9.1.2-alpine
+  redis:
+    image: redis:8.10.2-alpine
     restart: unless-stopped
     ports:
       # Defaults to 16380 because 6379 and 16379 clash with a native Redis on Windows;
-      # override with VALKEY_HOST_PORT if 16380 is taken too.
-      - "127.0.0.1:${VALKEY_HOST_PORT:-16380}:6379"
+      # override with REDIS_HOST_PORT if 16380 is taken too.
+      - "127.0.0.1:${REDIS_HOST_PORT:-16380}:6379"
     volumes:
-      - valkey_data:/data
+      - redis_data:/data
     healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -183,9 +183,9 @@ services:
       <<: *app-common-depends-on
       postgres:
         condition: service_healthy
-      valkey:
+      redis:
         condition: service_healthy
-      redpanda:
+      kafka:
         condition: service_healthy
       # No shell in the image, so no healthcheck: started is the strongest signal compose has;
       # `make up` polls /actuator/health on the host (scripts/wait-for-health.sh).
@@ -215,12 +215,12 @@ services:
       X402_SELLER_PAYTO_ADDRESS: ${X402_SELLER_PAYTO_ADDRESS:-}
     depends_on:
       <<: *app-common-depends-on
-      valkey:
+      redis:
         condition: service_healthy
-      # M4: seller-api records settlements in its own schema (seller_api) and publishes payment events to Redpanda.
+      # M4: seller-api records settlements in its own schema (seller_api) and publishes payment events to Kafka.
       postgres:
         condition: service_healthy
-      redpanda:
+      kafka:
         condition: service_healthy
       ingest:
         condition: service_started
@@ -245,7 +245,7 @@ services:
       <<: *app-common-depends-on
       postgres:
         condition: service_healthy
-      redpanda:
+      kafka:
         condition: service_healthy
 
   ingest:
@@ -265,7 +265,7 @@ services:
       <<: *app-common-depends-on
       postgres:
         condition: service_healthy
-      valkey:
+      redis:
         condition: service_healthy
 
 # File-backed secrets under the ignored repo-root secrets/ dir. `make up` creates missing
@@ -281,5 +281,5 @@ secrets:
 
 volumes:
   postgres_data:
-  redpanda_data:
-  valkey_data:
+  kafka_data:
+  redis_data:

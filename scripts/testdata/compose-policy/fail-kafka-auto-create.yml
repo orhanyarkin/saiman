@@ -1,0 +1,9 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: KAFKA_AUTO_CREATE_TOPICS_ENABLE must be "false"
+# Kafka without auto-create disabled: any compose peer could create topics (ADR-0020).
+name: cptest-kafka-auto-create
+services:
+  kafka:
+    image: apache/kafka:4.3.1
+    environment:
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,CONTROLLER://localhost:9093

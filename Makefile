@@ -37,7 +37,7 @@ images: ## Build all service images for the host architecture (./gradlew bootBui
 check-x402-env: ## Verify X402_SELLER_PAYTO_ADDRESS is a valid address (required by `make up`, not `infra-up`).
 	scripts/check-x402-env.sh
 
-infra-up: ## Start postgres, redpanda, valkey, otel-collector, jaeger and wait for health.
+infra-up: ## Start postgres, kafka, redis, otel-collector, jaeger and wait for health.
 	$(COMPOSE) up -d --wait
 
 up: ## Verify payTo, create empty secret files if missing, build images, start the full stack and wait for app health.
@@ -55,7 +55,7 @@ up: ## Verify payTo, create empty secret files if missing, build images, start t
 down: ## Stop and remove all containers (volumes kept).
 	$(COMPOSE) --profile apps down
 
-clean: ## Stop everything and drop volumes (postgres/redpanda/valkey data).
+clean: ## Stop everything and drop volumes (postgres/kafka/redis data).
 	$(COMPOSE) --profile apps down -v
 
 ps: ## List container status.
@@ -129,7 +129,7 @@ secrets-from-dotenv: ## HUMAN ONLY: copy OPENAI_API_KEY from .env into secrets/o
 ingest-backfill: ## Run ingest locally in backfill mode against `make infra-up` (needs secrets/mkk_credentials + openai_api_key).
 	@bash -c '(exec 3<>/dev/tcp/127.0.0.1/5432)' 2>/dev/null || { echo "Postgres is not reachable on 127.0.0.1:5432; run 'make infra-up' first." >&2; exit 1; }
 	scripts/prepare-ingest-secrets.sh $(CURDIR)/secrets $(CURDIR)/build/ingest-secrets
-	SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=saiman SPRING_DATASOURCE_PASSWORD=saiman SPRING_DATA_REDIS_URL=redis://localhost:$${VALKEY_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=$(CURDIR)/build/ingest-secrets/"
+	SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=saiman SPRING_DATASOURCE_PASSWORD=saiman SPRING_DATA_REDIS_URL=redis://localhost:$${REDIS_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=$(CURDIR)/build/ingest-secrets/"
 
 ingest-status: ## Show per-ticker ingest status from the running ingest container (loopback only).
 	@out=$$(curl -sf $(INGEST_URL)/internal/v1/tickers) || { echo "ingest not reachable on $(INGEST_URL) (is 'make up' running?)" >&2; exit 1; }; \

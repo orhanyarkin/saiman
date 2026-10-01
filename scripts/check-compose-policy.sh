@@ -155,8 +155,26 @@ if [[ -n "${bad_key_material}" ]]; then
   violations=1
 fi
 
+# Kafka is unauthenticated until M6 (docs/THREAT_MODEL.md, ADR-0020): every topic is declared by the services, so
+# a peer must not be able to create new ones; the KRaft controller listener stays inside the container; no JMX port.
+bad_kafka=$(jq -r '
+  .services | to_entries[] | .key as $svc | .value as $s |
+    ( select(($s.image // "") | startswith("apache/kafka"))
+      | ( select((($s.environment // {}).KAFKA_AUTO_CREATE_TOPICS_ENABLE // "") != "false")
+          | "\($svc): KAFKA_AUTO_CREATE_TOPICS_ENABLE must be \"false\" (all topics are declared by the services)" ),
+        ( select((($s.environment // {}).KAFKA_LISTENERS // "") | test("CONTROLLER://(localhost|127\\.0\\.0\\.1):") | not)
+          | "\($svc): KAFKA_LISTENERS must bind CONTROLLER to localhost or 127.0.0.1 only" ) ),
+    ( ($s.environment // {}) | keys[] | select(test("JMX_PORT$"))
+      | "\($svc): environment defines \(.) (no remote JMX)" )
+' <<<"${config_json}")
+if [[ -n "${bad_kafka}" ]]; then
+  fail_check "Kafka settings that widen the unauthenticated broker:"
+  echo "${bad_kafka}" >&2
+  violations=1
+fi
+
 if [[ ${violations} -ne 0 ]]; then
   exit 1
 fi
 
-echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, secrets: allowlist enforced, no OPENAI_* env, plaintext-hosts pinned to seller-api, chain RPC pinned to sepolia.base.org on ledger/orchestrator only)"
+echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, secrets: allowlist enforced, no OPENAI_* env, plaintext-hosts pinned to seller-api, chain RPC pinned to sepolia.base.org on ledger/orchestrator only, Kafka auto-create off and controller local)"
