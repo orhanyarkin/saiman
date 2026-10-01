@@ -40,12 +40,16 @@ import org.jspecify.annotations.Nullable;
  * <h2>Chain truth</h2>
  *
  * <ol>
- *   <li>Two different reported tx hashes (buyer vs seller): {@code CONFLICTING_TX}; nothing else is decided and
- *       nothing is posted until a human looks.
- *   <li>One reported tx hash: its receipt must exist ({@code TX_NOT_FOUND} once the safe block is past
+ *   <li>The projection's asset must be test USDC (receipts only describe the USDC contract); otherwise
+ *       {@code TX_NOT_FOR_AUTHORIZATION}, never MATCHED, nothing posted.
+ *   <li>Every reported tx hash (buyer and seller may report different ones) is checked on its own: its receipt
+ *       must exist ({@code TX_NOT_FOUND} once the safe block is past
  *       {@code validBefore + receiptGrace}, PENDING before that), be at or below the safe block (PENDING
  *       otherwise), have succeeded ({@code TX_FAILED}) and contain {@code AuthorizationUsed(payer, nonce)}
- *       ({@code TX_NOT_FOR_AUTHORIZATION}). A receipt passing all of that is the <em>canonical</em> transfer.
+ *       ({@code TX_NOT_FOR_AUTHORIZATION}). A receipt passing all of that is the <em>canonical</em> transfer; the
+ *       other hash keeps its own finding, so a bogus hash from one producer cannot freeze the payment. Two
+ *       different canonical receipts ({@code CONFLICTING_TX}) are impossible on chain and kept only as a guard:
+ *       nothing is decided or posted then.
  *   <li>No canonical receipt yet: before {@code validBefore} (at the safe block) the authorization may still be
  *       used, so the item is PENDING. After it, {@code authorizationState} at the safe block decides: UNUSED means
  *       no money moved; USED with a canonical receipt found by log lookup means that receipt; USED without one is
@@ -154,7 +158,7 @@ public final class ChainReconciler {
      */
     public static boolean needsAuthorizationState(
             PaymentProjection p, Map<String, Optional<UsdcReceipt>> receipts, ChainBlock safe) {
-        if (!isUsdc(p) || reportedTxHashes(p).size() > 1 || safe.timestamp() <= p.validBefore()) {
+        if (!isUsdc(p) || safe.timestamp() <= p.validBefore()) {
             return false;
         }
         return receipts.values().stream().flatMap(Optional::stream).noneMatch(r -> isCanonical(r, p, safe));
@@ -190,46 +194,50 @@ public final class ChainReconciler {
             return new Outcome(
                     ItemStatus.MISMATCH, p.withChain(p.chainState(), p.chainTxHash(), now), null, findings, null);
         }
-        if (reported.size() > 1) {
+        // Every reported hash is checked on its own: a bogus hash from one producer must not freeze the payment.
+        String reportedTx = reported.isEmpty() ? null : reported.getFirst();
+        UsdcReceipt canonical = null;
+        boolean undecided = false;
+        boolean conflict = false;
+        for (String tx : reported) {
+            Optional<UsdcReceipt> lookup = evidence.receipts().get(tx);
+            if (lookup == null) {
+                undecided = true; // not read (or the row changed since): decide nothing about this hash yet
+            } else if (lookup.isEmpty()) {
+                if (safe.timestamp()
+                        <= Math.addExact(
+                                p.validBefore(), settings.receiptGrace().toSeconds())) {
+                    undecided = true;
+                } else {
+                    findings.add(new Finding(MismatchKind.TX_NOT_FOUND, null, null, tx, null, false));
+                }
+            } else {
+                UsdcReceipt receipt = lookup.get();
+                if (receipt.blockNumber() > safe.number()) {
+                    undecided = true;
+                } else if (!receipt.succeeded()) {
+                    findings.add(new Finding(MismatchKind.TX_FAILED, null, null, tx, lower(receipt.txHash()), false));
+                } else if (!usesAuthorization(receipt, p)) {
+                    findings.add(new Finding(
+                            MismatchKind.TX_NOT_FOR_AUTHORIZATION, null, null, tx, lower(receipt.txHash()), false));
+                } else if (canonical == null) {
+                    canonical = receipt;
+                    reportedTx = tx;
+                } else if (!lower(canonical.txHash()).equals(lower(receipt.txHash()))) {
+                    conflict = true;
+                }
+            }
+        }
+        if (conflict) {
+            // Two final, successful transactions both using one authorization: impossible on chain (EIP-3009 marks
+            // the nonce used), kept as a guard. Nothing is decided and nothing is posted until a human looks.
             findings.add(
                     new Finding(MismatchKind.CONFLICTING_TX, null, null, p.buyerTxHash(), p.sellerTxHash(), false));
             return new Outcome(
                     ItemStatus.MISMATCH, p.withChain(p.chainState(), p.chainTxHash(), now), null, findings, null);
         }
-
-        String reportedTx = reported.isEmpty() ? null : reported.getFirst();
-        UsdcReceipt canonical = null;
-        if (reportedTx != null) {
-            Optional<UsdcReceipt> lookup = evidence.receipts().get(reportedTx);
-            if (lookup == null) {
-                return pending(p, findings, now);
-            }
-            if (lookup.isEmpty()) {
-                if (safe.timestamp()
-                        <= Math.addExact(
-                                p.validBefore(), settings.receiptGrace().toSeconds())) {
-                    return pending(p, findings, now);
-                }
-                findings.add(new Finding(MismatchKind.TX_NOT_FOUND, null, null, reportedTx, null, false));
-            } else {
-                UsdcReceipt receipt = lookup.get();
-                if (receipt.blockNumber() > safe.number()) {
-                    return pending(p, findings, now);
-                } else if (!receipt.succeeded()) {
-                    findings.add(new Finding(
-                            MismatchKind.TX_FAILED, null, null, reportedTx, lower(receipt.txHash()), false));
-                } else if (!usesAuthorization(receipt, p)) {
-                    findings.add(new Finding(
-                            MismatchKind.TX_NOT_FOR_AUTHORIZATION,
-                            null,
-                            null,
-                            reportedTx,
-                            lower(receipt.txHash()),
-                            false));
-                } else {
-                    canonical = receipt;
-                }
-            }
+        if (canonical == null && undecided) {
+            return pending(p, findings, now);
         }
 
         ChainState chainState;
