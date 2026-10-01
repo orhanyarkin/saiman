@@ -43,7 +43,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       {@code expired_unused}).
  * </ul>
  *
- * Not yet expired, or any {@link ChainUnavailableException}: untouched until a later pass.
+ * Not yet expired, any {@link ChainUnavailableException}, or an RPC that turns out not to be Base Sepolia (the
+ * client's deferred chain-id check throws {@link IllegalStateException}; outcome {@code wrong_chain}): untouched
+ * until a later pass. A used authorization whose log lookup fails also stays HELD ({@code used_tx_lookup_failed}):
+ * it is never released, and not settled blind either.
  *
  * <p>HELD intents with no recorded authorization (RESERVED -> HELD after a failure: the signature provably
  * never left the process) are released locally without a chain read ({@code resolved_by = LOCAL}, no payment
@@ -76,6 +79,8 @@ public class HeldPaymentResolver {
     static final long SLACK_BLOCKS = 30;
     /** A safe block further ahead of the local clock than this is not trusted: the pass is skipped. */
     static final long MAX_SAFE_AHEAD_SECONDS = 60;
+    /** Outcome when the RPC is not Base Sepolia (the client's deferred chain-id check failed). */
+    static final String WRONG_CHAIN = "wrong_chain";
 
     private final ObjectProvider<BaseSepoliaUsdc> chain;
     private final HeldResolutionProperties properties;
@@ -204,6 +209,12 @@ public class HeldPaymentResolver {
             count("chain_unavailable");
             LOG.info("HELD resolution skipped: the chain RPC is unavailable");
             return new Pass(settled, released, skipped);
+        } catch (IllegalStateException e) {
+            // The client's deferred eth_chainId check: a misconfigured RPC, not a bug in this pass. Logged without
+            // the stack trace, every pass, until the configuration is fixed.
+            count(WRONG_CHAIN);
+            LOG.warn("HELD resolution skipped: {}", e.getMessage());
+            return new Pass(settled, released, skipped);
         }
         long now = clock.getIfAvailable(Clock::systemUTC).instant().getEpochSecond();
         if (safe.timestamp() > now + MAX_SAFE_AHEAD_SECONDS) {
@@ -269,13 +280,24 @@ public class HeldPaymentResolver {
         @Nullable String txHash = null;
         try {
             used = usdc.authorizationState(held.payer(), held.nonce(), safe.number());
-            if (used) {
+        } catch (ChainUnavailableException e) {
+            return "chain_unavailable";
+        } catch (IllegalStateException e) {
+            LOG.warn("HELD resolution of payment intent {} skipped: {}", id, e.getMessage());
+            return WRONG_CHAIN;
+        }
+        if (used) {
+            // Used on chain: it will be SETTLED, never RELEASED. Without the tx hash it waits for a later pass.
+            try {
                 long[] window = logWindow(held.validBefore(), safe, properties.logWindowBlocks());
                 txHash = usdc.findAuthorizationTx(held.payer(), held.nonce(), window[0], window[1])
                         .orElse(null);
+            } catch (ChainUnavailableException e) {
+                return "used_tx_lookup_failed";
+            } catch (IllegalStateException e) {
+                LOG.warn("HELD resolution of payment intent {} skipped: {}", id, e.getMessage());
+                return WRONG_CHAIN;
             }
-        } catch (ChainUnavailableException e) {
-            return "chain_unavailable";
         }
         boolean finalUsed = used;
         @Nullable String finalTx = txHash;
