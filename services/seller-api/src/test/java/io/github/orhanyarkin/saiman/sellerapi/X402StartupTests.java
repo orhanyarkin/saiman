@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.sellerapi;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.github.orhanyarkin.saiman.sellerapi.testsupport.StartupDatabase;
 import io.github.orhanyarkin.x402.testing.FakeFacilitator;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -43,10 +44,10 @@ class X402StartupTests {
                 RuntimeException.class,
                 () -> new SpringApplicationBuilder(SellerApiApplication.class)
                         .web(WebApplicationType.SERVLET)
-                        .run(
+                        .run(StartupDatabase.with(
                                 "--server.port=0",
                                 "--x402.server.facilitator.url=" + FACILITATOR.url(),
-                                "--x402.server.pay-to="));
+                                "--x402.server.pay-to=")));
 
         Throwable root = thrown;
         while (root.getCause() != null) {
