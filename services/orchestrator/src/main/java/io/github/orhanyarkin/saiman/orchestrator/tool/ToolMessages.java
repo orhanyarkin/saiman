@@ -16,7 +16,8 @@ public final class ToolMessages {
 
     public static final String UNKNOWN_TOOL = "ERROR unknown_tool: no tool has this name. Nothing was paid.";
     public static final String INVALID_ARGUMENTS =
-            "ERROR invalid_arguments: use exactly the documented parameters. Nothing was paid.";
+            "ERROR invalid_arguments: send only the documented fields: ticker (3-6 upper-case letters or digits, from the plan)"
+                    + " and, for askDisclosures, question (3 to 500 characters). Nothing was paid.";
     public static final String UNKNOWN_TICKER =
             "ERROR unknown_ticker: the ticker is not in the seller's catalogue. Nothing was paid.";
     public static final String CATALOGUE_UNAVAILABLE =
