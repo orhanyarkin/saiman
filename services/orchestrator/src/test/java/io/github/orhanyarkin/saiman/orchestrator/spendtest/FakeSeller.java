@@ -21,6 +21,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,6 +38,9 @@ public final class FakeSeller {
     public static final String PAY_TO = "0x209693Bc6afc0C5328bA36FaF03C514EF312287C";
     public static final String PAY_TO_2 = "0x1111111111111111111111111111111111111111";
     public static final String NOT_ALLOWED_PAY_TO = "0x2222222222222222222222222222222222222222";
+
+    /** One request that reached the seller: method, raw path and whether it carried a signature. */
+    public record SeenRequest(String method, String path, boolean signed) {}
 
     /** What the seller does with a request that carries {@code PAYMENT-SIGNATURE}. */
     public enum PaidMode {
@@ -63,6 +67,9 @@ public final class FakeSeller {
     private volatile String paidBody = DEFAULT_PAID_BODY;
     private volatile List<String> tickers = DEFAULT_TICKERS;
     private volatile boolean tickersFail;
+    private final Map<String, Long> pricePerPath = new ConcurrentHashMap<>();
+    private final Map<String, String> payToPerPath = new ConcurrentHashMap<>();
+    private final List<SeenRequest> requests = new CopyOnWriteArrayList<>();
     private final AtomicInteger tickerRequests = new AtomicInteger();
     private final List<String> paidRequestLines = new CopyOnWriteArrayList<>();
     private final List<String> paidRequestBodies = new CopyOnWriteArrayList<>();
@@ -110,6 +117,9 @@ public final class FakeSeller {
         paidBody = DEFAULT_PAID_BODY;
         tickers = DEFAULT_TICKERS;
         tickersFail = false;
+        pricePerPath.clear();
+        payToPerPath.clear();
+        requests.clear();
         tickerRequests.set(0);
         paidRequestLines.clear();
         paidRequestBodies.clear();
@@ -126,6 +136,21 @@ public final class FakeSeller {
 
     public void payTo(String address) {
         this.payTo = address;
+    }
+
+    /** Offers {@code atomic} for requests to exactly {@code rawPath} (other paths keep {@link #price}). */
+    public void price(String rawPath, long atomic) {
+        pricePerPath.put(rawPath, atomic);
+    }
+
+    /** Offers {@code address} as payee for requests to exactly {@code rawPath}. */
+    public void payTo(String rawPath, String address) {
+        payToPerPath.put(rawPath, address);
+    }
+
+    /** Every request that reached this seller (free and paid), in arrival order. */
+    public List<SeenRequest> requests() {
+        return List.copyOf(requests);
     }
 
     public void paidMode(PaidMode mode) {
@@ -187,6 +212,15 @@ public final class FakeSeller {
     }
 
     private void handle(HttpExchange exchange) throws IOException {
+        String rawPath = exchange.getRequestURI().getRawPath();
+        requests.add(new SeenRequest(
+                exchange.getRequestMethod(),
+                exchange.getRequestURI().getRawQuery() == null
+                        ? rawPath
+                        : rawPath + "?" + exchange.getRequestURI().getRawQuery(),
+                exchange.getRequestHeaders().containsKey(X402Headers.PAYMENT_SIGNATURE)));
+        long offerPrice = pricePerPath.getOrDefault(rawPath, price);
+        String offerPayTo = payToPerPath.getOrDefault(rawPath, payTo);
         if ("GET".equals(exchange.getRequestMethod())
                 && "/v1/tickers".equals(exchange.getRequestURI().getRawPath())) {
             tickerRequests.incrementAndGet();
@@ -216,9 +250,9 @@ public final class FakeSeller {
             PaymentRequirements offer = new PaymentRequirements(
                     TestnetAssets.SCHEME_EXACT,
                     TestnetAssets.NETWORK,
-                    Long.toString(price),
+                    Long.toString(offerPrice),
                     TestnetAssets.USDC_ADDRESS,
-                    payTo,
+                    offerPayTo,
                     60,
                     Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION));
             String header = codec.encodePaymentRequired(new PaymentRequired(
@@ -231,8 +265,8 @@ public final class FakeSeller {
         PaymentPayload payload = codec.decodePaymentPayload(signature);
         Eip3009Authorization authorization = payload.payload().authorization();
         boolean valid = Eip3009TypedData.verify(authorization, payload.payload().signature())
-                && authorization.to().equalsIgnoreCase(payTo)
-                && AssetAmount.parse(authorization.value()).atomicUnits() == price;
+                && authorization.to().equalsIgnoreCase(offerPayTo)
+                && AssetAmount.parse(authorization.value()).atomicUnits() == offerPrice;
         if (!valid) {
             invalidSignatures.incrementAndGet();
             write(exchange, 402, "{}");
