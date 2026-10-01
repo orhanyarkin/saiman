@@ -30,11 +30,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.SplittableRandom;
 import java.util.UUID;
-import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.api.Test;
 
 /**
  * Properties of the chain step (ADR-0019 seeded generators): random books (any producer story), a random tamper
@@ -50,12 +47,8 @@ import org.junit.jupiter.params.provider.MethodSource;
  */
 class ChainReconcilerPropertyTests {
 
-    private static final int TRIES = 500;
+    private static final int TRIES = Pbt.tries();
     private static final Instant NOW = Instant.parse("2026-10-01T12:00:00Z");
-
-    static Stream<Arguments> tries() {
-        return Pbt.tries(TRIES);
-    }
 
     private enum Chain {
         MATCHING,
@@ -69,9 +62,12 @@ class ChainReconcilerPropertyTests {
     /** The evidence plus the movements it implies for the two wallets (when a canonical receipt or UNUSED decides). */
     private record Scenario(ChainReconciler.Evidence evidence, long chainBuyer, long chainSeller) {}
 
-    @ParameterizedTest(name = "P4-P6 try {0} seed {1}")
-    @MethodSource("tries")
-    void adjustmentsBalanceConvergeAndAreIdempotent(int tryIndex, long seed) {
+    @Test
+    void adjustmentsBalanceConvergeAndAreIdempotent() {
+        Pbt.forAll(TRIES, this::adjustmentsBalanceConvergeAndAreIdempotentTry);
+    }
+
+    private void adjustmentsBalanceConvergeAndAreIdempotentTry(int tryIndex, long seed) {
         var random = new SplittableRandom(seed);
         TestPayment payment = TestPayment.random(random, 1 + random.nextLong(1_000_000));
         List<PaymentFact> facts = story(payment, random);

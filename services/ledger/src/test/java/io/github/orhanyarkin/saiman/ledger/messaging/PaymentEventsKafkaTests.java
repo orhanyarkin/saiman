@@ -38,7 +38,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * End to end through a real Redpanda: raw JSON on the {@code payments.*} topics (as the producers' Modulith
- * externalization writes it, no type headers), the ledger books each entry once whatever the order and however
+ * externalization writes it, no type headers), the ledger books each entry once when a fact arrives late and however
  * often a record is redelivered, publishes {@code ledger.entry-posted.v1} through the outbox, and dead-letters
  * poison records instead of retrying them forever.
  */
@@ -83,22 +83,29 @@ class PaymentEventsKafkaTests {
         PaymentAuthorized authorized = payment.authorized();
         String key = payment.key();
 
-        // settled (buyer) before authorized, the same settled record twice, and the seller's report last on the topic.
+        // Deterministically out of order: both settled reports (the buyer's twice) are booked before the
+        // authorization is even sent. Records of one partition are processed in order, so once the last record on
+        // a topic is in the inbox, the duplicates before it have been consumed too.
         send(PaymentTopics.SETTLED, key, json.writeValueAsString(buyerSettled));
         send(PaymentTopics.SETTLED, key, json.writeValueAsString(buyerSettled));
         send(PaymentTopics.SETTLED, key, json.writeValueAsString(sellerSettled));
-        send(PaymentTopics.AUTHORIZED, key, json.writeValueAsString(authorized));
-        send(PaymentTopics.AUTHORIZED, key, json.writeValueAsString(authorized));
+        await().atMost(TIMEOUT)
+                .untilAsserted(() ->
+                        assertThat(inboxed(sellerSettled.meta().eventId())).isTrue());
+        assertThat(kinds(key)).containsExactlyInAnyOrder("ENCUMBER", "SETTLE", "SALE");
 
-        // Records of one partition are processed in order, so once the last record of each topic is in the inbox,
-        // the earlier duplicates have been consumed too.
-        await().atMost(TIMEOUT).untilAsserted(() -> {
-            assertThat(inboxed(sellerSettled.meta().eventId())).isTrue();
-            assertThat(inboxed(authorized.meta().eventId())).isTrue();
-        });
-        await().pollDelay(Duration.ofSeconds(1))
-                .atMost(TIMEOUT)
-                .untilAsserted(() -> assertThat(kinds(key)).containsExactlyInAnyOrder("ENCUMBER", "SETTLE", "SALE"));
+        // The late authorization twice, then a sentinel record behind it on the same topic.
+        PaymentAuthorized sentinel = TestPayment.random(random(), 20_000).authorized();
+        send(PaymentTopics.AUTHORIZED, key, json.writeValueAsString(authorized));
+        send(PaymentTopics.AUTHORIZED, key, json.writeValueAsString(authorized));
+        send(PaymentTopics.AUTHORIZED, "sentinel", json.writeValueAsString(sentinel));
+        await().atMost(TIMEOUT)
+                .untilAsserted(
+                        () -> assertThat(inboxed(sentinel.meta().eventId())).isTrue());
+
+        assertThat(inboxed(buyerSettled.meta().eventId())).isTrue();
+        assertThat(inboxed(authorized.meta().eventId())).isTrue();
+        assertThat(kinds(key)).containsExactlyInAnyOrder("ENCUMBER", "SETTLE", "SALE");
         assertThat(jdbc.sql("SELECT count(*) FROM posting p JOIN journal_entry e ON e.id = p.entry_id"
                                 + " WHERE e.payment_key = :key")
                         .param("key", key)

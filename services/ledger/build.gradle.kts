@@ -25,10 +25,12 @@ dependencies {
     testImplementation(libs.testcontainers.redpanda)
 }
 
-// Property tests (ADR-0019): `-Dsaiman.pbt.seed=<base seed>` on the Gradle command line reaches the test JVM,
-// so a failure printed with its base seed reproduces exactly.
+// Property tests (ADR-0019): `-Dsaiman.pbt.seed=<base seed>` and `-Dsaiman.pbt.tries=<n>` on the Gradle command
+// line reach the test JVM, so a failure printed with its base seed reproduces exactly and a nightly run can scale up.
 tasks.withType<Test>().configureEach {
-    providers.systemProperty("saiman.pbt.seed").orNull?.let { systemProperty("saiman.pbt.seed", it) }
+    for (name in listOf("saiman.pbt.seed", "saiman.pbt.tries")) {
+        providers.systemProperty(name).orNull?.let { systemProperty(name, it) }
+    }
 }
 
 // Live reconciliation against the public Base Sepolia RPC (free, no key): `./gradlew :services:ledger:testnetTest`.

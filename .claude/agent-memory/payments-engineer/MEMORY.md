@@ -10,3 +10,4 @@
 - [Modulith/evm-rpc notes](modulith-evmrpc-notes.md) — Modulith 2.1.1 property formats, Kafka JSON auto-config trap (ByteArray serde, __TypeId__), commit-time trigger errors, ON CONFLICT target pitfall.
 - [Spring 7 scheduling and sandbox quirks](spring7-scheduling-and-sandbox-quirks.md) — FixedDelayTask, SchedulingConfigurer gating, NullAway JdbcClient lists, advisory-lock runner, Bash sandbox limits.
 - [Worktree Bash + Spring Kafka DLT gotchas](worktree-bash-and-kafka-gotchas.md) — guard-refused shell forms, DLPR header copying, back-off/recoverer loops, Jackson 3 strict features, EIP-3009 log order.
+- [Spring DAO exception classification](spring-dao-exception-classification.md) — DataAccessResourceFailure is NonTransient (08xxx), spring-kafka 4.1 setBackOffFunction, TestPayment fresh eventId per call.

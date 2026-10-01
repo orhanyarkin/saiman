@@ -21,11 +21,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -33,7 +29,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 @LedgerIntegrationTest
 class PaymentLedgerServiceTests {
 
-    private static final int DB_TRIES = 50;
+    private static final int DB_TRIES = Pbt.dbTries();
 
     @Autowired
     private PaymentLedgerService ledger;
@@ -47,18 +43,17 @@ class PaymentLedgerServiceTests {
     @Autowired
     private JdbcClient jdbc;
 
-    static Stream<Arguments> dbTries() {
-        return Pbt.tries(DB_TRIES);
-    }
-
     /**
      * P2 (database-backed): payment A gets its events in canonical order, payment B (same wallets, amount and
      * story, another nonce) gets a permutation with redeliveries of the same event ids. Projections and balances
      * per account must be equal.
      */
-    @ParameterizedTest(name = "P2 db try {0} seed {1}")
-    @MethodSource("dbTries")
-    void p2RedeliveryAndReorderingGiveTheCanonicalBooks(int tryIndex, long seed) {
+    @Test
+    void p2RedeliveryAndReorderingGiveTheCanonicalBooks() {
+        Pbt.forAll(DB_TRIES, this::p2RedeliveryAndReorderingGiveTheCanonicalBooksTry);
+    }
+
+    private void p2RedeliveryAndReorderingGiveTheCanonicalBooksTry(int tryIndex, long seed) {
         var random = new SplittableRandom(seed);
         TestPayment a = TestPayment.random(random, Stories.amount(random));
         TestPayment b = TestPayment.of(
