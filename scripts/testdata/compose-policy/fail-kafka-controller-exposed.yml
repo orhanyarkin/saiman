@@ -1,0 +1,10 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: KAFKA_LISTENERS must bind CONTROLLER to localhost or 127.0.0.1 only
+# The KRaft controller listener on all interfaces would let peers talk to the controller (ADR-0020).
+name: cptest-kafka-controller-exposed
+services:
+  kafka:
+    image: apache/kafka:4.3.1
+    environment:
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
