@@ -21,3 +21,6 @@ All LLM calls go through `ModelRouter` (a library, `libs/model-router`, per ADR-
 
 ## Amendment (2026-10-01, M4): run steps on Kafka
 From M4 the orchestrator externalizes `agent.run-step.v1` to Redpanda. Those events carry the user's question, model-written answers and tool arguments, approval amounts, payees and resource URLs, so the question's `INTERNAL` class now also applies to the broker. Redpanda has no authentication until M6: it must stay on the compose network and loopback, no external consumer may subscribe before M6, and users must not enter personal data in questions (M5 UI note).
+
+## Amendment (2026-10-01): Redis and Apache Kafka (ADR-0020)
+Valkey is replaced by Redis and Redpanda by Apache Kafka (KRaft). The data-class rules for `agent.run-step.v1` are unchanged: the topic now lives on Kafka.

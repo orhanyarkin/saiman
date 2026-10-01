@@ -1,5 +1,5 @@
 - [otel-collector 0.161.0 component names](otel_collector_0161_component_names.md) — "otlp" exporter alias deprecated, use "otlp_grpc"; confirmed core distro manifest
-- [docker-compose local stack gotchas](docker_compose_local_stack_gotchas.md) — sandbox port 6379 reservation is persistent (confirmed via full project recreate), redpanda dev-container listeners, jaeger v2 defaults, Paketo tiny images have no shell
+- [docker-compose local stack gotchas](docker_compose_local_stack_gotchas.md) — sandbox port 6379 reservation is persistent (confirmed via full project recreate), (Redpanda notes are history since ADR-0020) redpanda dev-container listeners, jaeger v2 defaults, Paketo tiny images have no shell
 - [CI action SHAs](ci_action_shas.md) — how to resolve action commit SHAs via git ls-remote (peel annotated tags with ^{}), last known-good set for M0 ci.yml
 - [bash subshell error propagation](bash_subshell_error_propagation.md) — don't report function errors via a shared variable when the function's stdout is captured with $(...); use a file instead
 - [worktree write boundary](worktree_write_boundary.md) — Write/Edit tools refuse paths outside a worktree-isolated agent's own worktree even on explicit coordinator instruction; edit the worktree copy and report paths for the coordinator to merge

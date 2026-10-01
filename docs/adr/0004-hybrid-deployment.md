@@ -23,3 +23,6 @@ The project must prove it really runs in the cloud and be easy for anyone to loo
 - Oracle Always Free: heavy sign-up verification, unreliable ARM capacity.
 - Always-on VPS (Contabo/Hetzner, ~$9/month + domain): works, but pays monthly for traffic that doesn't exist.
 - AWS always-on: $50–100+/month.
+
+## Amendment (2026-10-01): Redis and Apache Kafka (ADR-0020)
+In `demo-lite`, Apache Kafka (KRaft, single node) and Redis run as the Fargate tasks instead of Redpanda and Valkey; the cost model is unchanged in kind (one small task each). MSK stays the `enterprise` option.

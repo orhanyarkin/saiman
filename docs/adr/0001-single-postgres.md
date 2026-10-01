@@ -14,3 +14,6 @@ One PostgreSQL 17 instance with pgvector. Each service owns its schema and its m
 − Vector search scale is limited (fine up to millions of chunks with HNSW).
 − Services share a failure domain; acceptable for this scale, documented in "how I'd scale this".
 Revisit if: corpus > 10M chunks or write contention appears.
+
+## Amendment (2026-10-01): Redis and Apache Kafka (ADR-0020)
+Valkey is replaced by Redis 8 (same role: ephemeral counters and caches). Postgres stays the single store of record.

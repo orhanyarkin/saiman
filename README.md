@@ -33,9 +33,9 @@ make verify-trace TRACE_ID=<traceId shown on the card>   # or open the card's Ja
 make verify-trace                                       # no browser: orchestrator → Postgres only
 ```
 
-Jaeger UI: http://localhost:16686. Valkey is published on host port **16380** (not 6379), because
+Jaeger UI: http://localhost:16686. Redis is published on host port **16380** (not 6379), because
 6379 and 16379 clash with a native Redis on Windows; if 16380 is taken too, run
-`export VALKEY_HOST_PORT=<port>` before `make up`. `make down` stops everything; `make clean` also
+`export REDIS_HOST_PORT=<port>` before `make up`. `make down` stops everything; `make clean` also
 drops volumes.
 
 ## Secrets for M2 (RAG)
@@ -115,7 +115,7 @@ wire-level contract.
 
 ## Stack
 
-Java 25 · Spring Boot 4.1 · Spring AI 2.0 · PostgreSQL + pgvector · Kafka (Redpanda) · Valkey · React + Vite · OpenTelemetry · Terraform (AWS ECS Fargate)
+Java 25 · Spring Boot 4.1 · Spring AI 2.0 · PostgreSQL + pgvector · Apache Kafka (KRaft) · Redis · React + Vite · OpenTelemetry · Terraform (AWS ECS Fargate)
 
 ## Docs
 

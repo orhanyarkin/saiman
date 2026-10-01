@@ -32,3 +32,6 @@ Depending on a local-only snapshot breaks two M1 acceptance criteria (copy-paste
 − We own spec conformance; mitigated by vendored spec fixtures pinned to a commit and a local live `/verify` check against x402.org (`make x402-testnet-check`, read-only, moves no funds).
 − Security-sensitive crypto glue is our code; security-auditor reviews every change to `core/`, `evm/`, `server/` and `client/`.
 Revisit if: the official SDK ships a v2 release on Maven Central, or we need a scheme other than `exact`.
+
+## Amendment (2026-10-01): Redis and Apache Kafka (ADR-0020)
+The seller-api nonce store runs on Redis instead of Valkey. The starter itself is unchanged: `RedisPaymentNonceStore` speaks the Redis protocol and works with either server.
