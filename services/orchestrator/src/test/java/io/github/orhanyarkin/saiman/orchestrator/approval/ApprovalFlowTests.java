@@ -2,12 +2,16 @@ package io.github.orhanyarkin.saiman.orchestrator.approval;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaidCallException;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentApprovalRequiredException;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentDeniedException;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentHandle;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentStatus;
+import io.github.orhanyarkin.saiman.orchestrator.run.FailureCode;
+import io.github.orhanyarkin.saiman.orchestrator.run.RunService;
+import io.github.orhanyarkin.saiman.orchestrator.run.RunTestAccess;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.FakeSeller;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.SpendTestSupport;
 import io.github.orhanyarkin.saiman.shared.run.DenyReason;
@@ -38,6 +42,9 @@ class ApprovalFlowTests extends SpendTestSupport {
 
     @Autowired
     private ApprovalWaiter waiter;
+
+    @Autowired
+    private RunService runs;
 
     @Test
     void aboveTheThresholdNothingIsSignedBeforeApproval() {
@@ -219,6 +226,77 @@ class ApprovalFlowTests extends SpendTestSupport {
         decide(run, approvalId, "APPROVE").expectStatus().isOk();
         decide(run, approvalId, "REJECT").expectStatus().isEqualTo(409);
         assertThat(approvals.find(approvalId).orElseThrow().status()).isEqualTo(ApprovalStatus.APPROVED);
+    }
+
+    @Test
+    void aDecisionForAFinishedRunIsAConflictAndChangesNothing() {
+        UUID run = createRun(50_000);
+        seller.price(ABOVE_THRESHOLD);
+        PaymentIntentHandle handle = newIntent(run);
+        UUID approvalId = requireApproval(handle);
+        jdbc.sql("UPDATE run SET status = 'FAILED', finished_at = now() WHERE id = :id")
+                .param("id", run)
+                .update();
+
+        decide(run, approvalId, "APPROVE")
+                .expectStatus()
+                .isEqualTo(409)
+                .expectHeader()
+                .contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.detail")
+                .isEqualTo("run has finished");
+
+        assertThat(approvals.find(approvalId).orElseThrow().status()).isEqualTo(ApprovalStatus.PENDING);
+        assertThat(intents.find(handle.id()).orElseThrow().status()).isEqualTo(PaymentIntentStatus.AWAITING_APPROVAL);
+    }
+
+    @Test
+    void anInterruptedWaiterWritesNothingAndKeepsTheInterruptFlag() throws Exception {
+        UUID run = createRun(50_000);
+        seller.price(ABOVE_THRESHOLD);
+        UUID approvalId = requireApproval(newIntent(run));
+        CompletableFuture<ApprovalStatus> result = new CompletableFuture<>();
+        CompletableFuture<Boolean> flag = new CompletableFuture<>();
+        Thread waiting = Thread.ofVirtual().start(() -> {
+            result.complete(waiter.await(approvalId, Duration.ofSeconds(30)));
+            flag.complete(Thread.currentThread().isInterrupted());
+        });
+        awaitWaiting(waiting);
+
+        waiting.interrupt();
+
+        assertThat(result.get(10, TimeUnit.SECONDS)).isEqualTo(ApprovalStatus.EXPIRED);
+        assertThat(flag.get(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(approvals.find(approvalId).orElseThrow().status()).isEqualTo(ApprovalStatus.PENDING);
+    }
+
+    @Test
+    void anApprovalAfterTheWaiterWasInterruptedLeavesNoOpenApprovedIntent() throws Exception {
+        UUID run = createRun(50_000);
+        seller.price(ABOVE_THRESHOLD);
+        PaymentIntentHandle handle = newIntent(run);
+        UUID approvalId = requireApproval(handle);
+        Thread waiting = Thread.ofVirtual().start(() -> waiter.await(approvalId, Duration.ofSeconds(30)));
+        awaitWaiting(waiting);
+        waiting.interrupt();
+        waiting.join(10_000);
+
+        decide(run, approvalId, "APPROVE").expectStatus().isOk(); // the human was a moment late
+        RunTestAccess.finishFailed(runs, run, FailureCode.INTERRUPTED);
+
+        assertThat(intents.find(handle.id()).orElseThrow().status()).isEqualTo(PaymentIntentStatus.RELEASED);
+        assertThat(intentsWithStatus(run, "APPROVED")).isZero();
+        decide(run, approvalId, "REJECT").expectStatus().isEqualTo(409);
+        assertThat(signer.calls()).isZero();
+        assertThat(seller.paidRequests()).isZero();
+        assertThat(run(run)).isEqualTo(new RunCounters(50_000, 0, 0));
+    }
+
+    private static void awaitWaiting(Thread thread) {
+        await().atMost(Duration.ofSeconds(10))
+                .until(() ->
+                        thread.getState() == Thread.State.WAITING || thread.getState() == Thread.State.TIMED_WAITING);
     }
 
     private UUID requireApproval(PaymentIntentHandle handle) {
