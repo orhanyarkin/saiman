@@ -26,8 +26,10 @@ import org.springframework.web.client.RestClient;
  * X402PaymentInterceptor} and, inside it, the {@link OfferRecorder}.
  *
  * <p>Without an {@code x402.client} signer the starter creates no interceptor; the client then
- * refuses every call ({@code NOT_CONFIGURED}) instead of the application failing to start, so the
- * service still runs (and its health endpoint answers) where no buyer key is mounted.
+ * refuses every call ({@code NOT_CONFIGURED}) instead of the application failing to start. That
+ * path applies only when {@code x402.client.private-key} is absent entirely: with compose file
+ * secrets (configtree) a mounted but empty key file binds an empty key, which the starter refuses,
+ * so startup stops (ADR-0008).
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(SellerProperties.class)
