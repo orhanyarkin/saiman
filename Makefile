@@ -21,7 +21,8 @@ export X402_SELLER_PAYTO_ADDRESS
 .PHONY: help images check-x402-env infra-up up down clean ps logs test lint format web-dev verify-trace \
 	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check \
 	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask \
-	research-run research-approve research-status
+	research-run research-approve research-status \
+	recon-run recon-report ledger-balance ledger-tamper-demo
 
 help: ## Show this help.
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -178,3 +179,29 @@ research-status: ## Show a run's summary (status, cost). Usage: make research-st
 	@command -v jq >/dev/null 2>&1 || { echo "research-status needs jq; install jq." >&2; exit 1; }
 	@[ -n "$(RUN_ID)" ] || { echo "Set RUN_ID." >&2; exit 1; }
 	@curl -sS --fail-with-body $(ORCH_URL)/api/v1/runs/$(RUN_ID) | jq .
+
+# M4 ledger and reconciliation (docs/design/m4-ledger.md "Ledger HTTP", ADR-0016, ADR-0018).
+# The ledger API is guarded like the orchestrator's (Host allowlist, JSON + X-Saiman-Csrf) and
+# bound to loopback; there is no authentication until M6. Needs `make up`.
+
+LEDGER_URL ?= http://localhost:8082
+
+recon-run: ## Trigger a reconciliation run on the ledger and print its runId.
+	@command -v jq >/dev/null 2>&1 || { echo "recon-run needs jq; install jq." >&2; exit 1; }
+	@resp=$$(curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' -H 'X-Saiman-Csrf: 1' --data '{}' $(LEDGER_URL)/api/v1/reconciliation/runs) || { echo "$$resp" >&2; exit 1; }; \
+	printf '%s\n' "$$resp" | jq -r '"runId: \(.runId)"'
+
+recon-report: ## Show the latest reconciliation report and save it to build/reports/reconciliation/latest.json.
+	@command -v jq >/dev/null 2>&1 || { echo "recon-report needs jq; install jq." >&2; exit 1; }
+	@mkdir -p build/reports/reconciliation
+	@resp=$$(curl -sS --fail-with-body $(LEDGER_URL)/api/v1/reconciliation/runs/latest) || { echo "$$resp" >&2; exit 1; }; \
+	printf '%s\n' "$$resp" | jq . | tee build/reports/reconciliation/latest.json
+
+ledger-balance: ## Print the ledger trial balance as a table.
+	@command -v jq >/dev/null 2>&1 || { echo "ledger-balance needs jq; install jq." >&2; exit 1; }
+	@resp=$$(curl -sS --fail-with-body $(LEDGER_URL)/api/v1/ledger/trial-balance) || { echo "$$resp" >&2; exit 1; }; \
+	printf '%s\n' "$$resp" | jq -r '(if type == "array" then . else (.accounts // .balances // .rows // []) end) as $$rows | if ($$rows | length) == 0 then "(no accounts)" else ($$rows[0] | keys_unsorted) as $$cols | ($$cols | join("\t")), ($$rows[] | [.[$$cols[]] | if type == "object" then (.atomicUnits // tojson) else . end] | map(tostring) | join("\t")) end' \
+		| column -t -s "$$(printf '\t')"
+
+ledger-tamper-demo: ## LOCAL COMPOSE ONLY: bypass the immutability triggers and inflate the latest SALE entry by 5000 atomic, for the reconciliation demo.
+	scripts/ledger-tamper-demo.sh
