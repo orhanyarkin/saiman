@@ -20,7 +20,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** The global daily cap (20000 here) binds across runs, each with a budget far above it. */
-@TestPropertySource(properties = "saiman.orchestrator.spend.daily-cap-atomic=20000")
+@TestPropertySource(
+        properties = {
+            "saiman.orchestrator.spend.daily-cap-atomic=20000",
+            "saiman.orchestrator.spend.default-run-budget-atomic=20000"
+        })
 class DailyCapTests extends SpendTestSupport {
 
     @Test
