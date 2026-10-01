@@ -39,6 +39,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.client.RestTestClient;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Reconciliation against {@link FakeChain} with Postgres and Redpanda. A context of its own (the property only
@@ -86,6 +88,9 @@ class ReconciliationTests {
 
     @Autowired
     private RestTestClient client;
+
+    @Autowired
+    private JsonMapper jsonMapper;
 
     @Autowired
     private ConsumerFactory<String, String> consumers;
@@ -222,6 +227,9 @@ class ReconciliationTests {
             assertThat(json)
                     .contains("\"adjustmentEntryId\":\"" + item.mismatch().adjustmentEntryId() + "\"");
             assertThat(json).doesNotContain(payment.authorization().nonce().toLowerCase(Locale.ROOT));
+            JsonNode tree = jsonMapper.readTree(json);
+            assertThat(tree.findValues("nonce")).isEmpty();
+            assertThat(tree.findValues("authorization")).isEmpty();
         });
 
         int entries = entryCount(payment);
