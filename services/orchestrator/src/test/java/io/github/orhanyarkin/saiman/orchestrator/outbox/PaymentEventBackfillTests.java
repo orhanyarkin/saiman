@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.orhanyarkin.saiman.orchestrator.outbox.OutboxTestAccess.Publication;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentHandle;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.SpendTestSupport;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +18,9 @@ class PaymentEventBackfillTests extends SpendTestSupport {
 
     @Autowired
     private PaymentEventBackfill backfill;
+
+    @Autowired
+    private MeterRegistry meters;
 
     @Test
     void historyIsPublishedExactlyOnce() {
@@ -51,6 +55,34 @@ class PaymentEventBackfillTests extends SpendTestSupport {
                                     .toString());
                     assertThat(p.event().at("/evidence").asString()).isEqualTo("FACILITATOR");
                 });
+    }
+
+    @Test
+    void aBadHistoricalRowIsSkippedAndCountedWhileTheOthersArePublished() {
+        UUID run = createRun(50_000);
+        PaymentIntentHandle good = newIntent(run);
+        assertThat(client.send(good, null).paid()).isTrue();
+        PaymentIntentHandle bad = newIntent(run);
+        assertThat(client.send(bad, null).paid()).isTrue();
+        jdbc.sql("UPDATE payment_intent SET auth_nonce = 'not-a-nonce' WHERE id = :id")
+                .param("id", bad.id())
+                .update();
+        jdbc.sql("TRUNCATE event_publication, payment_event_log").update();
+        double skippedBefore = skipped();
+
+        assertThat(backfill.backfill()).isEqualTo(2); // the good intent's authorized + settled
+
+        assertThat(skipped()).isEqualTo(skippedBefore + 2); // the bad intent's authorized + settled
+        assertThat(OutboxTestAccess.publications(jdbc, "PaymentAuthorized"))
+                .extracting(p -> p.event().at("/meta/eventId").asString())
+                .containsExactly(PaymentEventPublisher.eventId(good.id(), PaymentEventPublisher.Kind.AUTHORIZED)
+                        .toString());
+    }
+
+    private double skipped() {
+        return meters.find(PaymentEventBackfill.SKIPPED_METRIC).counters().stream()
+                .mapToDouble(c -> c.count())
+                .sum();
     }
 
     @Test
