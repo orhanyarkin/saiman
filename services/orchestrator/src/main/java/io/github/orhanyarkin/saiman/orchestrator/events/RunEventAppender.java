@@ -78,6 +78,8 @@ public class RunEventAppender {
                 .update();
         RunEvent event = new RunEvent(runId, seq, type, occurredAt, data);
         publisher.publishEvent(new RunEventAppended(event));
+        // The outbox copy (ADR-0016): persisted by the registry in this transaction, sent to Kafka after commit.
+        publisher.publishEvent(new RunStepExternalized(runId, codec.encodeEnvelope(event)));
         return event;
     }
 

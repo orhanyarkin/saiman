@@ -3,10 +3,13 @@ package io.github.orhanyarkin.saiman.orchestrator.budget;
 import io.github.orhanyarkin.saiman.orchestrator.approval.ApprovalService;
 import io.github.orhanyarkin.saiman.orchestrator.approval.ApprovalStatus;
 import io.github.orhanyarkin.saiman.orchestrator.approval.ApprovalView;
+import io.github.orhanyarkin.saiman.orchestrator.outbox.PaymentEventPublisher;
+import io.github.orhanyarkin.saiman.orchestrator.payment.IntentAuthorization;
 import io.github.orhanyarkin.saiman.orchestrator.payment.OfferedPayment;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentService;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentStatus;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentView;
+import io.github.orhanyarkin.saiman.shared.payments.SettlementEvidence;
 import io.github.orhanyarkin.saiman.shared.run.DenyReason;
 import io.github.orhanyarkin.x402.client.PaymentIntent;
 import io.github.orhanyarkin.x402.client.SpendDeniedException;
@@ -85,6 +88,7 @@ public class BudgetSpendGuard implements SpendGuard {
     private final Set<String> allowedPayTo;
     private final long maxAmountPerRequest;
     private final MeterRegistry meters;
+    private final PaymentEventPublisher events;
 
     public BudgetSpendGuard(
             JdbcClient jdbc,
@@ -93,7 +97,9 @@ public class BudgetSpendGuard implements SpendGuard {
             ApprovalService approvals,
             SpendProperties spend,
             X402ClientProperties x402,
-            MeterRegistry meters) {
+            MeterRegistry meters,
+            PaymentEventPublisher events) {
+        this.events = events;
         this.jdbc = jdbc;
         this.tx = new TransactionTemplate(transactionManager);
         this.intents = intents;
@@ -156,19 +162,26 @@ public class BudgetSpendGuard implements SpendGuard {
         } catch (NumberFormatException e) {
             throw new SpendDeniedException("signed authorization has an invalid validBefore");
         }
-        boolean recorded = intents.markSigned(
-                reservation.idempotencyKey(),
-                authorization.to(),
-                amount,
-                authorization.from(),
-                authorization.nonce(),
-                validBefore);
+        // One transaction: the SIGNED row and its PaymentAuthorized publication commit together, or neither
+        // does and the interceptor drops the signature unsent (ADR-0016).
+        boolean recorded = Boolean.TRUE.equals(tx.execute(status -> intents.markSigned(
+                        reservation.idempotencyKey(),
+                        authorization.to(),
+                        amount,
+                        authorization.from(),
+                        authorization.nonce(),
+                        validBefore)
+                .map(events::authorized)
+                .isPresent()));
         if (!recorded) {
             throw new SpendDeniedException("the signed authorization does not match the reservation");
         }
     }
 
-    /** SIGNED -> SETTLED: moves the amount from reserved to committed on the run and the day. */
+    /**
+     * SIGNED -> SETTLED: moves the amount from reserved to committed on the run and the day, and publishes
+     * {@code PaymentSettled} (BUYER, FACILITATOR) in the same transaction.
+     */
     @Override
     public void commit(SpendReservation reservation, SettlementResponse settlement) {
         tx.executeWithoutResult(status -> {
@@ -180,7 +193,48 @@ public class BudgetSpendGuard implements SpendGuard {
             moveRun(view.runId(), amount, true);
             moveDay(day, amount, true);
             intents.markSettled(view.id(), settlement.transaction());
+            IntentAuthorization settled = intents.findAuthorization(view.id())
+                    .orElseThrow(() -> new IllegalStateException("settled intent without an authorization"));
+            events.settled(settled, settlement.transaction(), SettlementEvidence.FACILITATOR);
         });
+    }
+
+    /**
+     * HELD -> SETTLED for an intent the caller has locked, in the caller's transaction (HELD resolution,
+     * ADR-0018): the chain says the authorization was used, so the amount moves from reserved to committed on
+     * the run and on the day it was reserved, and {@code PaymentSettled} (BUYER, CHAIN) is published.
+     *
+     * @param txHash the transaction that used it, or null if the log lookup found none
+     */
+    void settleHeldLocked(IntentAuthorization held, @Nullable String txHash) {
+        requireHeld(held);
+        lockRun(held.runId());
+        lockDay(held.reservedDay());
+        moveRun(held.runId(), held.amountAtomic(), true);
+        moveDay(held.reservedDay(), held.amountAtomic(), true);
+        intents.markHeldSettled(held.id(), txHash);
+        events.settled(held, txHash, SettlementEvidence.CHAIN);
+    }
+
+    /**
+     * HELD -> RELEASED for an intent the caller has locked, in the caller's transaction: the chain says the
+     * authorization expired unused, so the amount leaves the reserved counters and {@code PaymentFailed}
+     * (BUYER, FINAL, {@code expired_unused}) is published.
+     */
+    void releaseHeldLocked(IntentAuthorization held) {
+        requireHeld(held);
+        lockRun(held.runId());
+        lockDay(held.reservedDay());
+        moveRun(held.runId(), held.amountAtomic(), false);
+        moveDay(held.reservedDay(), held.amountAtomic(), false);
+        intents.markHeldReleased(held.id());
+        events.expiredUnused(held);
+    }
+
+    private static void requireHeld(IntentAuthorization intent) {
+        if (intent.status() != PaymentIntentStatus.HELD) {
+            throw new IllegalStateException("only a held payment can be resolved from the chain");
+        }
     }
 
     /**
