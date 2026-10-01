@@ -94,7 +94,8 @@ class GroundedGenerator {
             3. List in citedChunkIds the ids of the excerpts you actually used. Use only ids that appear
                in <<<EXCERPT id=...>>> headers.
             4. Write in Turkish unless the question is in another language.
-            5. Reply with one JSON object and nothing else, exactly of the form:
+            5. Keep the text under 1500 characters: summarise the most important points instead of listing everything.
+            6. Reply with one JSON object and nothing else, exactly of the form:
             """;
 
     private final ModelRouter router;
