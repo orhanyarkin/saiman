@@ -43,11 +43,13 @@ public record ChainProperties(
         if (rpcUrl == null || rpcUrl.isBlank()) {
             throw new IllegalArgumentException("saiman.chain.rpc-url must be set");
         }
-        allowedHosts = allowedHosts.stream()
-                .map(h -> h.toLowerCase(Locale.ROOT))
-                .toList();
+        allowedHosts =
+                allowedHosts.stream().map(h -> h.toLowerCase(Locale.ROOT)).toList();
         checkUrl(rpcUrl, allowedHosts);
-        if (connectTimeout.isNegative() || connectTimeout.isZero() || readTimeout.isNegative() || readTimeout.isZero()) {
+        if (connectTimeout.isNegative()
+                || connectTimeout.isZero()
+                || readTimeout.isNegative()
+                || readTimeout.isZero()) {
             throw new IllegalArgumentException("saiman.chain timeouts must be positive");
         }
         if (maxRequestsPerSecond <= 0) {
@@ -59,8 +61,8 @@ public record ChainProperties(
         if (retryAttempts < 1) {
             throw new IllegalArgumentException("saiman.chain.retry-attempts must be at least 1");
         }
-        if (retryWait.isNegative()) {
-            throw new IllegalArgumentException("saiman.chain.retry-wait must not be negative");
+        if (retryWait.toMillis() < 1) {
+            throw new IllegalArgumentException("saiman.chain.retry-wait must be at least 1ms");
         }
         if (maxLogRangeBlocks < 1) {
             throw new IllegalArgumentException("saiman.chain.max-log-range-blocks must be positive");

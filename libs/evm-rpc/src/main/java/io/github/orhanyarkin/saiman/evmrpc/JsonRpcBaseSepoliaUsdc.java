@@ -142,9 +142,10 @@ public class JsonRpcBaseSepoliaUsdc implements BaseSepoliaUsdc {
             throw new IllegalArgumentException("block number must not be negative");
         }
         ensureChain();
-        String data = AUTHORIZATION_STATE_SELECTOR + pad(authorizer) + strip0x(nonce).toLowerCase(Locale.ROOT);
-        JsonNode result = call(
-                "eth_call", List.of(Map.of("to", USDC, "data", data), "0x" + Long.toHexString(blockNumber)));
+        String data =
+                AUTHORIZATION_STATE_SELECTOR + pad(authorizer) + strip0x(nonce).toLowerCase(Locale.ROOT);
+        JsonNode result =
+                call("eth_call", List.of(Map.of("to", USDC, "data", data), "0x" + Long.toHexString(blockNumber)));
         if (!result.isString() || !BYTES32.matcher(result.asString()).matches()) {
             throw malformed();
         }
@@ -218,10 +219,14 @@ public class JsonRpcBaseSepoliaUsdc implements BaseSepoliaUsdc {
             JsonNode logs = call(
                     "eth_getLogs",
                     List.of(Map.of(
-                            "fromBlock", "0x" + Long.toHexString(start),
-                            "toBlock", "0x" + Long.toHexString(end),
-                            "address", USDC,
-                            "topics", topics)));
+                            "fromBlock",
+                            "0x" + Long.toHexString(start),
+                            "toBlock",
+                            "0x" + Long.toHexString(end),
+                            "address",
+                            USDC,
+                            "topics",
+                            topics)));
             if (!logs.isArray()) {
                 throw malformed();
             }
@@ -248,7 +253,8 @@ public class JsonRpcBaseSepoliaUsdc implements BaseSepoliaUsdc {
     private void verifyChain() {
         JsonNode result = call("eth_chainId", List.of());
         if (quantity(result) != CHAIN_ID) {
-            throw new IllegalStateException("saiman.chain.rpc-url is not Base Sepolia (eth_chainId != " + CHAIN_ID + ")");
+            throw new IllegalStateException(
+                    "saiman.chain.rpc-url is not Base Sepolia (eth_chainId != " + CHAIN_ID + ")");
         }
         chainVerified = true;
     }
@@ -296,7 +302,8 @@ public class JsonRpcBaseSepoliaUsdc implements BaseSepoliaUsdc {
                         return readBounded(resp.getBody());
                     });
         } catch (ResourceAccessException e) {
-            throw new TransientChainException("chain RPC request failed (" + e.getClass().getSimpleName() + ")");
+            throw new TransientChainException(
+                    "chain RPC request failed (" + e.getClass().getSimpleName() + ")");
         }
         JsonNode root;
         try {
