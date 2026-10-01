@@ -60,6 +60,18 @@ services:
   redpanda:
     image: redpandadata/redpanda:v26.2.3
     restart: unless-stopped
+    # HTTP Proxy (pandaproxy, :8082) and Schema Registry (:8081) are off: nothing here uses
+    # them, and both would let any container on the compose network write payments.* topics
+    # over plain HTTP with no auth. The image enables them through the `pandaproxy: {}` and
+    # `schema_registry: {}` sections of its default /etc/redpanda/redpanda.yaml (its comments
+    # say so; rpk has no disable flag), so the container deletes those two lines from its own
+    # copy before the stock entrypoint runs. The Kafka listeners below are unchanged; Kafka
+    # itself stays unauthenticated until M6 (docs/THREAT_MODEL.md).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - sed -i -e '/^pandaproxy:/d' -e '/^schema_registry:/d' /etc/redpanda/redpanda.yaml && exec /entrypoint.sh "$$@"
+      - redpanda-entrypoint
     command:
       - redpanda
       - start
