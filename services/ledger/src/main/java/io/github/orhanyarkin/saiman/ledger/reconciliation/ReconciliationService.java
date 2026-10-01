@@ -413,29 +413,47 @@ public class ReconciliationService {
             this.connection = connection;
         }
 
+        /**
+         * Unlocks, then returns the connection to the pool. If the unlock fails, or Postgres says the lock was not
+         * held by this session, the connection is aborted <em>before</em> it is closed: closing first would return
+         * a pooled connection that may still hold the session lock, refusing every future run. The pool evicts an
+         * aborted connection and Postgres ends the session, which releases the lock.
+         */
         @Override
         public void close() {
-            try (connection) {
+            try {
+                boolean unlocked = false;
                 try (PreparedStatement unlock = connection.prepareStatement("SELECT pg_advisory_unlock(?)")) {
                     unlock.setLong(1, LOCK_KEY);
-                    unlock.execute();
-                }
-            } catch (SQLException e) {
-                // Closing returns a pooled connection that may still hold the session lock, blocking every future
-                // run. Abort it instead: the pool evicts an aborted connection and Postgres ends the session,
-                // which releases the lock.
-                log.error(
-                        "Could not release the reconciliation lock; aborting its connection ({})",
-                        e.getClass().getName());
-                try {
-                    connection.abort(Runnable::run);
-                } catch (SQLException abortFailed) {
+                    try (ResultSet rs = unlock.executeQuery()) {
+                        unlocked = rs.next() && rs.getBoolean(1);
+                    }
+                } catch (SQLException | RuntimeException e) {
                     log.error(
-                            "Could not abort the reconciliation lock connection ({})",
-                            abortFailed.getClass().getName());
+                            "Could not release the reconciliation lock; aborting its connection ({})",
+                            e.getClass().getName());
+                }
+                if (!unlocked) {
+                    abort();
                 }
             } finally {
-                running.set(false);
+                try {
+                    connection.close();
+                } catch (SQLException | RuntimeException e) {
+                    // Already aborted or broken: the pool evicts it.
+                } finally {
+                    running.set(false);
+                }
+            }
+        }
+
+        private void abort() {
+            try {
+                connection.abort(Runnable::run);
+            } catch (SQLException | RuntimeException e) {
+                log.error(
+                        "Could not abort the reconciliation lock connection ({})",
+                        e.getClass().getName());
             }
         }
     }
