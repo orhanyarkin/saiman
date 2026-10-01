@@ -69,3 +69,8 @@ containers directly (confirmed in ADR-0007). Poll `/actuator/health` from the ho
 instead — see `scripts/wait-for-health.sh`.
 
 See also [[otel-collector-0161-component-names]].
+
+**2026-10-01 (ADR-0020): Valkey → Redis, Redpanda → Apache Kafka KRaft.** The Valkey port notes above apply to the
+`redis` service unchanged (host port `REDIS_HOST_PORT`, default 16380). The Redpanda notes are history: compose now
+runs `apache/kafka` with KAFKA_* env vars (fixed `CLUSTER_ID`, listeners INTERNAL kafka:9092 / EXTERNAL
+localhost:9092 ← container 19092 / CONTROLLER localhost:9093), healthcheck via `/opt/kafka/bin/kafka-topics.sh`.

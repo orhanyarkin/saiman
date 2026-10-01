@@ -6,6 +6,8 @@ Agentic-payments reference platform: financial research agents that discover and
 
 **One backend stack (Java 25 + Spring Boot 4.1 + Spring AI 2.0), one frontend stack (React + Vite).** See ADR-0005. Don't introduce another language or framework without a new ADR.
 
+**Prefer widely known tools** (Redis, Kafka, Postgres and the like). If you want a less common alternative, justify it in an ADR and ask the human for approval first (ADR-0020).
+
 Read `docs/ARCHITECTURE.md` and `docs/PLAN.md` before starting any milestone. Track progress in `docs/PROGRESS.md`.
 
 ## Repository layout (Gradle multi-project, Kotlin DSL)
@@ -25,7 +27,7 @@ services/
   evals/                          golden-set evals, cost/quality reports (Spring Boot CLI app)
 web/                              React 19 + Vite + TypeScript + TanStack Router/Query + Tailwind + shadcn/ui
 deploy/
-  compose/                        Postgres+pgvector, Redpanda, Valkey, OTel collector, all services
+  compose/                        Postgres+pgvector, Apache Kafka (KRaft), Redis, OTel collector, all services
   terraform/aws/                  bootstrap (state, OIDC) + module demo-lite (ECS Fargate ARM); enterprise (EKS + Helm) is a stretch goal
 scripts/capture-demo/             exports a deployed run as JSON for the static replay demo (ADR-0004)
 docs/                             ARCHITECTURE, PLAN, PROGRESS, SETUP, KICKOFF, adr/, events/
@@ -35,7 +37,7 @@ docs/                             ARCHITECTURE, PLAN, PROGRESS, SETUP, KICKOFF, 
 
 1. **Testnet only.** x402 runs on Base Sepolia with test USDC. Never add mainnet networks, real private keys or real funds. Wallet keys come from env vars and are never committed or logged.
 2. **Secrets.** Never read, print or commit `.env`, `*.pem`, `*.key` or anything under `secrets/`. Add new variables to `.env.example`.
-3. **Spend limits live outside the LLM.** Budget checks are deterministic code in the spend-control plane (Valkey + Postgres), never a prompt instruction. Every paid call needs: per-run budget, global daily cap, payee allowlist, idempotency key.
+3. **Spend limits live outside the LLM.** Budget checks are deterministic code in the spend-control plane (Redis + Postgres), never a prompt instruction. Every paid call needs: per-run budget, global daily cap, payee allowlist, idempotency key.
 4. **Money is integers.** `long` atomic units + asset decimals (USDC = 6), wrapped in a `Money` record. No `double`/`float`; no `BigDecimal` on the wire. Format only at the UI edge.
 5. **Idempotency + outbox.** Every state change that emits an event goes through the transactional outbox; consumers dedupe through an inbox table keyed by event id, in the same transaction as the state change.
 6. **LLM calls go through the model router** (`libs/model-router`, a `ChatClient`/`EmbeddingModel` facade over Spring AI; ADR-0011). No code calls a provider directly. The router enforces the data-classification policy (ADR-0003).
@@ -50,10 +52,10 @@ docs/                             ARCHITECTURE, PLAN, PROGRESS, SETUP, KICKOFF, 
 - Package by feature inside each service (`payment`, `budget`, `run`…), not by layer. Records for DTOs and events. JSpecify nullness annotations.
 - Web: Spring MVC + `RestClient`; Problem Details (RFC 9457) for errors; springdoc-openapi for OpenAPI specs.
 - Data: Spring Data JDBC or `JdbcClient` (no JPA/Hibernate), Flyway migrations, one Postgres with one schema per service, no cross-schema queries.
-- Messaging: Spring Kafka against Redpanda. Topics `<domain>.<event>.v1`; schemas in `docs/events/`. Spring Modulith's event publication registry may back the outbox (ADR if used).
+- Messaging: Spring Kafka against Apache Kafka (KRaft, single node locally). Topics `<domain>.<event>.v1`; schemas in `docs/events/`. Spring Modulith's event publication registry may back the outbox (ADR if used).
 - Resilience: Resilience4j (retry with jitter, circuit breaker, timeout) on every outbound client.
 - Observability: Micrometer + OpenTelemetry (traces + metrics) on every endpoint, consumer and LLM/payment call; LLM and payment paths record tokens and USD.
-- Tests: JUnit Jupiter, AssertJ, Testcontainers (Postgres, Redpanda, Valkey), `@SpringBootTest` slices; the property-testing approach is decided by an ADR at the start of M4 (not jqwik: its maintainers ask AI agents not to use it). Spotless (palantir-java-format) + Error Prone.
+- Tests: JUnit Jupiter, AssertJ, Testcontainers via `libs/test-support` (one Postgres, Kafka and Redis per test JVM, a database per context; ADR-0020), `@SpringBootTest` slices; the property-testing approach is decided by an ADR at the start of M4 (not jqwik: its maintainers ask AI agents not to use it). Spotless (palantir-java-format) + Error Prone.
 - Web app: strict TypeScript, TanStack Query, typed client from OpenAPI (`openapi-typescript`), Vitest + Playwright.
 - Commits: Conventional Commits, one logical change each.
 

@@ -9,3 +9,4 @@
 - [M4 T4+T5 audit](m4-t4-t5-audit.md) — forged payments.* defeats recon: validBefore overflow, asset double-book, starvation, tx freeze (2026-10-01)
 - [M4 close audit](m4-close-audit.md) — NUL eventId stalls ledger forever, recon Lease abort-after-close, with-tx flood starvation, LOCAL release sound (2026-10-01)
 - [M4 close-fix re-review](m4-close-fix-reaudit.md) — RPC failures keep HELD, min(safe,now) sound; residual ts-number binding, unmapped SQLSTATE quarantine (2026-10-01)
+- [Redis/Kafka swap audit](infra-redis-kafka-swap-audit.md) — no Crit/High/Med; Kafka admin-API suppression undocumented, JMX local connector, Redis 8 modules (2026-10-01)

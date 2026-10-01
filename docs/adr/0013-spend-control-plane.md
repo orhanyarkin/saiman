@@ -31,3 +31,6 @@ A money decision must be durable and in the same transaction as the reservation 
 HELD intents are resolved by the orchestrator from chain facts (ADR-0018): HELD → SETTLED when `authorizationState` is true at the `safe` block past `validBefore` (reserved → committed), HELD → RELEASED when it is false (reserved released). `payment_intent.resolved_by` (FACILITATOR | CHAIN) and `resolved_at` record how. A HELD reservation keeps counting until then; an RPC failure leaves it counted (fail closed).
 
 - A HELD intent without a nonce (marked HELD before anything was signed) is released immediately with `resolved_by = LOCAL`, without a chain read or a payment event: its signature provably never left the process.
+
+## Amendment (2026-10-01): Redis and Apache Kafka (ADR-0020)
+Read "Valkey" above as Redis: the router's counters moved to Redis. The reasons for keeping payment budgets in Postgres (durability, same transaction as the intent, no auth on the cache yet) apply to Redis unchanged.

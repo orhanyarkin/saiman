@@ -23,3 +23,6 @@ Payment state changes in the orchestrator and seller-api must reach the ledger e
 + The consumer design (inbox + business keys + order independence) is robust to duplicates and reordering, which the acceptance tests prove.
 − Delivery order is not guaranteed; consumers must stay order-independent.
 − One more dependency line (Spring Modulith BOM) to keep in step with Boot.
+
+## Amendment (2026-10-01): Redis and Apache Kafka (ADR-0020)
+The broker is Apache Kafka (KRaft, single node) instead of Redpanda. The outbox, externalization and inbox design is unchanged: both speak the Kafka protocol through Spring Kafka.
