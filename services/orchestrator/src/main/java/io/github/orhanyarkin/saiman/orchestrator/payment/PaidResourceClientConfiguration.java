@@ -64,7 +64,11 @@ class PaidResourceClientConfiguration {
                 restClient, intents, sellerCircuitBreaker(), codec, allowedPayTo, max == null ? 0 : max);
     }
 
-    /** Opens on I/O errors and seller 5xx only; a denial, rejection or 4xx is not a seller failure. */
+    /**
+     * Opens on I/O errors and seller 5xx only; a denial, rejection or 4xx is not a seller failure,
+     * and a 429 on the paid retry is ignored altogether (neither failure nor success): the seller is
+     * up and rate-limiting this payer.
+     */
     private static CircuitBreaker sellerCircuitBreaker() {
         return CircuitBreaker.of(
                 "seller-api",
@@ -76,6 +80,8 @@ class PaidResourceClientConfiguration {
                         .waitDurationInOpenState(Duration.ofSeconds(30))
                         .permittedNumberOfCallsInHalfOpenState(1)
                         .recordException(X402PaidResourceClient::isSellerFailure)
+                        .ignoreException(
+                                failure -> failure instanceof X402PaidResourceClient.SellerRateLimitedException)
                         .build());
     }
 }

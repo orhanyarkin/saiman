@@ -210,6 +210,21 @@ class PaidToolGatewayTests extends RunTestSupport {
     }
 
     @Test
+    void aSellerRateLimitOnThePaidRetryIsAnAmbiguousPayment() {
+        UUID run = createRun(50_000);
+        RunToolSession session = gateway.openSession(run, RunPhaseListener.NONE);
+        seller.paidMode(FakeSeller.PaidMode.RATE_LIMITED_429);
+
+        assertThat(session.call(SUMMARY, "{\"ticker\":\"THYAO\"}")).isEqualTo(ToolMessages.OUTCOME_UNKNOWN);
+
+        assertThat(signer.calls()).isEqualTo(1);
+        assertThat(intentsWithStatus(run, "HELD")).isEqualTo(1);
+        assertThat(run(run)).isEqualTo(new RunCounters(50_000, 10_000, 0));
+        assertThat(eventLog.readAfter(run, 0))
+                .anySatisfy(e -> assertThat(e.data()).isInstanceOf(RunEventData.PaymentAmbiguous.class));
+    }
+
+    @Test
     void theMaxPaidCallsLimitIsEnforcedInCode() {
         // The shared test context allows 20 paid calls (the guard's own limit); this gateway allows 4.
         SpendProperties four = new SpendProperties(

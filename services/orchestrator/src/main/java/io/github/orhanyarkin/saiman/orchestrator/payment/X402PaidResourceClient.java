@@ -60,7 +60,11 @@ final class X402PaidResourceClient implements PaidResourceClient {
         this.maxAmountPerRequest = maxAmountPerRequest;
     }
 
-    /** The failures that count against the seller's circuit breaker: I/O errors and 5xx. */
+    /**
+     * The failures that count against the seller's circuit breaker: I/O errors and 5xx. Not a
+     * failure: a denial, a rejection, a 4xx, a 402 after signing, and a 429 on the paid retry ({@link
+     * SellerRateLimitedException}, ignored by the breaker): a rate limit says the seller is up.
+     */
     static boolean isSellerFailure(Throwable failure) {
         return failure instanceof ResourceAccessException
                 || (failure instanceof AmbiguousPaymentException
@@ -84,7 +88,7 @@ final class X402PaidResourceClient implements PaidResourceClient {
         }
         OfferRecorder.Exchange exchange = new OfferRecorder.Exchange();
         try {
-            return circuitBreaker.executeSupplier(() -> exchange(client, intent, jsonBody, exchange));
+            return circuitBreaker.executeSupplier(() -> rateLimitAware(client, intent, jsonBody, exchange));
         } catch (PaidCallException e) {
             throw e;
         } catch (CallNotPermittedException e) {
@@ -97,6 +101,23 @@ final class X402PaidResourceClient implements PaidResourceClient {
         } catch (RuntimeException e) {
             // Ambiguous payment, I/O error, or a failure while recording the settlement.
             throw unresolved(id);
+        }
+    }
+
+    /**
+     * {@link #exchange}, with an ambiguous outcome whose paid retry was answered 429 rethrown as
+     * {@link SellerRateLimitedException}, so the circuit breaker can tell it from an outage. The
+     * payment stays ambiguous either way: {@link #send} still holds the reservation.
+     */
+    private PaidResponse rateLimitAware(
+            RestClient client, PaymentIntentHandle intent, @Nullable Object jsonBody, OfferRecorder.Exchange exchange) {
+        try {
+            return exchange(client, intent, jsonBody, exchange);
+        } catch (AmbiguousPaymentException e) {
+            if (!(e instanceof PaymentDeclinedAfterSigningException) && exchange.paidStatus() == 429) {
+                throw new SellerRateLimitedException(e);
+            }
+            throw e;
         }
     }
 
@@ -257,4 +278,18 @@ final class X402PaidResourceClient implements PaidResourceClient {
     }
 
     private record RawResponse(int status, @Nullable String body) {}
+
+    /**
+     * The seller answered the signed retry with 429 (its per-payer limit). As ambiguous as any other
+     * non-2xx after signing (the intent is held), but not a seller outage: the circuit breaker
+     * ignores it.
+     */
+    static final class SellerRateLimitedException extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        SellerRateLimitedException(AmbiguousPaymentException cause) {
+            super("seller rate-limited the paid retry; payment outcome is ambiguous", cause);
+        }
+    }
 }
