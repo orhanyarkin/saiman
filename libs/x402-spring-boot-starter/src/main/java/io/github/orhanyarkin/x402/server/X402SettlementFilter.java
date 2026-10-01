@@ -82,6 +82,9 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
 
     private static final Pattern TRANSACTION_HASH_PATTERN = Pattern.compile("0x[0-9a-fA-F]{64}");
 
+    /** A facilitator reason code is logged only in this shape; anything else is reported as unrecognised. */
+    private static final Pattern REASON_CODE = Pattern.compile("[a-z0-9_]{1,64}");
+
     private final ObjectProvider<RequestMappingHandlerMapping> handlerMapping;
     private final RequiresPaymentRegistry registry;
     private final FacilitatorClient facilitatorClient;
@@ -330,6 +333,10 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
         wrappedResponse.reset();
         restoreHeaders(wrappedResponse, headerSnapshot);
         attempt.outcome("settlement_failed");
+        // The facilitator's reason is untrusted text: log it only as a bounded code, never echo it.
+        log.warn(
+                "x402 settlement failed: reason={}",
+                errorReason != null && REASON_CODE.matcher(errorReason).matches() ? errorReason : "unrecognised");
         RequiresPaymentInterceptor.writePaymentRequired(
                 wrappedResponse,
                 codec,
