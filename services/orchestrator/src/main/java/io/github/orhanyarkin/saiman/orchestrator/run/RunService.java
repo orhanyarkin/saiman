@@ -19,6 +19,7 @@ import io.micrometer.observation.ObservationRegistry;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -50,7 +51,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       queue); the run is inserted QUEUED together with {@code RUN_STARTED}.
  *   <li><b>Execution</b> (on its own virtual thread): a root {@code saiman.run} observation (a new
  *       trace, whose id is stored on the run and returned by the API), RUNNING, the {@link
- *       ResearchPipeline}, AWAITING_APPROVAL while a payment waits for a human.
+ *       ResearchPipeline}, AWAITING_APPROVAL while a payment waits for a human. A wall-clock
+ *       deadline ({@code saiman.orchestrator.runs.deadline}) bounds the run: past it no tool call or
+ *       step starts, an approval wait ends (the approval expires) and the run fails {@code
+ *       RUN_DEADLINE}; spend stays bounded by the run, daily and LLM caps either way.
  *   <li><b>Finish</b> (one transaction): the run's PENDING approvals expire (with their intents) and
  *       its still-PENDING intents are released, the run becomes SUCCEEDED or FAILED and exactly one
  *       terminal event carries the persisted cost; the root span gets the same numbers.
@@ -176,7 +180,12 @@ public class RunService {
             String traceId = currentTraceId();
             runs.markRunning(runId, traceId);
             traceHandoff.complete(traceId);
-            outcome = runPipeline(runId, question, budget);
+            Instant deadline = Instant.now().plus(limits.deadline());
+            outcome = runPipeline(runId, question, budget, deadline);
+            if (outcome instanceof RunOutcome.Failed && !Instant.now().isBefore(deadline)) {
+                // Whatever failed last (an expired approval, no evidence), the cause is the deadline.
+                outcome = RunOutcome.failed(FailureCode.RUN_DEADLINE);
+            }
             RunCost cost = finish(runId, outcome);
             tagCost(observation, cost);
         } catch (RuntimeException e) {
@@ -202,12 +211,12 @@ public class RunService {
         }
     }
 
-    private RunOutcome runPipeline(UUID runId, String question, long budget) {
+    private RunOutcome runPipeline(UUID runId, String question, long budget, Instant deadline) {
         ResearchPipeline research = pipeline.getIfAvailable();
         if (research == null) {
             return RunOutcome.failed(FailureCode.PIPELINE_UNAVAILABLE);
         }
-        RunToolSession tools = gateway.openSession(runId, phaseListener(runId));
+        RunToolSession tools = gateway.openSession(runId, phaseListener(runId, deadline));
         RunContext context = new RunContext(
                 runId,
                 question,
@@ -215,7 +224,8 @@ public class RunService {
                 events.emitterFor(runId),
                 tools,
                 runId.toString(),
-                call -> recordModelCall(runId, call));
+                call -> recordModelCall(runId, call),
+                deadline);
         try {
             return Objects.requireNonNull(research.execute(context), "pipeline returned no outcome");
         } catch (RuntimeException e) {
@@ -271,8 +281,13 @@ public class RunService {
         });
     }
 
-    private RunPhaseListener phaseListener(UUID runId) {
+    private RunPhaseListener phaseListener(UUID runId, Instant deadline) {
         return new RunPhaseListener() {
+            @Override
+            public Instant deadline() {
+                return deadline;
+            }
+
             @Override
             public void awaitingApproval() {
                 runs.changeActiveStatus(runId, RunStatus.RUNNING, RunStatus.AWAITING_APPROVAL);

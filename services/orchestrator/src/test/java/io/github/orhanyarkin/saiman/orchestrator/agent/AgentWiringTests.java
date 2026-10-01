@@ -74,7 +74,13 @@ class AgentWiringTests extends RunTestSupport {
                         + "\"citedChunkIds\":[\"kap:1001:0001\"]}"));
 
         RunOutcome outcome = agents.run(new AgentPipeline.AgentRun(
-                runId, "What did THYAO disclose?", (type, data) -> null, tools, runId.toString(), recorded::add));
+                runId,
+                "What did THYAO disclose?",
+                (type, data) -> null,
+                tools,
+                runId.toString(),
+                recorded::add,
+                java.time.Instant.MAX));
 
         assertThat(outcome).isInstanceOf(RunOutcome.Succeeded.class);
         assertThat(recorded)

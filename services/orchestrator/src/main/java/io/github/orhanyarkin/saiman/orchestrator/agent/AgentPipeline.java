@@ -22,6 +22,7 @@ import io.github.orhanyarkin.saiman.shared.run.RunEventData;
 import io.github.orhanyarkin.saiman.shared.run.RunEventType;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -127,7 +128,8 @@ public class AgentPipeline implements ResearchPipeline {
             RunEventEmitter events,
             RunTools tools,
             String costScopeId,
-            ModelCallRecorder modelCalls) {}
+            ModelCallRecorder modelCalls,
+            Instant deadline) {}
 
     /** A step ended the run with a fixed code. */
     private static final class StepFailure extends RuntimeException {
@@ -148,7 +150,8 @@ public class AgentPipeline implements ResearchPipeline {
                 context.events(),
                 RunTools.of(context.tools()),
                 context.costScopeId(),
-                context.modelCalls()));
+                context.modelCalls(),
+                context.deadline()));
     }
 
     RunOutcome run(AgentRun run) {
@@ -168,6 +171,7 @@ public class AgentPipeline implements ResearchPipeline {
 
     /** Runs one step inside its events and its child observation; checks the cost recording after it. */
     private <T> T step(AgentRun run, ModelCallTap.Subscription calls, AgentStep step, Supplier<T> body) {
+        requireBeforeDeadline(run);
         calls.step(step);
         run.events().emit(RunEventType.STEP_STARTED, new RunEventData.StepChanged(step));
         Observation observation = Observation.createNotStarted(STEP_OBSERVATION, observations)
@@ -180,6 +184,7 @@ public class AgentPipeline implements ResearchPipeline {
             if (calls.failed()) {
                 throw new StepFailure(FailureCode.INTERNAL_ERROR);
             }
+            requireBeforeDeadline(run);
             outcome = "completed";
             run.events().emit(RunEventType.STEP_COMPLETED, new RunEventData.StepChanged(step));
             return result;
@@ -189,6 +194,12 @@ public class AgentPipeline implements ResearchPipeline {
         } finally {
             observation.lowCardinalityKeyValue("outcome", outcome);
             observation.stop();
+        }
+    }
+
+    private static void requireBeforeDeadline(AgentRun run) {
+        if (!Instant.now().isBefore(run.deadline())) {
+            throw new StepFailure(FailureCode.RUN_DEADLINE);
         }
     }
 

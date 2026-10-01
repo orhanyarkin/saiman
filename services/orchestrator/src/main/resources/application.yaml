@@ -42,6 +42,7 @@ saiman:
     runs:
       max-concurrent: 2 # the seller allows 2 in-flight runs per payer; the orchestrator is one wallet
       llm-budget-usd-micros: 150000
+      deadline: 15m # wall clock per run; past it the run fails RUN_DEADLINE (pending approvals expire)
     agents:
       # TIER2 per ADR-0014; set tier1 while the tier2 model id is unverified (T6 live runs).
       synthesis-tier: tier2
