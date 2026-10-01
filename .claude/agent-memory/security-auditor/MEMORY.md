@@ -5,3 +5,6 @@
 - [M3 T3 spend-control audit](m3-t3-spend-control-audit.md) — /api guard bypass via ;/%61 (confirmed, also ingest), ".." in SellerEndpoint, trigger/role gaps (2026-09-30)
 - [M3 T4 agents audit](m3-t4-agents-audit.md) — no Crit/High; T3 guard + ".." closed; Unicode invisibles, link-scrub gaps, orphan approvals, test gaps (2026-10-01)
 - [M3 close audit](m3-close-audit.md) — honest-path HELD triggers: 35s buyer timeout, seller 30/h cap, shared router day key, clock skew (2026-10-01)
+- [M4 T1/T3/T6 audit](m4-t1-t3-t6-audit.md) — poison validBefore kills reconciliation, DLT on transient DB errors, amount bounds, Kafka trust (2026-10-01)
+- [M4 T4+T5 audit](m4-t4-t5-audit.md) — forged payments.* defeats recon: validBefore overflow, asset double-book, starvation, tx freeze (2026-10-01)
+- [M4 close audit](m4-close-audit.md) — NUL eventId stalls ledger forever, recon Lease abort-after-close, with-tx flood starvation, LOCAL release sound (2026-10-01)
