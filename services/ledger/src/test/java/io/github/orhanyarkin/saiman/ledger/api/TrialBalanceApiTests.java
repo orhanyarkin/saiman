@@ -11,6 +11,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.math.BigInteger;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -24,7 +25,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.client.RestTestClient;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * {@code GET /api/v1/ledger/trial-balance} and the request guard on a real Tomcat. Guard cases write the request
@@ -37,6 +40,12 @@ class TrialBalanceApiTests {
 
     @Autowired
     private RestTestClient client;
+
+    @Autowired
+    private JdbcClient jdbc;
+
+    @Autowired
+    private TransactionTemplate transactions;
 
     @Autowired
     private PaymentLedgerService ledger;
@@ -77,6 +86,56 @@ class TrialBalanceApiTests {
                 .mapToLong(row -> ((Number) row.get("balance")).longValue())
                 .sum();
         assertThat(sum).isZero();
+    }
+
+    /**
+     * Each posting is at most 2^53-1, but 1100 of them on one account exceed a {@code long}: the totals are summed
+     * as numeric and returned as JSON integers, never a 500. A separate asset keeps the USDC rows untouched.
+     */
+    @Test
+    void trialBalanceSurvivesSumsBeyondLong() {
+        String asset = "BIG" + Math.abs(new SplittableRandom().nextInt(1_000_000));
+        int entries = 1100;
+        transactions.executeWithoutResult(tx -> {
+            jdbc.sql("""
+                            INSERT INTO account (code, book, type, asset, decimals)
+                            VALUES ('platform:bigsum:a', 'PLATFORM', 'ASSET', :asset, 0),
+                                   ('platform:bigsum:b', 'PLATFORM', 'SUSPENSE', :asset, 0)
+                            """).param("asset", asset).update();
+            jdbc.sql("""
+                            WITH e AS (
+                                INSERT INTO journal_entry (id, book, kind, description, effective_at)
+                                SELECT gen_random_uuid(), 'PLATFORM', 'ADJUSTMENT', 'sum beyond long', now()
+                                  FROM generate_series(1, :entries)
+                                RETURNING id)
+                            INSERT INTO posting (entry_id, account_code, side, amount_atomic, asset, decimals)
+                            SELECT e.id, a.code, a.side, 9007199254740991, :asset, 0
+                              FROM e CROSS JOIN (VALUES ('platform:bigsum:a', 'DEBIT'),
+                                                        ('platform:bigsum:b', 'CREDIT')) AS a (code, side)
+                            """).param("entries", entries).param("asset", asset).update();
+        });
+        BigInteger expected = BigInteger.valueOf(9_007_199_254_740_991L).multiply(BigInteger.valueOf(entries));
+        assertThat(expected).isGreaterThan(BigInteger.valueOf(Long.MAX_VALUE));
+
+        List<Map<String, Object>> rows = client.get()
+                .uri(PATH)
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(rows)
+                .filteredOn(row -> asset.equals(row.get("asset")))
+                .hasSize(2)
+                .anySatisfy(row -> {
+                    assertThat(row.get("account")).isEqualTo("platform:bigsum:a");
+                    assertThat(new BigInteger(row.get("debit").toString())).isEqualTo(expected);
+                    assertThat(new BigInteger(row.get("balance").toString())).isEqualTo(expected);
+                })
+                .anySatisfy(row -> assertThat(new BigInteger(row.get("balance").toString()))
+                        .isEqualTo(expected.negate()));
     }
 
     @Test

@@ -192,7 +192,8 @@ public final class ChainReconciler {
             }
             if (lookup.isEmpty()) {
                 if (safe.timestamp()
-                        <= p.validBefore() + settings.receiptGrace().toSeconds()) {
+                        <= Math.addExact(
+                                p.validBefore(), settings.receiptGrace().toSeconds())) {
                     return pending(p, findings, now);
                 }
                 findings.add(new Finding(MismatchKind.TX_NOT_FOUND, null, null, reportedTx, null, false));
@@ -260,7 +261,7 @@ public final class ChainReconciler {
                     }
                 }
             }
-            chainBuyer = -fromPayer;
+            chainBuyer = Math.negateExact(fromPayer);
             chainSeller = direct;
             if (!anyDirect) {
                 receiptFinding = new Finding(
