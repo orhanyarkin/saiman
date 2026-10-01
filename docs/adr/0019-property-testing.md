@@ -15,3 +15,11 @@ M4's acceptance needs a balanced-postings property test. CLAUDE.md rules out jqw
 ## Consequences
 + No extra dependency; failures reproduce from one seed.
 − No automatic shrinking; generators are kept small and the failing seed plus the generated case are printed.
+
+## Addendum (2026-10-01): one test per property, 200 tries by default
+The decision above stays: seeded JUnit 5 generators, no jqwik. What changed during the M4 audit fixes:
+- Each property is one `@Test` that loops over `Pbt.forAll(tries, body)` instead of a `@ParameterizedTest` that expands every try into its own JUnit case (the ledger showed about 3,700 "tests" that were really six properties).
+- The default is 200 tries per pure property and a quarter of that for database-backed ones, instead of 1000/50.
+
+Why: **speed** (the module's `check` stays fast and the CI report lists properties, not thousands of tries) and **reproducibility** (a failure is one `AssertionError` whose message carries the try index, that try's seed and the base seed, so it is reproduced with `-Dsaiman.pbt.seed=<base seed>`; the seed is no longer only on stdout).
+For deeper runs, raise the count without code changes: `-Dsaiman.pbt.tries=<n>` (passed through to the test JVM), e.g. in CI or a nightly job.
