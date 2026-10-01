@@ -16,11 +16,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.SplittableRandom;
 import java.util.UUID;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -35,7 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @LedgerIntegrationTest
 class LedgerSchemaTests {
 
-    private static final int DB_TRIES = 50;
+    private static final int DB_TRIES = Pbt.dbTries();
 
     @Autowired
     private JdbcClient jdbc;
@@ -45,10 +41,6 @@ class LedgerSchemaTests {
 
     @Autowired
     private PaymentLedgerService ledger;
-
-    static Stream<Arguments> dbTries() {
-        return Pbt.tries(DB_TRIES);
-    }
 
     @Test
     void balancedEntryCommits() {
@@ -65,9 +57,12 @@ class LedgerSchemaTests {
     }
 
     /** P3 (database half): one posting perturbed by a delta in a balanced entry is rejected at commit. */
-    @ParameterizedTest(name = "P3 db try {0} seed {1}")
-    @MethodSource("dbTries")
-    void p3PerturbedEntryIsRejectedAtCommit(int tryIndex, long seed) {
+    @Test
+    void p3PerturbedEntryIsRejectedAtCommit() {
+        Pbt.forAll(DB_TRIES, this::p3PerturbedEntryIsRejectedAtCommitTry);
+    }
+
+    private void p3PerturbedEntryIsRejectedAtCommitTry(int tryIndex, long seed) {
         var random = new SplittableRandom(seed);
         long amount = random.nextLong(2, 1_000_000_000_001L);
         String wallet = wallet();

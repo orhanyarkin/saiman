@@ -19,28 +19,24 @@ import java.util.Set;
 import java.util.SplittableRandom;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.api.Test;
 
-/** Pure properties P1, P2 and P3 of ADR-0019 over {@link PaymentBook}, 1000 tries each. */
+/** Pure properties P1, P2 and P3 of ADR-0019 over {@link PaymentBook}, Pbt.tries() tries each. */
 class PaymentBookPropertyTests {
 
-    private static final int TRIES = 1000;
-
-    static Stream<Arguments> tries() {
-        return Pbt.tries(TRIES);
-    }
+    private static final int TRIES = Pbt.tries();
 
     /**
      * P1: any interleaving of events about many payments (shared wallets, duplicates, reorderings, contradictory
      * reports) posts only balanced entries, each one-per-payment kind at most once, and the trial balance of every
      * asset sums to zero.
      */
-    @ParameterizedTest(name = "P1 try {0} seed {1}")
-    @MethodSource("tries")
-    void p1EveryEntryBalancesAndTheTrialBalanceSumsToZero(int tryIndex, long seed) {
+    @Test
+    void p1EveryEntryBalancesAndTheTrialBalanceSumsToZero() {
+        Pbt.forAll(TRIES, this::p1EveryEntryBalancesAndTheTrialBalanceSumsToZeroTry);
+    }
+
+    private void p1EveryEntryBalancesAndTheTrialBalanceSumsToZeroTry(int tryIndex, long seed) {
         var random = new SplittableRandom(seed);
         int payments = Pbt.size(tryIndex, TRIES, 12);
         List<String> payers = List.of(TestPayment.address(random), TestPayment.address(random));
@@ -96,9 +92,12 @@ class PaymentBookPropertyTests {
      * P2: any permutation-with-duplicates of one payment's events yields the same projection and the same balances
      * as the canonical order.
      */
-    @ParameterizedTest(name = "P2 try {0} seed {1}")
-    @MethodSource("tries")
-    void p2OrderAndDuplicatesDoNotChangeTheOutcome(int tryIndex, long seed) {
+    @Test
+    void p2OrderAndDuplicatesDoNotChangeTheOutcome() {
+        Pbt.forAll(TRIES, this::p2OrderAndDuplicatesDoNotChangeTheOutcomeTry);
+    }
+
+    private void p2OrderAndDuplicatesDoNotChangeTheOutcomeTry(int tryIndex, long seed) {
         var random = new SplittableRandom(seed);
         TestPayment payment = TestPayment.random(random, Stories.amount(random));
         List<PaymentFact> canonical = Stories.story(random).stream()
@@ -119,9 +118,12 @@ class PaymentBookPropertyTests {
     }
 
     /** P3 (domain half): an entry with one posting perturbed by a non-zero delta is rejected. */
-    @ParameterizedTest(name = "P3 try {0} seed {1}")
-    @MethodSource("tries")
-    void p3APerturbedPostingIsRejectedByTheDomain(int tryIndex, long seed) {
+    @Test
+    void p3APerturbedPostingIsRejectedByTheDomain() {
+        Pbt.forAll(TRIES, this::p3APerturbedPostingIsRejectedByTheDomainTry);
+    }
+
+    private void p3APerturbedPostingIsRejectedByTheDomainTry(int tryIndex, long seed) {
         var random = new SplittableRandom(seed);
         TestPayment payment = TestPayment.random(random, Stories.amount(random));
         List<JournalEntry> entries = replay(Stories.story(random).stream()
