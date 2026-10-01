@@ -42,6 +42,10 @@ public record SpendProperties(
             throw new IllegalArgumentException(
                     "saiman.orchestrator.spend.max-run-budget-atomic must be >= default-run-budget-atomic");
         }
+        if (defaultRunBudgetAtomic > dailyCapAtomic) {
+            throw new IllegalArgumentException(
+                    "saiman.orchestrator.spend.default-run-budget-atomic must be <= daily-cap-atomic");
+        }
         if (approvalTimeout.isNegative() || approvalTimeout.isZero()) {
             throw new IllegalArgumentException("saiman.orchestrator.spend.approval-timeout must be positive");
         }
