@@ -47,12 +47,16 @@ class X402PaidNotServedMetricsTests {
                 "handler_server_error",
                 Instant.now()));
 
-        assertThat(registry.get(X402PaymentMetricsListener.PAYMENTS_COUNTER_NAME)
+        assertThat(registry.get(X402PaymentMetricsListener.PAID_NOT_SERVED_COUNTER_NAME)
                         .tag("network", TestnetAssets.NETWORK)
-                        .tag("outcome", "paid_not_served")
                         .counter()
                         .count())
                 .isEqualTo(1.0);
+        // The settled event already counted the payment in x402.payments: no second outcome there,
+        // so summing x402.payments over outcomes counts each payment once.
+        assertThat(registry.find(X402PaymentMetricsListener.PAYMENTS_COUNTER_NAME)
+                        .counters())
+                .isEmpty();
         assertThat(registry.get(X402PaymentMetricsListener.PAID_NOT_SERVED_AMOUNT_COUNTER_NAME)
                         .counter()
                         .count())

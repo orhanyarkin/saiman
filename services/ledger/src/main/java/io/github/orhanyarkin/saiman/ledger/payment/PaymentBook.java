@@ -221,6 +221,9 @@ public final class PaymentBook {
                 }
                 requireSameSellerTx(p, c.txHash());
             }
+            // Deliberately asymmetric: a seller `failed` after SETTLED is accepted ("settled wins" is the M4 rule,
+            // the failure report was an ambiguous outcome the settlement later resolved), but after CREDITED it is a
+            // conflict, because a credit note asserts that the seller settled AND then failed to serve.
             case PaymentFact.Failed f
             when f.book() == Book.SELLER && p.sellerState() == SellerState.CREDITED ->
                 throw new ConflictingFactException("settle failure for a payment the seller credited", p.id());

@@ -16,8 +16,11 @@ import io.github.orhanyarkin.x402.testing.FakeFacilitator;
 import io.github.orhanyarkin.x402.testing.PaymentPayloads;
 import io.github.orhanyarkin.x402.testing.TestWallets;
 import io.micrometer.observation.tck.TestObservationRegistry;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponseWrapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -36,9 +39,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.Ordered;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -50,6 +55,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -415,6 +421,43 @@ class UpfrontPaymentFlowIntegrationTests {
         }
     }
 
+    @Test
+    void aProblemBodyThatCannotBeWrittenStillPublishesThePaidFailureOnce() {
+        ExchangeResult result = client.get()
+                .uri("/upfront/boom")
+                .header(X402Headers.PAYMENT_SIGNATURE, payment())
+                .header(UnwritableProblemFilter.TRIGGER_HEADER, "true")
+                .exchange()
+                .expectStatus()
+                .isEqualTo(500)
+                .returnResult();
+
+        assertThat(paymentResponse(result).success()).isTrue();
+        assertThat(Recorder.paidFailed)
+                .singleElement()
+                .satisfies(event -> assertThat(event.reasonCode()).isEqualTo("handler_exception"));
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertOutcome("paid_not_served");
+    }
+
+    @Test
+    void anUpfrontHandlerThatGoesAsyncIsReportedAndKeepsTheClaim() {
+        String header = payment();
+        get("/upfront/async", header);
+
+        assertThat(Recorder.paidFailed)
+                .singleElement()
+                .satisfies(event -> assertThat(event.reasonCode()).isEqualTo("async_not_supported"));
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertOutcome("paid_not_served");
+
+        // The claim is kept: the same authorization cannot buy a second run or a second settle.
+        get("/upfront/async", header).expectStatus().isEqualTo(402);
+        assertThat(UpfrontController.runs.get()).isEqualTo(1);
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertThat(Recorder.paidFailed).hasSize(1);
+    }
+
     private void assertOutcome(String outcome) {
         observations
                 .assertThat()
@@ -443,6 +486,15 @@ class UpfrontPaymentFlowIntegrationTests {
             return new Recorder();
         }
 
+        /** Runs outside X402SettlementFilter so the response it wraps is the one the filter writes to. */
+        @Bean
+        FilterRegistrationBean<UnwritableProblemFilter> unwritableProblemFilter() {
+            FilterRegistrationBean<UnwritableProblemFilter> registration =
+                    new FilterRegistrationBean<>(new UnwritableProblemFilter());
+            registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
+            return registration;
+        }
+
         @Bean
         TestObservationRegistry testObservationRegistry() {
             return TestObservationRegistry.create();
@@ -452,6 +504,34 @@ class UpfrontPaymentFlowIntegrationTests {
         @Bean
         PaymentNonceStore x402InMemoryPaymentNonceStoreForTests() {
             return new InMemoryPaymentNonceStore();
+        }
+    }
+
+    /**
+     * When the trigger header is present, makes setting a Problem Details content type fail the way
+     * a broken or already-committed response would, so the filter's problem write throws.
+     */
+    static final class UnwritableProblemFilter extends OncePerRequestFilter {
+
+        static final String TRIGGER_HEADER = "X-Test-Unwritable-Problem";
+
+        @Override
+        protected void doFilterInternal(
+                HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+                throws ServletException, IOException {
+            if (request.getHeader(TRIGGER_HEADER) == null) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+            filterChain.doFilter(request, new HttpServletResponseWrapper(response) {
+                @Override
+                public void setContentType(String type) {
+                    if (type.startsWith("application/problem+json")) {
+                        throw new IllegalStateException("response not writable");
+                    }
+                    super.setContentType(type);
+                }
+            });
         }
     }
 
@@ -512,6 +592,14 @@ class UpfrontPaymentFlowIntegrationTests {
             response.setHeader("X-Download-Url", "https://internal.example/secret-file");
             response.addCookie(new jakarta.servlet.http.Cookie("session", "leaked-session-id"));
             throw new IllegalStateException("boom secret");
+        }
+
+        /** Starts raw servlet async processing, which X402SettlementFilter can only detect after the fact. */
+        @GetMapping("/upfront/async")
+        @RequiresPayment(price = PRICE, paymentFlow = PaymentFlow.UPFRONT)
+        void startsAsync(HttpServletRequest request, HttpServletResponse response) {
+            runs.incrementAndGet();
+            request.startAsync(request, response).complete();
         }
 
         @GetMapping("/upfront/not-found")
