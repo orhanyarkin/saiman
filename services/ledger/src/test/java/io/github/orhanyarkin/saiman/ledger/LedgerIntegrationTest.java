@@ -13,12 +13,13 @@ import org.springframework.context.annotation.Import;
 /**
  * The one integration-test setup of the ledger: the full application on a random port with Postgres and Redpanda
  * containers. Every test class using exactly this annotation shares one cached context and one pair of containers,
- * so tests must not depend on an empty database: they use fresh payment keys and wallets.
+ * so tests must not depend on an empty database: they use fresh payment keys and wallets. {@link FakeChain} stands in
+ * for Base Sepolia, so no test reaches a real RPC.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureRestTestClient
-@Import({TestcontainersConfiguration.class, RegistryProbe.class})
+@Import({TestcontainersConfiguration.class, RegistryProbe.class, FakeChain.class})
 public @interface LedgerIntegrationTest {}
