@@ -4,3 +4,4 @@
 - [Servlet path guard testing](servlet-path-guard-testing.md) — raw-URI prefix filters are bypassable; test with raw socket on real Tomcat
 - [Spring AI 2.0.1 OpenAI quirks](spring-ai-2-openai-quirks.md) — builder API, lazy key handling, advisor/usage shapes, Boot 4.1 autoconfig names
 - [Jackson 3 + palantir quirks](jackson3-palantir-quirks.md) — Money 'zero' leak needs mixin; spotless unescapes \u literals (bidi breaks Error Prone)
+- [Spring AI 2.0.1 tool-calling quirks](spring-ai-2-tool-calling-quirks.md) — tools() vs deprecated toolCallbacks, exception propagation, router tracing bug
