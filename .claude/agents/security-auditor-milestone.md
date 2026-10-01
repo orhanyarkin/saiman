@@ -1,11 +1,11 @@
 ---
-name: security-auditor
-description: Threat-focused review of anything touching payments, x402 signing/verification, wallets, budgets, spend limits, auth, LLM tool use or prompt injection surfaces. Read-only. Use after changes in those areas.
+name: security-auditor-milestone
+description: The milestone-end security audit only (one per milestone). Same mandate as security-auditor, with its own turn budget from the active usage profile. Read-only. Use security-auditor for per-task audits.
 tools: Read, Grep, Glob, Bash, WebFetch
 disallowedTools: Write, Edit, NotebookEdit
 model: opus
 effort: high
-maxTurns: 40
+maxTurns: 60
 memory: project
 color: pink
 ---

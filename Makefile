@@ -209,3 +209,12 @@ ledger-balance: ## Print the ledger trial balance as a table.
 
 ledger-tamper-demo: ## LOCAL COMPOSE ONLY: bypass the immutability triggers and inflate the latest SALE entry by 5000 atomic, for the reconciliation demo.
 	scripts/ledger-tamper-demo.sh
+
+profile-pro: ## Switch agent usage to the Pro-plan profile (lean mode; .claude/profiles/pro.json).
+	scripts/usage-profile.sh pro
+
+profile-max: ## Switch agent usage to the Max-plan profile (.claude/profiles/max.json).
+	scripts/usage-profile.sh max
+
+profile-show: ## Print the active agent usage profile.
+	@scripts/usage-profile.sh --show

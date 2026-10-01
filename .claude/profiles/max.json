@@ -1,0 +1,27 @@
+{
+  "name": "max",
+  "description": "Max plan: more parallelism, stronger audits, one re-review on money paths.",
+  "maxConcurrentSubagents": 3,
+  "agents": {
+    "architect": { "model": "opus", "effort": "high", "maxTurns": 40 },
+    "security-auditor": { "model": "opus", "effort": "high", "maxTurns": 40 },
+    "security-auditor-milestone": { "model": "opus", "effort": "high", "maxTurns": 60 },
+    "reviewer": { "model": "sonnet", "effort": "medium", "maxTurns": 30 },
+    "agent-engineer": { "model": "sonnet", "effort": "medium", "maxTurns": 80 },
+    "ai-engineer": { "model": "sonnet", "effort": "medium", "maxTurns": 80 },
+    "payments-engineer": { "model": "sonnet", "effort": "medium", "maxTurns": 80 },
+    "frontend": { "model": "sonnet", "effort": "medium", "maxTurns": 80 },
+    "infra": { "model": "sonnet", "effort": "medium", "maxTurns": 60 },
+    "test-runner": { "model": "sonnet", "effort": "low", "maxTurns": 15 }
+  },
+  "invocationOverrides": [
+    "payments-engineer with model: opus for ledger tasks and for signing/crypto implementation tasks"
+  ],
+  "reReview": {
+    "policy": "once-after-high-or-medium-on-money-paths",
+    "rule": "Critical findings: re-review as always. Payment, ledger and budget code: after High or Medium findings are fixed, one security-auditor re-review of the fix commits; no further rounds."
+  },
+  "advisor": {
+    "consultOn": ["architecture decisions", "milestone-end audit"]
+  }
+}
