@@ -21,3 +21,9 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
 }
+
+// Property tests (ADR-0019): `-Dsaiman.pbt.seed=<base seed>` on the Gradle command line reaches the test JVM,
+// so a failure printed with its base seed reproduces exactly.
+tasks.withType<Test>().configureEach {
+    providers.systemProperty("saiman.pbt.seed").orNull?.let { systemProperty("saiman.pbt.seed", it) }
+}
