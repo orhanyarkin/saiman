@@ -20,6 +20,26 @@ spring:
     schemas: orchestrator
     default-schema: orchestrator
     create-schemas: true
+  # Transactional outbox (ADR-0016). libs/eventing sets the registry defaults (only @ApplicationModuleListener
+  # publications are persisted, republish on restart, completed rows deleted); V6 owns the table.
+  modulith:
+    events:
+      jdbc:
+        schema: orchestrator
+      kafka:
+        # Events are mapped to their JSON string by OutboxConfiguration (Boot's JsonMapper), so the Kafka
+        # value is exactly the documented payload; no Modulith JSON converter, no type headers.
+        enable-json: false
+  kafka:
+    producer:
+      # Bounded, so an unreachable broker fails a publication quickly: it stays incomplete in the registry
+      # and is resubmitted later (saiman.orchestrator.outbox) or on restart. A run never waits for Kafka.
+      properties:
+        max.block.ms: 10000
+        request.timeout.ms: 10000
+        delivery.timeout.ms: 30000
+    admin:
+      operation-timeout: 10s
 
 server:
   port: 8080
@@ -52,6 +72,18 @@ saiman:
       max-concurrent: 2 # the seller allows 2 in-flight runs per payer; the orchestrator is one wallet
       llm-budget-usd-micros: 150000
       deadline: 15m # wall clock per run; past it the run fails RUN_DEADLINE (pending approvals expire)
+    # Payment events to the ledger (ADR-0016): a publication Kafka did not acknowledge is resubmitted once it
+    # is older than resubmit-older-than (longer than one bounded send attempt, so an in-flight one is not
+    # resent; a duplicate would be harmless anyway, the ledger dedupes on the event id).
+    outbox:
+      resubmit-interval: 1m
+      resubmit-older-than: 2m
+    # HELD intents resolved from the chain (ADR-0018); active only when saiman.chain.rpc-url is set.
+    held-resolution:
+      interval: 2m
+      batch-size: 20
+      # Blocks searched for the AuthorizationUsed log before validBefore (Base Sepolia: 2 s per block).
+      log-window-blocks: 300
     agents:
       # TIER2 per ADR-0014; set tier1 while the tier2 model id is unverified (T6 live runs).
       synthesis-tier: tier1 # tier2 (gpt-5-chat) returned 404 in the first live run (M3 T6); tier1 (gpt-5-mini) is verified live
