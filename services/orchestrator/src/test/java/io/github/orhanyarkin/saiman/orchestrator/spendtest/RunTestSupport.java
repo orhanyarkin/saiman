@@ -3,6 +3,8 @@ package io.github.orhanyarkin.saiman.orchestrator.spendtest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import io.github.orhanyarkin.saiman.orchestrator.agent.ScriptedChatModel;
+import io.github.orhanyarkin.saiman.orchestrator.agent.ScriptedModels;
 import io.github.orhanyarkin.saiman.orchestrator.approval.ApiRequestGuardFilter;
 import io.github.orhanyarkin.saiman.orchestrator.events.RunEventAppender;
 import io.github.orhanyarkin.saiman.orchestrator.run.RunService;
@@ -32,13 +34,14 @@ import org.springframework.test.web.servlet.client.RestTestClient;
 
 /**
  * Shared setup for the run, event and tool tests: everything {@link SpendTestSupport} has, plus a
- * {@link ScriptedPipeline}, tracing into an in-memory exporter, a short SSE heartbeat and a short
+ * {@link ScriptedPipeline} (primary, so runs skip the agents unless a test calls them), the
+ * {@link ScriptedChatModel} behind the real model router ({@link ScriptedModels.Config}), tracing into an in-memory exporter, a short SSE heartbeat and a short
  * approval timeout. All these tests share one Spring context.
  */
 @TestPropertySource(
         properties = {"saiman.orchestrator.events.heartbeat=200ms", "saiman.orchestrator.spend.approval-timeout=4s"})
 @AutoConfigureTracing
-@Import(RunTestSupport.RunTestConfiguration.class)
+@Import({RunTestSupport.RunTestConfiguration.class, ScriptedModels.Config.class})
 public abstract class RunTestSupport extends SpendTestSupport {
 
     // Not a bean: Boot would wrap an exporter bean in a batch processor (see PingTracingTests).
@@ -53,12 +56,17 @@ public abstract class RunTestSupport extends SpendTestSupport {
     @Autowired
     protected RunService runService;
 
+    /** The model behind the real router (the agents run only where a test calls them directly). */
+    @Autowired
+    protected ScriptedChatModel model;
+
     @Autowired
     protected RunEventAppender eventLog;
 
     @BeforeEach
     void resetRuns() {
         pipeline.reset();
+        model.reset();
         SPANS.reset();
     }
 
