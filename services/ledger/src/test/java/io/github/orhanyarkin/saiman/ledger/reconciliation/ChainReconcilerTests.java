@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.SplittableRandom;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /** Worked examples of the chain step, one per outcome of ADR-0018 (the property tests cover the rest). */
@@ -239,7 +240,7 @@ class ChainReconcilerTests {
     }
 
     /** The projection with these reported hashes (buyer, seller) and no chain facts. */
-    private static PaymentProjection withTx(PaymentProjection p, String buyerTx, String sellerTx) {
+    private static PaymentProjection withTx(PaymentProjection p, @Nullable String buyerTx, @Nullable String sellerTx) {
         return new PaymentProjection(
                 p.id(),
                 p.paymentKey(),
@@ -338,13 +339,46 @@ class ChainReconcilerTests {
 
     @Test
     void usedAuthorizationWithoutAKnownTransactionIsTxUnknown() {
-        Books books = Books.of(List.of(PaymentFact.of(payment.authorized())));
+        Books books = Books.of(List.of(PaymentFact.of(payment.buyerSettled())));
+        PaymentProjection noTx = withTx(books.projection(), null, null);
 
-        var outcome = reconcile(books, evidence(SAFE_LATE, Map.of(), true));
+        var outcome = ChainReconciler.reconcile(
+                noTx, books.nets(), evidence(SAFE_LATE, Map.of(), true), SETTINGS, UUID.randomUUID(), NOW);
 
         assertThat(outcome.status()).isEqualTo(ItemStatus.TX_UNKNOWN);
         assertThat(outcome.findings()).isEmpty();
         assertThat(outcome.next().chainState()).isEqualTo(ChainState.USED);
+    }
+
+    @Test
+    void finalChainWithNeitherBookTerminalIsBooksOpen() {
+        Books books = Books.of(List.of(PaymentFact.of(payment.authorized())));
+        String tx = payment.txHash();
+
+        var used = reconcile(books, evidence(SAFE_LATE, Map.of(), true));
+        var usedWithTx = reconcile(books, evidence(SAFE_LATE, Map.of(), true, matching(books.projection(), tx)));
+        var unused = reconcile(books, evidence(SAFE_LATE, Map.of(), false));
+
+        for (var outcome : List.of(used, usedWithTx, unused)) {
+            assertThat(outcome.status()).isEqualTo(ItemStatus.MISMATCH);
+            assertThat(outcome.findings())
+                    .extracting(ChainReconciler.Finding::kind)
+                    .containsExactly(MismatchKind.BOOKS_OPEN);
+            assertThat(outcome.adjustment()).isNull();
+        }
+        assertThat(unused.next().chainState()).isEqualTo(ChainState.UNUSED);
+        assertThat(usedWithTx.next().chainTxHash()).isEqualTo(tx);
+    }
+
+    @Test
+    void openBooksWithinTheGraceAfterValidBeforeAreNotYetBooksOpen() {
+        Books books = Books.of(List.of(PaymentFact.of(payment.authorized())));
+        ChainBlock withinGrace = new ChainBlock(SAFE_LATE.number(), VALID_BEFORE + 60);
+
+        var outcome = reconcile(books, evidence(withinGrace, Map.of(), false));
+
+        assertThat(outcome.status()).isEqualTo(ItemStatus.MATCHED);
+        assertThat(outcome.findings()).isEmpty();
     }
 
     @Test
