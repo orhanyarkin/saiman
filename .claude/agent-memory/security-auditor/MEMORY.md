@@ -8,3 +8,4 @@
 - [M4 T1/T3/T6 audit](m4-t1-t3-t6-audit.md) — poison validBefore kills reconciliation, DLT on transient DB errors, amount bounds, Kafka trust (2026-10-01)
 - [M4 T4+T5 audit](m4-t4-t5-audit.md) — forged payments.* defeats recon: validBefore overflow, asset double-book, starvation, tx freeze (2026-10-01)
 - [M4 close audit](m4-close-audit.md) — NUL eventId stalls ledger forever, recon Lease abort-after-close, with-tx flood starvation, LOCAL release sound (2026-10-01)
+- [M4 close-fix re-review](m4-close-fix-reaudit.md) — RPC failures keep HELD, min(safe,now) sound; residual ts-number binding, unmapped SQLSTATE quarantine (2026-10-01)
