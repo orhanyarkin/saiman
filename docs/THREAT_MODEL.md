@@ -185,8 +185,8 @@ These are checked mechanically, not just by review:
   redirects by default; an unpatched paying client would forward `PAYMENT-SIGNATURE` and
   `Idempotency-Key` to whatever host a 302 on the paid retry points at. The starter ships
   `X402RestClients.nonRedirectingRequestFactory()` for this; the M2/M3 orchestrator's paying
-  `RestClient` must use it (or the equivalent `spring.http.clients.redirects=dont-follow`
-  property), with its own test proving it.
+  `RestClient` uses it: `PaidResourceClientConfiguration` builds a JDK client with `HttpRedirects.DONT_FOLLOW`, and two
+  real-socket tests prove a 302 (on the first request and on the paid retry) is not followed.
 - **Plaintext is refused except for loopback and exact allowlisted hosts.** `x402.client.allowed-plaintext-hosts`
   (empty by default) holds exact host names only: entries with `*`, `/`, `:`, `@`, a leading or
   trailing dot or non-DNS characters fail startup, matching is against `URI#getHost()` (so
@@ -278,6 +278,16 @@ These are checked mechanically, not just by review:
 - **Deadline vs. authorization window (deferred):** the 25 s deadline starts when the handler starts, so `/verify` time in `preHandle` is not counted and a model call can start with little time left; the 45 s `minWindowSeconds` is a constant while the deadline and facilitator timeouts are configurable. Worst case: a settle after `validBefore` (a free run or an ambiguous settle). Deriving the deadline from the authorization's `validBefore` belongs with the M3 settle-before-serve ADR.
 - **Residual:** an attacker with many funded wallets can still use up the day's unsettled budget and get 429s for everyone until midnight UTC: the spend is bounded, availability is not. The real fix is settle-before-serve (ADR in M3). An x402 payment does not bind the request body, so a signature can be spent once on a different question.
 
+## Orchestrator and spend control (`services/orchestrator`, M3)
+
+- **Assets:** the buyer key (compose file secret, never an env var), the run budget, the daily USDC cap and the LLM cost scope.
+- **Trust boundaries:** the model and everything it reads (KAP text, the user's question, tool results) are untrusted; the HTTP caller of `/api` (no authentication until M6); the seller (trusted only after an x402 offer passes the payee allowlist and the per-request maximum).
+- **Invariants (ADR-0013):** a payment is signed only after `BudgetSpendGuard.reserve` succeeds in one Postgres transaction (run row, then UTC day row locked in a fixed order; a DB CHECK and an immutable-budget trigger back it); only intents created by code (opaque 128-bit key, never from model text) can be paid; the model sees exactly two tools with `ticker`/`question` parameters and cannot name a URL, payee, amount, budget or key; approvals only open the threshold gate and can never raise a budget or the daily cap; a signed payment with an unknown outcome is HELD and keeps counting until M4 reconciles it; on restart RESERVED intents are released, SIGNED ones held, unfinished runs fail as `INTERRUPTED` with a terminal event.
+- **Tool results:** only allowlisted fields reach the model (answer text, chunk id, KAP-pattern URL, title), stripped of control and bidi characters, delimited as data; citations are rebuilt by code from the run's retrieved evidence; the final answer is plain text.
+- **Events:** the `run_event` log carries no keys, nonces or signatures (tx hash only); `seq` is gap-free per run; `agent.run-step.v1`.
+- **Proven by tests (hermetic):** budget blocks before signing; a fully compromised scripted model with injected text cannot raise a budget, reach another payee or URL, or approve itself; root-span cost attributes equal the database totals.
+- **Residual:** `/api` is unauthenticated (Host allowlist + JSON/CSRF header only; M6); one shared superuser DB role (see known gaps); a held reservation can block a run until M4; the final answer is free text from the model (a display field: the UI and any consuming agent must treat it as data).
+
 ## Known gaps (tracked, not yet closed)
 
 | Gap | Why it's open | Revisit |
@@ -295,7 +305,7 @@ These are checked mechanically, not just by review:
 | No test drives a genuine 5xx from inside a real `@RequiresPayment` handler (only the starter's synthetic fixtures) | Coverage gap, not a known defect | Add when the next paid handler lands |
 | A handler declared with a wide return type (e.g. `Object`) that returns an async value at runtime bypasses the startup rejection of async handlers | The startup check only inspects the *declared* return type; Spring MVC picks the async handling path from the runtime value | Before M2's handlers grow return types wider than a concrete record: register `CallableProcessingInterceptor`/`DeferredResultProcessingInterceptor` to catch every async path regardless of declared type |
 | One circuit breaker instance is shared by `/verify` and `/settle`, and counts a facilitator rejection (`FacilitatorClientErrorException`, including 429) as a breaker failure | A flood of unfunded-wallet signatures rate-limited by x402.org could open the breaker and short-circuit `/settle` for requests that already ran their (paid-for) handler | M3, alongside the per-payer/IP rate limit above: separate breakers for verify and settle, and don't count 4xx (or at least not 429) as a breaker failure |
-| The starter's client interceptor still follows redirects on Spring Boot's defaults; only the console-buyer *sample* pins `spring.http.clients.redirects=dont-follow` | `X402RestClients.nonRedirectingRequestFactory()` exists but isn't applied automatically | The M2/M3 orchestrator's paying `RestClient` must use it explicitly, with its own real-socket test (same shape as the sample's) |
+| The starter's client interceptor still follows redirects on Spring Boot's defaults; only the console-buyer *sample* pins `spring.http.clients.redirects=dont-follow` | `X402RestClients.nonRedirectingRequestFactory()` exists but isn't applied automatically | Orchestrator: done (pinned and real-socket tested, M3 T3). Other callers of the starter must pin it themselves; a non-empty plaintext allowlist already requires `dont-follow` at startup |
 | `PaymentSigner` bean + pass-through can bypass the SpendGuard | unchanged starter design | M6 hardening |
 | Shared superuser DB role can bypass the budget trigger | one `saiman` role for all services in local compose | M6: per-service DML role + a monotonic committed_atomic trigger |
 | Valkey (the nonce store) is reachable from every app container, not only seller-api | Compose gives every service the same `SPRING_DATA_REDIS_URL`; a future service with an unrelated vulnerability (e.g. an SSRF-exposed fetcher in `ingest`) could reach it too | Same remediation as the no-auth gap above: scope network/credentials to the services that actually need it |

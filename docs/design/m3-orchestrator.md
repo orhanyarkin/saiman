@@ -76,13 +76,15 @@ There is deliberately no endpoint that changes a budget.
 saiman.orchestrator:
   seller.base-url: http://seller-api:8081     # config only; no tool takes a URL
   spend: {daily-cap-atomic: 1000000, default-run-budget-atomic: 50000, max-run-budget-atomic: 200000,
-          approval-threshold-atomic: 20000, approval-timeout: 5m, max-paid-calls-per-run: 4, max-tool-calls-per-run: 6}
+          approval-threshold-atomic: 10000, approval-timeout: 5m, max-paid-calls-per-run: 4, max-tool-calls-per-run: 6}
   runs: {max-concurrent: 2, llm-budget-usd-micros: 150000}
 x402.client: {private-key: (configtree), max-amount-per-request: 20000, allowed-pay-to: ${X402_SELLER_PAYTO_ADDRESS},
               allowed-plaintext-hosts: [seller-api]}
 saiman.router: {require-cost-scope: true}
 ```
 Seller-api allows at most 2 in-flight runs per payer and the orchestrator is one wallet: paid calls are sequential within a run and at most 2 runs run concurrently (F-D).
+
+Approval threshold: the shipped value is 10000 (strictly above), so the 0.01 USDC summary tool never waits and the 0.02 USDC questions tool waits for a human; `ResearchRunApprovalTests` uses a 16000 price against a 15000 threshold. OpenAPI (springdoc) for the orchestrator and seller-api is deferred to M5, when the typed web client needs it.
 
 ## Deferred
 MCP tools -> Stretch. Non-OpenAI adapters and the LLM response cache -> M6. Settle-before-serve implementation, on-chain reconciliation of held reservations, Kafka `agent.run-step.v1` via the outbox -> M4. Per-IP `/verify` limits, separate verify/settle breakers, Valkey ACLs, ingest shared secret, orchestrator auth -> M6 hardening. `GET /internal/v1/corpus-version`, cache/422 metrics -> M6. Web run view -> M5.
