@@ -8,6 +8,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -106,24 +107,58 @@ public class ReconciliationRepository {
     }
 
     /**
-     * Payments due for a check, least recently checked first (newest first among the never checked): every payment
-     * with a reported tx hash, and every payment whose {@code validBefore + grace} is behind the safe block. Matched
-     * payments stay due, so a record corrupted after its first check is still caught (the tamper demo).
+     * Payments due for a check, in two shares so a flood of forged rows cannot starve real ones (M4 audit):
+     *
+     * <ul>
+     *   <li><b>Reported tx</b> (buyer or seller reported a hash): at least half of the batch is reserved for them,
+     *       least recently checked first, never-checked oldest first.
+     *   <li><b>No reported tx</b>, due once {@code validBefore < safe - grace}: the rest of the batch, same order.
+     * </ul>
+     *
+     * An unused share goes to the other one. Matched payments stay due, so a record corrupted after its first
+     * check is still caught (the tamper demo). The grace is subtracted from the safe timestamp, never added to the
+     * column, so no stored value can overflow the comparison.
      */
     @Transactional(readOnly = true)
     public List<String> duePaymentKeys(long safeTimestamp, long graceSeconds, int limit) {
-        return jdbc.sql("""
+        List<String> withTx = jdbc.sql("""
                         SELECT payment_key FROM payment
                          WHERE buyer_tx_hash IS NOT NULL OR seller_tx_hash IS NOT NULL
-                            OR valid_before < :safeTs - :grace
-                         ORDER BY last_checked_at NULLS FIRST, created_at DESC, payment_key
+                         ORDER BY last_checked_at NULLS FIRST, created_at, payment_key
                          LIMIT :limit
                         """)
-                .param("grace", graceSeconds)
-                .param("safeTs", safeTimestamp)
                 .param("limit", limit)
                 .query((rs, row) -> rs.getString(1))
                 .list();
+        List<String> withoutTx = jdbc.sql("""
+                        SELECT payment_key FROM payment
+                         WHERE buyer_tx_hash IS NULL AND seller_tx_hash IS NULL
+                           AND valid_before < :safeTs - :grace
+                         ORDER BY last_checked_at NULLS FIRST, created_at, payment_key
+                         LIMIT :limit
+                        """)
+                .param("safeTs", safeTimestamp)
+                .param("grace", graceSeconds)
+                .param("limit", limit)
+                .query((rs, row) -> rs.getString(1))
+                .list();
+        return fairShare(withTx, withoutTx, limit);
+    }
+
+    /** At least {@code ceil(limit / 2)} of {@code reserved} first, then {@code rest}, then whatever fits. */
+    static List<String> fairShare(List<String> reserved, List<String> rest, int limit) {
+        int share = Math.min(reserved.size(), (limit + 1) / 2);
+        List<String> due = new ArrayList<>(reserved.subList(0, share));
+        for (String key : rest) {
+            if (due.size() >= limit) {
+                break;
+            }
+            due.add(key);
+        }
+        for (int i = share; i < reserved.size() && due.size() < limit; i++) {
+            due.add(reserved.get(i));
+        }
+        return List.copyOf(due);
     }
 
     /** Entries whose postings do not balance per asset (the deferred trigger forbids them; tampering does not). */
