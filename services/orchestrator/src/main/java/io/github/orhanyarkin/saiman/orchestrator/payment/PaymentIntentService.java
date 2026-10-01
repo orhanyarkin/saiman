@@ -38,6 +38,8 @@ public class PaymentIntentService {
 
     private static final String COLUMNS = "id, run_id, tool, args_hash, resource, status, amount_atomic, pay_to,"
             + " network, asset, reserved_day, tx_hash, deny_reason";
+    private static final String AUTHORIZATION_COLUMNS = "id, run_id, status, resource, network, asset, pay_to,"
+            + " amount_atomic, payer, auth_nonce, valid_before, reserved_day, tx_hash";
 
     private final JdbcClient jdbc;
     private final SellerProperties seller;
@@ -188,9 +190,11 @@ public class PaymentIntentService {
 
     /**
      * RESERVED -> SIGNED, recording what M4 needs to reconcile the authorization on chain. Refuses
-     * (returns false) unless the signed recipient and amount are exactly what was reserved.
+     * (returns empty) unless the signed recipient and amount are exactly what was reserved. Runs in the
+     * caller's transaction, which publishes {@code PaymentAuthorized} from the returned row.
      */
-    public boolean markSigned(
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<IntentAuthorization> markSigned(
             String idempotencyKey, String payTo, long amountAtomic, String payer, String nonce, long validBefore) {
         return jdbc.sql("""
                         UPDATE payment_intent
@@ -198,24 +202,114 @@ public class PaymentIntentService {
                                updated_at = now()
                          WHERE idempotency_key = :key AND status = 'RESERVED'
                            AND amount_atomic = :amount AND lower(pay_to) = lower(:payTo)
-                        """)
-                        .param("key", idempotencyKey)
-                        .param("payTo", payTo)
-                        .param("amount", amountAtomic)
-                        .param("payer", payer)
-                        .param("nonce", nonce)
-                        .param("validBefore", validBefore)
-                        .update()
-                == 1;
+                        RETURNING\s""" + AUTHORIZATION_COLUMNS)
+                .param("key", idempotencyKey)
+                .param("payTo", payTo)
+                .param("amount", amountAtomic)
+                .param("payer", payer)
+                .param("nonce", nonce)
+                .param("validBefore", validBefore)
+                .query(PaymentIntentService::mapAuthorization)
+                .optional();
     }
 
-    /** SIGNED -> SETTLED. */
+    /** The authorization of a signed (SIGNED, SETTLED, HELD, ...) intent, in the caller's transaction. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<IntentAuthorization> findAuthorization(UUID id) {
+        return jdbc.sql("SELECT " + AUTHORIZATION_COLUMNS
+                        + " FROM payment_intent WHERE id = :id AND auth_nonce IS NOT NULL")
+                .param("id", id)
+                .query(PaymentIntentService::mapAuthorization)
+                .optional();
+    }
+
+    /** Locks a signed intent and returns its authorization ({@code SELECT ... FOR UPDATE}). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<IntentAuthorization> lockAuthorization(UUID id) {
+        return jdbc.sql("SELECT " + AUTHORIZATION_COLUMNS
+                        + " FROM payment_intent WHERE id = :id AND auth_nonce IS NOT NULL FOR UPDATE")
+                .param("id", id)
+                .query(PaymentIntentService::mapAuthorization)
+                .optional();
+    }
+
+    /**
+     * HELD intents whose authorization expired before {@code expiredBefore} (unix seconds: the safe
+     * block's timestamp), oldest first. A HELD intent without a nonce never had a signature recorded and
+     * cannot be read on chain; it is not returned (see {@link #countHeldWithoutAuthorization()}).
+     */
+    public List<UUID> findHeldExpiredBefore(long expiredBefore, int limit) {
+        return jdbc.sql("""
+                        SELECT id FROM payment_intent
+                         WHERE status = 'HELD' AND auth_nonce IS NOT NULL AND valid_before < :expiredBefore
+                         ORDER BY valid_before, id LIMIT :limit
+                        """)
+                .param("expiredBefore", expiredBefore)
+                .param("limit", limit)
+                .query((rs, row) -> rs.getObject("id", UUID.class))
+                .list();
+    }
+
+    /** HELD intents with no recorded authorization: they stay counted until an operator looks at them. */
+    public int countHeldWithoutAuthorization() {
+        return jdbc.sql("SELECT count(*) FROM payment_intent WHERE status = 'HELD' AND auth_nonce IS NULL")
+                .query(Integer.class)
+                .single();
+    }
+
+    /**
+     * Signed intents in one of {@code statuses} whose {@code kind} payment event was never published
+     * (no {@code payment_event_log} row): the startup backfill's work list.
+     */
+    public List<UUID> findUnpublished(String kind, List<String> statuses) {
+        return jdbc.sql("""
+                        SELECT p.id FROM payment_intent p
+                         WHERE p.auth_nonce IS NOT NULL AND p.status IN (:statuses)
+                           AND NOT EXISTS (SELECT 1 FROM payment_event_log l
+                                            WHERE l.payment_intent_id = p.id AND l.kind = :kind)
+                         ORDER BY p.created_at, p.id
+                        """)
+                .param("statuses", statuses)
+                .param("kind", kind)
+                .query((rs, row) -> rs.getObject("id", UUID.class))
+                .list();
+    }
+
+    /** SIGNED -> SETTLED by the facilitator's answer. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void markSettled(UUID id, String txHash) {
         int updated = jdbc.sql("""
-                        UPDATE payment_intent SET status = 'SETTLED', tx_hash = :txHash, updated_at = now()
+                        UPDATE payment_intent
+                           SET status = 'SETTLED', tx_hash = :txHash, resolved_by = 'FACILITATOR',
+                               resolved_at = now(), updated_at = now()
                          WHERE id = :id AND status = 'SIGNED'
                         """).param("id", id).param("txHash", txHash).update();
+        requireOne(updated);
+    }
+
+    /** HELD -> SETTLED from a chain read ({@code authorizationState == true}); the tx hash may be unknown. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void markHeldSettled(UUID id, @Nullable String txHash) {
+        int updated = jdbc.sql("""
+                        UPDATE payment_intent
+                           SET status = 'SETTLED', tx_hash = :txHash, resolved_by = 'CHAIN', resolved_at = now(),
+                               updated_at = now()
+                         WHERE id = :id AND status = 'HELD'
+                        """)
+                .param("id", id)
+                .param("txHash", txHash, Types.VARCHAR)
+                .update();
+        requireOne(updated);
+    }
+
+    /** HELD -> RELEASED from a chain read ({@code authorizationState == false} past {@code validBefore}). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void markHeldReleased(UUID id) {
+        int updated = jdbc.sql("""
+                        UPDATE payment_intent
+                           SET status = 'RELEASED', resolved_by = 'CHAIN', resolved_at = now(), updated_at = now()
+                         WHERE id = :id AND status = 'HELD'
+                        """).param("id", id).update();
         requireOne(updated);
     }
 
@@ -360,6 +454,23 @@ public class PaymentIntentService {
         if (updated != 1) {
             throw new IllegalStateException("payment intent is not in the expected state");
         }
+    }
+
+    private static IntentAuthorization mapAuthorization(ResultSet rs, int row) throws SQLException {
+        return new IntentAuthorization(
+                rs.getObject("id", UUID.class),
+                rs.getObject("run_id", UUID.class),
+                PaymentIntentStatus.valueOf(rs.getString("status")),
+                rs.getString("resource"),
+                rs.getString("network"),
+                rs.getString("asset"),
+                rs.getString("pay_to"),
+                rs.getLong("amount_atomic"),
+                rs.getString("payer"),
+                rs.getString("auth_nonce"),
+                rs.getLong("valid_before"),
+                rs.getObject("reserved_day", LocalDate.class),
+                rs.getString("tx_hash"));
     }
 
     private static PaymentIntentView map(ResultSet rs, int row) throws SQLException {
