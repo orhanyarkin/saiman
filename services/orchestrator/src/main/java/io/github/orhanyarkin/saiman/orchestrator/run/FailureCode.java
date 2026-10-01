@@ -26,5 +26,7 @@ public enum FailureCode {
     /** No tool call produced usable evidence. */
     NO_EVIDENCE,
     /** The final answer cited no chunk the run actually retrieved. */
-    NO_VALID_CITATIONS
+    NO_VALID_CITATIONS,
+    /** The run's wall-clock deadline ({@code saiman.orchestrator.runs.deadline}) passed. */
+    RUN_DEADLINE
 }

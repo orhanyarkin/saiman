@@ -20,6 +20,7 @@ import io.github.orhanyarkin.saiman.shared.run.RunEventType;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -137,6 +138,10 @@ public class PaidToolGateway {
     }
 
     private String callLocked(RunToolSession session, String toolName, String argumentsJson) {
+        if (!Instant.now().isBefore(session.phases().deadline())) {
+            count("unknown", "run_deadline");
+            return ToolMessages.RUN_DEADLINE;
+        }
         session.toolCalls++;
         if (session.toolCalls > spend.maxToolCallsPerRun()) {
             count("unknown", "tool_call_limit");
@@ -308,7 +313,7 @@ public class PaidToolGateway {
         session.phases().awaitingApproval();
         ApprovalStatus status;
         try {
-            status = waiter.await(approval.id());
+            status = waiter.awaitUntil(approval.id(), session.phases().deadline());
         } finally {
             session.phases().resumed();
         }

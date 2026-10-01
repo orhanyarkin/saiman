@@ -32,6 +32,8 @@ public final class ToolMessages {
     public static final String NO_STORED_RESULT =
             "ERROR result_unavailable: this call was already paid and its answer was unusable. Do not repeat it.";
     public static final String TOOL_FAILED = "ERROR tool_failed: the tool call failed.";
+    public static final String RUN_DEADLINE =
+            "ERROR run_deadline: the run's time is up. Nothing was paid. Do not call tools again.";
 
     private static final Map<DenyReason, String> DENIED = denied();
 

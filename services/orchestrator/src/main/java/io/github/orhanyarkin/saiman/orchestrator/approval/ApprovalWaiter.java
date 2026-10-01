@@ -39,6 +39,17 @@ public class ApprovalWaiter {
     }
 
     /**
+     * Waits up to the configured approval timeout but never past {@code deadline} (the run's
+     * wall-clock deadline); an approval still PENDING then expires as on a timeout.
+     */
+    public ApprovalStatus awaitUntil(UUID approvalId, Instant deadline) {
+        Duration untilDeadline =
+                Instant.MAX.equals(deadline) ? defaultTimeout : Duration.between(Instant.now(), deadline);
+        Duration wait = untilDeadline.compareTo(defaultTimeout) < 0 ? untilDeadline : defaultTimeout;
+        return await(approvalId, wait.isNegative() ? Duration.ZERO : wait);
+    }
+
+    /**
      * Waits for a decision on {@code approvalId}, at most {@code timeout} and never past the
      * approval's {@code expires_at}.
      *

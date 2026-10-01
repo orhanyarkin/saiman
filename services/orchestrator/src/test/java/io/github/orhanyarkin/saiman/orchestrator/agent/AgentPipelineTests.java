@@ -98,7 +98,22 @@ class AgentPipelineTests {
                 },
                 tools,
                 runId.toString(),
-                recorded::add));
+                recorded::add,
+                deadline));
+    }
+
+    private java.time.Instant deadline = java.time.Instant.MAX;
+
+    @org.junit.jupiter.api.Test
+    void aPassedDeadlineFailsTheRunBeforeAnyModelCall() {
+        deadline = java.time.Instant.now().minusMillis(1);
+        var tools = FakeRunTools.withEvidence(CHUNK_1);
+
+        RunOutcome outcome = run(pipeline(150_000, 6, tools), tools);
+
+        assertThat(outcome).isEqualTo(RunOutcome.failed(FailureCode.RUN_DEADLINE));
+        assertThat(model.callCount()).isZero();
+        assertThat(tools.calls).isEmpty();
     }
 
     private static String synthesis(String... ids) {

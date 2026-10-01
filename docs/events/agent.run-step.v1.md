@@ -25,6 +25,6 @@ Envelope (SSE `id` = `seq`, `event` = `type`, `data` = JSON below):
 | TOOL_CALL_COMPLETED | tool, paid, citationCount |
 | MODEL_CALL_COMPLETED | step, tier, model, inputTokens, outputTokens, costUsd |
 | RUN_COMPLETED | report {answer, citations[{chunkId, sourceUrl, title}]}, cost {paymentsUsdc, llmUsd, totalUsd} |
-| RUN_FAILED | failureCode (a `FailureCode` name: INTERNAL_ERROR, PIPELINE_UNAVAILABLE, INTERRUPTED, CATALOGUE_UNAVAILABLE, INVALID_PLAN, BUDGET_EXHAUSTED, LLM_BUDGET_EXHAUSTED, LLM_UNAVAILABLE, INVALID_MODEL_OUTPUT, NO_EVIDENCE, NO_VALID_CITATIONS; never a message), costSoFar |
+| RUN_FAILED | failureCode (a `FailureCode` name: INTERNAL_ERROR, PIPELINE_UNAVAILABLE, INTERRUPTED, CATALOGUE_UNAVAILABLE, INVALID_PLAN, BUDGET_EXHAUSTED, LLM_BUDGET_EXHAUSTED, LLM_UNAVAILABLE, INVALID_MODEL_OUTPUT, NO_EVIDENCE, NO_VALID_CITATIONS, RUN_DEADLINE; never a message), costSoFar |
 
 `RUN_COMPLETED` and `RUN_FAILED` are terminal. Idempotency keys, nonces and signatures never appear; the answer is plain text and citation fields are rebuilt by code from retrieved evidence, so every consumer renders them as text.

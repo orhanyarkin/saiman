@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.orchestrator.run;
 import io.github.orhanyarkin.saiman.orchestrator.events.RunEventEmitter;
 import io.github.orhanyarkin.saiman.orchestrator.tool.RunToolSession;
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -18,6 +19,8 @@ import java.util.UUID;
  * @param costScopeId the router cost scope for every LLM call of this run ({@code
  *     RouterAdvisorParams.COST_SCOPE})
  * @param modelCalls records each LLM round trip's cost and event
+ * @param deadline the run's wall-clock deadline; a pipeline starts no step past it and fails with
+ *     {@link FailureCode#RUN_DEADLINE}
  */
 public record RunContext(
         UUID runId,
@@ -26,4 +29,5 @@ public record RunContext(
         RunEventEmitter events,
         RunToolSession tools,
         String costScopeId,
-        ModelCallRecorder modelCalls) {}
+        ModelCallRecorder modelCalls,
+        Instant deadline) {}
