@@ -10,27 +10,33 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * The time budget of one paid request whose handler works before settlement (ADR-0015), or after it
- * (upfront flow, ADR-0021: the configured deadline alone).
+ * The time budget of one paid request's handler, whether it works before settlement (ADR-0015) or
+ * after it (upfront flow, ADR-0021).
  *
  * <p>The budget is {@code min(seller.llm.deadline, validBefore - now - settleMargin)}: the
  * configured deadline, cut short when the payer's authorization expires sooner than that. The
- * settle margin is the facilitator connect timeout plus its read timeout plus {@value
- * #EXTRA_MARGIN_SECONDS} s, i.e. the time the {@code /settle} call after the handler may need; a handler finishing inside the budget
- * therefore leaves the authorization settleable. Without a verified payment (not a paid request)
- * the configured deadline applies alone.
+ * settle margin is the starter's {@link X402ServerProperties.Facilitator#settleMargin()} (facilitator
+ * connect timeout + read timeout + 5 s). Before settlement it is the time the {@code /settle} after
+ * the handler may need, so a handler finishing inside the budget leaves the authorization
+ * settleable. After an upfront settlement the same cut keeps verify + settle + handler inside the
+ * authorization window, which the buyer's read timeout is sized to: a handler that ran longer
+ * would be answered after the buyer gave up and resolved its payment as spent, with no credit note
+ * on the seller side. A budget of zero makes the handler fail fast ({@code 503}), which under the
+ * upfront flow is a paid-not-served request with a credit note. Without a verified payment (not a
+ * paid request) the configured deadline applies alone.
  *
  * <p>At startup the configured timeouts must fit inside the smallest window the LLM endpoints
  * accept: {@code deadline + facilitator connect timeout + read timeout + 5 s <= }{@link
  * LlmRunProperties#MIN_AUTHORIZATION_WINDOW_SECONDS}. That keeps the configurable values honest
  * against the constant window; the per-request {@code validBefore} cut covers the time already
- * spent before the handler (payment verification) and clock rounding.
+ * spent before the handler (payment verification, an upfront settle) and clock rounding.
  */
 @Component
 public class RequestDeadlines {
 
     /** Extra seconds on top of the facilitator timeouts, as in the starter's own window check. */
-    public static final int EXTRA_MARGIN_SECONDS = 5;
+    public static final int EXTRA_MARGIN_SECONDS =
+            (int) X402ServerProperties.Facilitator.SETTLE_MARGIN_EXTRA.toSeconds();
 
     private final Duration configured;
     private final Duration settleMargin;
@@ -42,20 +48,16 @@ public class RequestDeadlines {
         requireFitsWindow(
                 llm.deadline(), connectTimeout, readTimeout, LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS);
         this.configured = llm.deadline();
-        this.settleMargin = connectTimeout.plus(readTimeout).plusSeconds(EXTRA_MARGIN_SECONDS);
+        this.settleMargin = x402.facilitator().settleMargin();
         this.clock = clock;
     }
 
     /**
-     * The deadline for {@code request}, starting now. A request whose payment already settled
-     * (upfront flow, ADR-0021) gets the configured deadline without the {@code validBefore} cut: the
-     * money has moved, so cutting the run short would only turn paid requests into 503s and credit
-     * notes.
+     * The deadline for {@code request}, starting now: {@link #budget} of the configured deadline and
+     * the payer's {@code validBefore}, for a settled (upfront) request just as for one not settled
+     * yet.
      */
     public Deadline forRequest(HttpServletRequest request) {
-        if (X402PaymentContext.settled(request)) {
-            return Deadline.after(configured);
-        }
         return Deadline.after(
                 budget(configured, settleMargin, X402PaymentContext.validBefore(request), clock.instant()));
     }

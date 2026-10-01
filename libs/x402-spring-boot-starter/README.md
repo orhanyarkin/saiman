@@ -55,7 +55,12 @@ call): no unpaid work is ever done. The price is that a paid request can still f
 no key to refund on chain, so listen for `X402PaidRequestFailedEvent` and record what you owe (a
 credit note). In both flows the nonce claim of a settled or ambiguous payment is never released, so
 one authorization never buys two handler runs, and the authorization-window checks run before any
-facilitator call.
+facilitator call. An upfront handler checks the window once more between `/verify` and `/settle`:
+if less than the settle margin (`X402ServerProperties.Facilitator#settleMargin()`: facilitator
+connect + read timeout + 5 s) is left, it answers `402` without settling and releases the claim, so
+the same authorization can be retried. Handlers that budget their own work after an upfront settle
+should keep within `validBefore - settleMargin` too, so the answer reaches the buyer before its
+read timeout.
 
 The client accepts `authorization` and `upfront` offers, rejects anything else (e.g. `escrow`) before
 signing, and prefers `authorization` when both are offered. A non-2xx answer after paying is

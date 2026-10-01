@@ -458,6 +458,66 @@ class UpfrontPaymentFlowIntegrationTests {
         assertThat(Recorder.paidFailed).hasSize(1);
     }
 
+    /** The offer of an AUTHORIZATION handler: the upfront one without {@code extra.paymentFlow}. */
+    private static PaymentRequirements authorizationOffer() {
+        return new PaymentRequirements(
+                TestnetAssets.SCHEME_EXACT,
+                TestnetAssets.NETWORK,
+                PRICE,
+                TestnetAssets.USDC_ADDRESS,
+                PAY_TO,
+                60,
+                Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION));
+    }
+
+    @Test
+    void anUpfrontAcceptedOfferIsRefusedByAnAuthorizationHandlerWithoutHoldingTheClaim() {
+        assertFlowMismatchIsRefusedWithoutAClaim("/default/ok", upfrontOffer(), authorizationOffer(), "authorization");
+    }
+
+    @Test
+    void anAuthorizationAcceptedOfferIsRefusedByAnUpfrontHandlerWithoutHoldingTheClaim() {
+        assertFlowMismatchIsRefusedWithoutAClaim("/upfront/ok", authorizationOffer(), upfrontOffer(), "upfront");
+    }
+
+    /**
+     * A payload whose {@code accepted} names the other flow (a downgrade or upgrade attempt) is a
+     * requirements mismatch: refused before the nonce claim, {@code /verify} and {@code /settle}. The
+     * EIP-3009 signature does not cover {@code accepted}, so the same signed authorization, sent
+     * again with the right offer, is then served: proof that no claim was held.
+     */
+    private void assertFlowMismatchIsRefusedWithoutAClaim(
+            String uri, PaymentRequirements wrongOffer, PaymentRequirements rightOffer, String flow) {
+        Eip3009Authorization authorization =
+                PaymentPayloads.authorizationFor(TestWallets.PAYER, rightOffer, Instant.now());
+        String wrong =
+                PaymentPayloads.header(codec, PaymentPayloads.sign(TestWallets.PAYER, wrongOffer, authorization));
+
+        get(uri, wrong).expectStatus().isEqualTo(402).expectHeader().exists(X402Headers.PAYMENT_REQUIRED);
+
+        assertThat(FACILITATOR.verifyCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(Recorder.settled).isEmpty();
+        assertThat(Recorder.failed).isEmpty();
+        assertThat(Recorder.paidFailed).isEmpty();
+        assertOutcome("requirements_mismatch", flow);
+
+        String right =
+                PaymentPayloads.header(codec, PaymentPayloads.sign(TestWallets.PAYER, rightOffer, authorization));
+        get(uri, right).expectStatus().isOk();
+        assertThat(FACILITATOR.verifyCallCount()).isEqualTo(1);
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+    }
+
+    private void assertOutcome(String outcome, String flow) {
+        observations
+                .assertThat()
+                .hasObservationWithNameEqualTo(X402ObservationKeys.OBSERVATION_NAME)
+                .that()
+                .hasLowCardinalityKeyValue(X402ObservationKeys.OUTCOME, outcome)
+                .hasLowCardinalityKeyValue(X402ObservationKeys.PAYMENT_FLOW, flow);
+    }
+
     private void assertOutcome(String outcome) {
         observations
                 .assertThat()

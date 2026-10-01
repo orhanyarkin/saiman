@@ -21,7 +21,10 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
-/** Pure properties P1, P2 and P3 of ADR-0019 over {@link PaymentBook}, Pbt.tries() tries each. */
+/**
+ * Pure properties P1, P2 and P3 of ADR-0019 over {@link PaymentBook}, Pbt.tries() tries each, plus P4: the pinned
+ * outcome of contradictory seller reports in every delivery order (ADR-0021).
+ */
 class PaymentBookPropertyTests {
 
     private static final int TRIES = Pbt.tries();
@@ -144,6 +147,150 @@ class PaymentBookPropertyTests {
                     assertThat(actual.projection()).isEqualTo(expected.projection());
                     assertThat(actual.balances()).isEqualTo(expected.balances());
                 });
+    }
+
+    /**
+     * The seller reports that contradict each other (ADR-0021): a settle failure (AMBIGUOUS), a settled report and a
+     * credit note about one payment, in every delivery order, each fact possibly redelivered. Each order either ends
+     * in the canonical order's final state and balances or quarantines exactly one fact; which one, and the final
+     * state, are pinned per order (by first delivery) so that changing them is a deliberate decision.
+     *
+     * <p>Today's behaviour, F = failed, S = settled, C = credit note, canonical F, S, C:
+     *
+     * <ul>
+     *   <li>F,S,C and S,F,C: CREDITED (SALE + CREDIT_NOTE), nothing quarantined.
+     *   <li>S,C,F, C,S,F and C,F,S: CREDITED, the late settle failure quarantined.
+     *   <li>F,C,S: SETTLED (SALE only), the credit note quarantined: it arrived while the seller state was
+     *       SETTLE_FAILED, and the settled report that later overrules the failure does not revive it.
+     * </ul>
+     *
+     * Redeliveries (the same event again) do not always leave this as it is, which the second half checks: a settle
+     * failure accepted before the credit note conflicts when redelivered after it, and a quarantined credit note
+     * redelivered after the settled report is accepted (F,C,S then ends CREDITED). In production the inbox drops a
+     * redelivery of an accepted event; a quarantined one goes to the DLT and is only re-applied by a replay.
+     */
+    @Test
+    void p4ContradictorySellerReportsEndInAPinnedOutcomePerOrder() {
+        Pbt.forAll(TRIES, this::p4ContradictorySellerReportsEndInAPinnedOutcomePerOrderTry);
+    }
+
+    private enum SellerReport {
+        F,
+        S,
+        C
+    }
+
+    /** Every delivery order in a fixed sequence: Map.of iteration order varies per JVM, which would break seeds. */
+    private static final List<List<SellerReport>> ORDERS = List.of(
+            List.of(SellerReport.F, SellerReport.S, SellerReport.C),
+            List.of(SellerReport.S, SellerReport.F, SellerReport.C),
+            List.of(SellerReport.S, SellerReport.C, SellerReport.F),
+            List.of(SellerReport.C, SellerReport.S, SellerReport.F),
+            List.of(SellerReport.C, SellerReport.F, SellerReport.S),
+            List.of(SellerReport.F, SellerReport.C, SellerReport.S));
+
+    /** Expected final seller state and quarantined report, keyed by first-delivery order. */
+    private static final Map<List<SellerReport>, Map.Entry<SellerState, Set<SellerReport>>> PINNED = Map.of(
+            List.of(SellerReport.F, SellerReport.S, SellerReport.C), Map.entry(SellerState.CREDITED, Set.of()),
+            List.of(SellerReport.S, SellerReport.F, SellerReport.C), Map.entry(SellerState.CREDITED, Set.of()),
+            List.of(SellerReport.S, SellerReport.C, SellerReport.F),
+                    Map.entry(SellerState.CREDITED, Set.of(SellerReport.F)),
+            List.of(SellerReport.C, SellerReport.S, SellerReport.F),
+                    Map.entry(SellerState.CREDITED, Set.of(SellerReport.F)),
+            List.of(SellerReport.C, SellerReport.F, SellerReport.S),
+                    Map.entry(SellerState.CREDITED, Set.of(SellerReport.F)),
+            List.of(SellerReport.F, SellerReport.C, SellerReport.S),
+                    Map.entry(SellerState.SETTLED, Set.of(SellerReport.C)));
+
+    private void p4ContradictorySellerReportsEndInAPinnedOutcomePerOrderTry(int tryIndex, long seed) {
+        var random = new SplittableRandom(seed);
+        TestPayment payment = TestPayment.random(random, Stories.amount(random));
+        // Built once: a redelivery is the same event (same id), not a new report.
+        Map<SellerReport, PaymentFact> facts = Map.of(
+                SellerReport.F, PaymentFact.of(payment.sellerSettleFailed()),
+                SellerReport.S, PaymentFact.of(payment.sellerSettled()),
+                SellerReport.C, PaymentFact.of(payment.creditNoted()));
+        Map<String, SellerReport> byEventId = new HashMap<>();
+        facts.forEach((report, fact) -> byEventId.put(fact.meta().eventId(), report));
+        Replay canonical =
+                replay(List.of(facts.get(SellerReport.F), facts.get(SellerReport.S), facts.get(SellerReport.C)));
+
+        for (List<SellerReport> order : ORDERS) {
+            List<PaymentFact> firstDeliveries = order.stream().map(facts::get).toList();
+            List<PaymentFact> delivered = withRedeliveries(firstDeliveries, Pbt.size(tryIndex, TRIES, 4), random);
+            SellerState expectedState = PINNED.get(order).getKey();
+            Set<SellerReport> expectedQuarantined = PINNED.get(order).getValue();
+
+            Pbt.check(tryIndex, seed, () -> "order " + order + ", delivered:\n" + describe(delivered), () -> {
+                // Each report delivered once: exactly the pinned outcome.
+                Delivery once = deliver(firstDeliveries, byEventId);
+                assertThat(once.projection().sellerState())
+                        .as("final seller state")
+                        .isEqualTo(expectedState);
+                assertThat(once.quarantined()).as("quarantined reports").isEqualTo(expectedQuarantined);
+                assertThat(postedKinds(once.posted(), payment.key()))
+                        .as("entries posted")
+                        .isEqualTo(expectedKinds(once.projection(), once.posted()));
+                assertThat(once.sameAs(canonical))
+                        .as("ends like the canonical order")
+                        .isEqualTo(expectedState == SellerState.CREDITED);
+
+                // With redeliveries: a redelivery posts nothing new beyond what the final state implies, and the
+                // outcome is still the canonical one or has exactly one report left quarantined. (A quarantined
+                // credit note redelivered after the settled report is accepted: F,C,S then ends CREDITED.)
+                Delivery redelivered = deliver(delivered, byEventId);
+                assertThat(postedKinds(redelivered.posted(), payment.key()))
+                        .as("entries posted with redeliveries")
+                        .isEqualTo(expectedKinds(redelivered.projection(), redelivered.posted()));
+                assertThat(redelivered.sameAs(canonical)
+                                || redelivered.quarantined().size() == 1)
+                        .as("same outcome as the canonical order, or exactly one report quarantined")
+                        .isTrue();
+                assertThat(redelivered.projection().sellerState())
+                        .isIn(expectedState, canonical.projection().sellerState());
+            });
+        }
+    }
+
+    /**
+     * The outcome of delivering {@code facts} in order, quarantining (skipping) a conflicting one as the listener
+     * does. {@code quarantined} holds the reports whose last delivery was rejected.
+     */
+    private record Delivery(PaymentProjection projection, List<JournalEntry> posted, Set<SellerReport> quarantined) {
+        boolean sameAs(Replay canonical) {
+            return projection.equals(canonical.projection())
+                    && PaymentBookTests.balances(posted).equals(canonical.balances());
+        }
+    }
+
+    private static Delivery deliver(List<PaymentFact> facts, Map<String, SellerReport> byEventId) {
+        PaymentProjection state = PaymentProjection.initial(facts.getFirst());
+        List<JournalEntry> posted = new ArrayList<>();
+        Set<SellerReport> quarantined = new HashSet<>();
+        for (PaymentFact fact : facts) {
+            SellerReport report = byEventId.get(fact.meta().eventId());
+            try {
+                PaymentBook.Outcome outcome = PaymentBook.apply(state, fact);
+                state = outcome.next();
+                posted.addAll(outcome.entries());
+                quarantined.remove(report);
+            } catch (ConflictingFactException e) {
+                quarantined.add(report);
+            }
+        }
+        return new Delivery(state, posted, quarantined);
+    }
+
+    /** {@code facts} in this order, with up to {@code max} redeliveries inserted after the original. */
+    private static List<PaymentFact> withRedeliveries(List<PaymentFact> facts, int max, SplittableRandom random) {
+        List<PaymentFact> delivered = new ArrayList<>(facts);
+        int redeliveries = random.nextInt(max + 1);
+        for (int i = 0; i < redeliveries; i++) {
+            PaymentFact fact = facts.get(random.nextInt(facts.size()));
+            int first = delivered.indexOf(fact);
+            delivered.add(random.nextInt(first + 1, delivered.size() + 1), fact);
+        }
+        return delivered;
     }
 
     /** P3 (domain half): an entry with one posting perturbed by a non-zero delta is rejected. */
