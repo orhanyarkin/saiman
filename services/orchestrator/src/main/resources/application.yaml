@@ -27,11 +27,13 @@ spring:
       jdbc:
         schema: orchestrator
       kafka:
-        # Events are mapped to their JSON string by OutboxConfiguration (Boot's JsonMapper), so the Kafka
-        # value is exactly the documented payload; no Modulith JSON converter, no type headers.
+        # OutboxConfiguration's StringJacksonJsonMessageConverter writes the documented JSON as a String value
+        # with no __TypeId__ header (as in the ledger); Modulith's byte-array converter is off.
         enable-json: false
   kafka:
     producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
       # Bounded, so an unreachable broker fails a publication quickly: it stays incomplete in the registry
       # and is resubmitted later (saiman.orchestrator.outbox) or on restart. A run never waits for Kafka.
       properties:

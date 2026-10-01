@@ -8,9 +8,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
  * In-memory fan-out of committed run events to live subscribers (the SSE streams). Single-instance
@@ -83,13 +82,16 @@ public class RunEventBus {
         return set == null ? 0 : set.size();
     }
 
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    /** Fans the event out once the appending transaction has committed (see {@link AfterCommit} for why). */
+    @EventListener
     void onAppended(RunEventAppended appended) {
-        RunEvent event = appended.event();
-        Set<Subscription> set = subscribers.get(event.runId());
-        if (set != null) {
-            set.forEach(subscription -> subscription.listener.accept(event));
-        }
+        AfterCommit.run(() -> {
+            RunEvent event = appended.event();
+            Set<Subscription> set = subscribers.get(event.runId());
+            if (set != null) {
+                set.forEach(subscription -> subscription.listener.accept(event));
+            }
+        });
     }
 
     private void unsubscribe(Subscription subscription) {
