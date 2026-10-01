@@ -18,7 +18,7 @@ Contract for M4b. Decisions: ADR-0021 (implements ADR-0015). Accept (docs/PLAN.m
   - Settle succeeds: store tx hash + client-facing settlement on the attempt, publish `X402PaymentSettledEvent` (unchanged record) immediately, return true.
 - `X402SettlementFilter.afterDispatch`, upfront branch: 2xx → `PAYMENT-RESPONSE`, outcome `settled`, no further event. 3xx/4xx/5xx → keep status and Problem Details body, add `PAYMENT-RESPONSE` (success, tx hash), outcome `paid_not_served`, publish `X402PaidRequestFailedEvent`. Most seller failures arrive here as 5xx/4xx through `@ControllerAdvice` (e.g. `ModelUnavailableException` → 503), not as exceptions — test that case first. Handler throws (check what the filter does today with an escaped exception first): write `500 application/problem+json` with `PAYMENT-RESPONSE`, publish the event (`handler_exception`), log the exception class only, do not rethrow, no handler headers leak. Async dispatch: same with `async_not_supported`.
 - New public API: `X402PaymentContext.settled(HttpServletRequest)`, `transactionHash(HttpServletRequest)`; `record X402PaidRequestFailedEvent(UUID eventId, String resourceUrl, PaymentRequirements requirements, String from, String nonce, String value, String validBefore, String payer, String transactionHash, int httpStatus, String reasonCode, Instant failedAt)`.
-- Observability: low-cardinality key `x402.payment_flow`, outcome `paid_not_served`; the metrics listener counts the amount for `paid_not_served` (money moved).
+- Observability: low-cardinality key `x402.payment_flow`, observation outcome `paid_not_served`; separate counters `x402.payments.paid_not_served` and `x402.payment.paid_not_served.amount` (the settled amount is already in `x402.payment.amount`, so it is not counted twice).
 - `samples/console-buyer`: `testnet-check --flow=upfront` (read-only `/verify` with `extra.paymentFlow`), starter README section.
 - Proof of "default unchanged": existing server and client tests pass **unmodified** (diff on existing test files additive only).
 
@@ -32,7 +32,7 @@ Contract for M4b. Decisions: ADR-0021 (implements ADR-0015). Accept (docs/PLAN.m
 ## ledger
 - `PaymentFact.CreditNoted(CreditNoteIssued)` (sealed: the compiler forces `PaymentBook` to handle it); `PaymentEventParser.creditNoteIssued(json)` binds producer `seller-api`, same bounds as `settled`.
 - `SellerState`: `NONE < SETTLE_FAILED < SETTLED < CREDITED`; `CREDITED.impliedEntries() = {SALE, CREDIT_NOTE}`. A credit note before its settled posts SALE + CREDIT_NOTE; the late settled posts nothing (order independence, P2).
-- **Conflicting facts (no postings, reported):** credit note after SETTLE_FAILED; credit-note txHash ≠ settled txHash.
+- **Conflicting facts (no postings, reported), both delivery orders:** credit note after SETTLE_FAILED / seller failure after CREDITED; credit-note txHash ≠ seller settled txHash (either order). A seller failure after SETTLED stays accepted (M4 rule). Property generators: consistent stories for P2, any story (conflicts skipped as quarantined) for P1.
 - CREDIT_NOTE postings (book SELLER, full amount): Dr `seller:<S>:revenue:credit-notes` (REVENUE, contra) / Cr `seller:<S>:liability:customer-credits` (LIABILITY); entry id `entryId(key, SELLER, "CREDIT_NOTE")`.
 - Migration `V4__credit_notes.sql`: widen the seller-state check to include `CREDITED` (look up the generated constraint name first).
 - New `@KafkaListener` on `payments.credit-note-issued.v1` with inbox dedupe and DLT, declared topic + DLT `NewTopic`s.
