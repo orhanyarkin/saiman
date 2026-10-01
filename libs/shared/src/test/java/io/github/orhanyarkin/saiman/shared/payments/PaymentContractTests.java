@@ -113,4 +113,12 @@ class PaymentContractTests {
                         UUID.randomUUID()))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void eventIdsAndCorrelationIdsAreCharsetBounded() {
+        assertThatThrownBy(() -> new EventMetadata("\u0000abc", Instant.EPOCH, "orchestrator", "run-1"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new EventMetadata("e-1", Instant.EPOCH, "orchestrator", "run 1;drop"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }
