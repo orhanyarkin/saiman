@@ -6,6 +6,8 @@ COMPOSE := docker compose -f deploy/compose/docker-compose.yml
 # Default target for the x402 console buyer's `buy`/`replay`/`testnet-check` commands:
 # seller-api's paid disclosure summary endpoint (M1).
 X402_URL ?= http://localhost:8081/v1/disclosures/THYAO/summary
+# Payment flow probed by `make x402-testnet-check` (ADR-0021).
+X402_FLOW ?= authorization
 
 # The seller's payout address is public, so `make` reads it from the repo-root .env when it
 # isn't exported (compose itself doesn't read that file). Only this one variable is read, via
@@ -109,8 +111,8 @@ x402-buy: x402-publish-local ## Pay for X402_URL with the console buyer (default
 x402-replay: x402-publish-local ## Replay the last stored payment against X402_URL; succeeds only if the server answers 402.
 	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer bootRun --args="replay --url=$(X402_URL)"
 
-x402-testnet-check: x402-publish-local ## Read-only /verify call against x402.org (never calls /settle). Local only, not run in CI.
-	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer bootRun --args="testnet-check"
+x402-testnet-check: x402-publish-local ## Read-only /verify call against x402.org (never calls /settle); X402_FLOW=authorization|upfront. Local only, not run in CI.
+	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer bootRun --args="testnet-check --flow=$(X402_FLOW)"
 
 # M2 RAG credentials and operations (docs/design/m2-rag.md, ADR-0009 amendment, ADR-0010,
 # ADR-0012). Secrets are files under the ignored secrets/ dir; nothing here prints one.
