@@ -106,6 +106,25 @@ class ReconciliationLeaseTests {
                 .isPresent();
     }
 
+    @Test
+    void runExportsTheDueBacklogGauges() {
+        assertThat(service.runNow()).isPresent();
+
+        assertThat(meters.get("saiman.ledger.reconciliation.due").gauge().value())
+                .isGreaterThanOrEqualTo(0);
+        assertThat(meters.get("saiman.ledger.reconciliation.oldest_unchecked_seconds")
+                        .gauge()
+                        .value())
+                .isGreaterThanOrEqualTo(0);
+        long due = jdbc.sql(
+                        "SELECT count(*) FROM payment WHERE buyer_tx_hash IS NOT NULL OR seller_tx_hash IS NOT NULL")
+                .query(Long.class)
+                .single();
+        assertThat(meters.get("saiman.ledger.reconciliation.due").gauge().value())
+                .as("at least every payment with a reported tx is due")
+                .isGreaterThanOrEqualTo((double) due);
+    }
+
     /** Sessions holding the runner's advisory lock (a bigint key: high and low 32 bits, objsubid 1). */
     private long advisoryLocksHeld() {
         return jdbc.sql("""

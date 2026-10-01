@@ -25,6 +25,31 @@ public class ReconciliationRepository {
     /** Signed amount of a posting: {@code +} debit, {@code -} credit. */
     private static final String SIGNED = "CASE p.side WHEN 'DEBIT' THEN p.amount_atomic ELSE -p.amount_atomic END";
 
+    /** How much later an uncorroborated payment (no buyer fact) queues than its last check or creation. */
+    static final String UNCORROBORATED_DELAY = "1 hour";
+
+    /** How much later a payment whose reported tx was found missing or unrelated queues. */
+    static final String SUSPECT_DELAY = "6 hours";
+
+    private static final String WITH_TX = "p.buyer_tx_hash IS NOT NULL OR p.seller_tx_hash IS NOT NULL";
+
+    private static final String WITHOUT_TX_DUE =
+            "p.buyer_tx_hash IS NULL AND p.seller_tx_hash IS NULL AND p.valid_before < :safeTs - :grace";
+
+    /**
+     * Due order: corroborated payments by last check (never checked first); uncorroborated and suspect ones as if
+     * checked (or, if never checked, created) a fixed delay later. Ties by creation and key, so it is total.
+     */
+    static final String DUE_ORDER = """
+            CASE
+                WHEN EXISTS (SELECT 1 FROM reconciliation_mismatch m
+                              WHERE m.payment_id = p.id AND m.kind IN ('TX_NOT_FOUND', 'TX_NOT_FOR_AUTHORIZATION'))
+                    THEN coalesce(p.last_checked_at, p.created_at) + interval '%s'
+                WHEN p.buyer_state = 'NONE'
+                    THEN coalesce(p.last_checked_at, p.created_at) + interval '%s'
+                ELSE coalesce(p.last_checked_at, '-infinity')
+            END, p.created_at, p.payment_key""".formatted(SUSPECT_DELAY, UNCORROBORATED_DELAY);
+
     private final JdbcClient jdbc;
 
     public ReconciliationRepository(JdbcClient jdbc) {
@@ -110,39 +135,62 @@ public class ReconciliationRepository {
      * Payments due for a check, in two shares so a flood of forged rows cannot starve real ones (M4 audit):
      *
      * <ul>
-     *   <li><b>Reported tx</b> (buyer or seller reported a hash): at least half of the batch is reserved for them,
-     *       least recently checked first, never-checked oldest first.
-     *   <li><b>No reported tx</b>, due once {@code validBefore < safe - grace}: the rest of the batch, same order.
+     *   <li><b>Reported tx</b> (buyer or seller reported a hash): at least half of the batch is reserved for them.
+     *   <li><b>No reported tx</b>, due once {@code validBefore < safe - grace}: the rest of the batch.
      * </ul>
      *
-     * An unused share goes to the other one. Matched payments stay due, so a record corrupted after its first
-     * check is still caught (the tamper demo). The grace is subtracted from the safe timestamp, never added to the
-     * column, so no stored value can overflow the comparison.
+     * An unused share goes to the other one. Within each share the order is {@link #DUE_ORDER}: least recently
+     * checked first, but a payment no buyer fact corroborates (only the unauthenticated seller side reported it)
+     * queues as if it had been checked {@link #UNCORROBORATED_DELAY} later, and one whose reported tx was already
+     * found missing or unrelated ({@code TX_NOT_FOUND}, {@code TX_NOT_FOR_AUTHORIZATION}; those mismatch rows are
+     * never deleted, so a payment stays suspect) {@link #SUSPECT_DELAY} later. Forged facts therefore queue behind
+     * real payments yet still age into a batch: they are delayed, never starved. Matched payments stay due, so a
+     * record corrupted after its first check is still caught (the tamper demo). The grace is subtracted from the
+     * safe timestamp, never added to the column, so no stored value can overflow the comparison.
      */
     @Transactional(readOnly = true)
     public List<String> duePaymentKeys(long safeTimestamp, long graceSeconds, int limit) {
         List<String> withTx = jdbc.sql("""
-                        SELECT payment_key FROM payment
-                         WHERE buyer_tx_hash IS NOT NULL OR seller_tx_hash IS NOT NULL
-                         ORDER BY last_checked_at NULLS FIRST, created_at, payment_key
+                        SELECT payment_key FROM payment p
+                         WHERE %s
+                         ORDER BY %s
                          LIMIT :limit
-                        """)
+                        """.formatted(WITH_TX, DUE_ORDER))
                 .param("limit", limit)
                 .query((rs, row) -> rs.getString(1))
                 .list();
         List<String> withoutTx = jdbc.sql("""
-                        SELECT payment_key FROM payment
-                         WHERE buyer_tx_hash IS NULL AND seller_tx_hash IS NULL
-                           AND valid_before < :safeTs - :grace
-                         ORDER BY last_checked_at NULLS FIRST, created_at, payment_key
+                        SELECT payment_key FROM payment p
+                         WHERE %s
+                         ORDER BY %s
                          LIMIT :limit
-                        """)
+                        """.formatted(WITHOUT_TX_DUE, DUE_ORDER))
                 .param("safeTs", safeTimestamp)
                 .param("grace", graceSeconds)
                 .param("limit", limit)
                 .query((rs, row) -> rs.getString(1))
                 .list();
         return fairShare(withTx, withoutTx, limit);
+    }
+
+    /** The due backlog: how many payments are due now, and the oldest last check (or creation) among them. */
+    public record Backlog(long due, @Nullable Instant oldestUnchecked) {}
+
+    /** {@link Backlog} for the gauges, with the same due condition as {@link #duePaymentKeys}. */
+    @Transactional(readOnly = true)
+    public Backlog backlog(long safeTimestamp, long graceSeconds) {
+        return jdbc.sql("""
+                        SELECT count(*) AS due, min(coalesce(last_checked_at, created_at)) AS oldest
+                          FROM payment p
+                         WHERE (%s) OR (%s)
+                        """.formatted(WITH_TX, WITHOUT_TX_DUE))
+                .param("safeTs", safeTimestamp)
+                .param("grace", graceSeconds)
+                .query((rs, row) -> {
+                    Timestamp oldest = rs.getTimestamp("oldest");
+                    return new Backlog(rs.getLong("due"), oldest == null ? null : oldest.toInstant());
+                })
+                .single();
     }
 
     /** At least {@code ceil(limit / 2)} of {@code reserved} first, then {@code rest}, then whatever fits. */
