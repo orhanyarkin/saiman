@@ -8,7 +8,10 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
-/** F1(b)/F3: one payer may start only so many model runs per rolling hour, paid or not. */
+/**
+ * F1(b)/F3: one payer may start only so many model runs per rolling hour. Upfront flow (ADR-0021):
+ * a refused request was already settled, so the 429 is credited.
+ */
 @TestPropertySource(properties = {"seller.llm.max-runs-per-payer-per-hour=2", "seller.llm.max-unsettled-per-day=100"})
 class PayerHourlyLimitEndpointTests extends RagTestBase {
 
@@ -33,7 +36,8 @@ class PayerHourlyLimitEndpointTests extends RagTestBase {
                 .isEqualTo(429);
 
         assertThat(router.modelCalls()).isEqualTo(2);
-        assertThat(FACILITATOR.settleCallCount()).isEqualTo(2);
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(3);
+        assertOneCreditNote(429);
     }
 
     @Test
@@ -55,10 +59,14 @@ class PayerHourlyLimitEndpointTests extends RagTestBase {
         int tickerLookupsAtLimit = INGEST.tickerCalls();
 
         String replayed = payment("20000");
-        for (int i = 0; i < 3; i++) {
+        postWith("/v1/disclosures/THYAO/questions", replayed, body)
+                .expectStatus()
+                .isEqualTo(429);
+        // Settled up front, so the claim is kept: a replay is refused before the handler.
+        for (int i = 0; i < 2; i++) {
             postWith("/v1/disclosures/THYAO/questions", replayed, body)
                     .expectStatus()
-                    .isEqualTo(429);
+                    .isEqualTo(402);
         }
         client.get()
                 .uri("/v1/disclosures/THYAO/summary")
@@ -70,5 +78,6 @@ class PayerHourlyLimitEndpointTests extends RagTestBase {
         assertThat(INGEST.retrieveCalls()).isEqualTo(retrievesAtLimit);
         assertThat(INGEST.tickerCalls()).isEqualTo(tickerLookupsAtLimit);
         assertThat(router.modelCalls()).isEqualTo(2);
+        assertThat(creditNotes()).hasSize(2);
     }
 }

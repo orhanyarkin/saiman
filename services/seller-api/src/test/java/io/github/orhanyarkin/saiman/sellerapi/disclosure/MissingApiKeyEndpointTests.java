@@ -7,6 +7,7 @@ import io.github.orhanyarkin.saiman.sellerapi.testsupport.FakeIngestServer;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.RagTestBase;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.TestcontainersConfiguration;
 import io.github.orhanyarkin.saiman.testsupport.RedisContainerConfiguration;
+import io.github.orhanyarkin.x402.core.PaymentFlow;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
 import io.github.orhanyarkin.x402.core.X402Codec;
@@ -72,7 +73,13 @@ class MissingApiKeyEndpointTests {
                 TestnetAssets.USDC_ADDRESS,
                 RagTestBase.PAY_TO,
                 60,
-                Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION));
+                Map.of(
+                        "name",
+                        TestnetAssets.USDC_NAME,
+                        "version",
+                        TestnetAssets.USDC_VERSION,
+                        PaymentFlow.EXTRA_KEY,
+                        PaymentFlow.UPFRONT.wireValue()));
         String header = PaymentPayloads.header(codec, PaymentPayloads.build(TestWallets.PAYER, offer));
 
         String body = client.post()
@@ -87,7 +94,8 @@ class MissingApiKeyEndpointTests {
                 .returnResult()
                 .getResponseBody();
 
-        assertThat(RagTestBase.FACILITATOR.settleCallCount()).isZero();
+        // Upfront flow (ADR-0021): settled before the handler, so the 503 is credited.
+        assertThat(RagTestBase.FACILITATOR.settleCallCount()).isEqualTo(1);
         assertThat(body).doesNotContain("SECRETQUESTIONMARKER").doesNotContain("CHUNKTEXTMARKER");
     }
 }

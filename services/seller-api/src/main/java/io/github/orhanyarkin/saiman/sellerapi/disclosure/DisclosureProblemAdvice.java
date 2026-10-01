@@ -10,8 +10,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
  * Maps every RAG failure to a non-2xx RFC 9457 body with a fixed, generic detail. All of these are
- * thrown from the handler method, i.e. after the x402 starter verified the payment but before it
- * settles, and a non-2xx handler response is never settled. The details never contain exception
+ * thrown from the handler method, i.e. after the x402 starter verified and (upfront flow, ADR-0021)
+ * settled the payment: the buyer gets the status with {@code PAYMENT-RESPONSE}, and the seller
+ * issues a credit note for the full amount. The details never contain exception
  * messages, the question, chunk text or keys.
  *
  * <p>Unlike {@code TickerNotFoundException} these do not extend {@code ErrorResponseException}:

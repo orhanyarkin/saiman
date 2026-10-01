@@ -12,16 +12,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * ADR-0015 (M3 part): the handler's deadline is {@code min(seller.llm.deadline, validBefore - now -
- * settle margin)}, so an authorization that reaches the handler with little of its window left
- * (here: a slow {@code /verify}) gets a short deadline, and the model is not called when less than
- * the model timeout remains.
+ * ADR-0015 cut the handler's deadline to {@code min(seller.llm.deadline, validBefore - now - settle
+ * margin)} because the payment was settled after the handler. Under the upfront flow (ADR-0021) the
+ * payment is settled before the handler runs, so a request whose remaining window is short (here: a
+ * slow {@code /verify}) still gets the full configured deadline: cutting it would only turn paid
+ * requests into 503s and credit notes.
  *
  * <p>Scaled-down timeouts that still pass the startup rule {@code deadline + connect + read timeout
  * + 5 s <= 45 s}: deadline 3 s, facilitator connect 3 s and read timeout 34 s (settle margin 42 s),
- * model timeout 1.5 s. An
- * authorization valid for 46 s leaves {@code ~46 - 42 = 4 s}, capped at 3 s, when it arrives
- * promptly; after a 3 s {@code /verify} it leaves under 1 s.
+ * model timeout 1.5 s. An authorization valid for 46 s that spends 3 s in {@code /verify} would have
+ * left under 1 s under the old cut, less than the model needs (1.2 s here).
  */
 @TestPropertySource(
         properties = {
@@ -35,6 +35,7 @@ class AuthorizationWindowDeadlineEndpointTests extends RagTestBase {
     private static final String SUMMARY = "/v1/disclosures/THYAO/summary";
     private static final String BODY = "{\"question\":\"What did the board decide?\"}";
     private static final String ANSWER = "{\"answer\":\"Text.\",\"citedChunkIds\":[\"kap:5:0000\",\"kap:5:0001\"]}";
+    private static final Duration MODEL_TIME = Duration.ofMillis(1_200);
 
     @BeforeEach
     void script() {
@@ -55,53 +56,22 @@ class AuthorizationWindowDeadlineEndpointTests extends RagTestBase {
     }
 
     @Test
-    void aShortRemainingWindowSkipsRetrievalAndTheModelAndIsNeverSettled() {
+    void aSettledQuestionGetsTheFullDeadlineEvenWhenLittleOfItsWindowIsLeft() {
         String header = paymentWithWindow("20000", 46);
         FACILITATOR.injectVerifyDelay(Duration.ofSeconds(3));
+        router.replyWithDelay(ANSWER, MODEL_TIME);
 
-        postWith(QUESTIONS, header, BODY).expectStatus().isEqualTo(503);
-
-        assertThat(FACILITATOR.verifyCallCount()).isEqualTo(1);
-        assertThat(router.modelCalls()).isZero();
-        assertThat(INGEST.retrieveCalls()).isZero();
-        assertThat(FACILITATOR.settleCallCount()).isZero();
-    }
-
-    @Test
-    void aSummaryRefusedForLackOfTimeIsNotNegativeCachedAndTheNextFullWindowRequestGenerates() {
-        INGEST.retrieves(List.of(FakeIngestServer.chunk("kap:5:0000", "THYAO", "one")), "v-no-poison");
-        router.replyWith("{\"summary\":\"Summary.\",\"citedChunkIds\":[\"kap:5:0000\"]}");
-        String shortWindow = paymentWithWindow("10000", 46);
-        FACILITATOR.injectVerifyDelay(Duration.ofSeconds(3));
-
-        client.get()
-                .uri(SUMMARY)
-                .header(X402Headers.PAYMENT_SIGNATURE, shortWindow)
-                .exchange()
-                .expectStatus()
-                .isEqualTo(503);
-
-        assertThat(router.modelCalls()).isZero();
-        assertThat(redis.hasKey(DisclosureSummaryCache.failureKey("THYAO", "v-no-poison")))
-                .isFalse();
-        assertThat(redis.hasKey(DisclosureSummaryCache.lockKey("THYAO", "v-no-poison")))
-                .isFalse();
-
-        // Someone else, with a full window, is not affected by that refusal.
-        FACILITATOR.injectVerifyDelay(Duration.ZERO);
-        client.get()
-                .uri(SUMMARY)
-                .header(X402Headers.PAYMENT_SIGNATURE, paymentWithWindow("10000", 46))
-                .exchange()
-                .expectStatus()
-                .isOk();
+        postWith(QUESTIONS, header, BODY).expectStatus().isOk();
 
         assertThat(router.modelCalls()).isEqualTo(1);
         assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertThat(creditNotes()).isEmpty();
     }
 
     @Test
-    void theSummaryEndpointAlsoSkipsTheModelWhenTheWindowIsShort() {
+    void aSettledSummaryGetsTheFullDeadlineEvenWhenLittleOfItsWindowIsLeft() {
+        INGEST.retrieves(List.of(FakeIngestServer.chunk("kap:5:0000", "THYAO", "one")), "v-full-deadline");
+        router.replyWithDelay("{\"summary\":\"Summary.\",\"citedChunkIds\":[\"kap:5:0000\"]}", MODEL_TIME);
         String header = paymentWithWindow("10000", 46);
         FACILITATOR.injectVerifyDelay(Duration.ofSeconds(3));
 
@@ -110,9 +80,10 @@ class AuthorizationWindowDeadlineEndpointTests extends RagTestBase {
                 .header(X402Headers.PAYMENT_SIGNATURE, header)
                 .exchange()
                 .expectStatus()
-                .isEqualTo(503);
+                .isOk();
 
-        assertThat(router.modelCalls()).isZero();
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(router.modelCalls()).isEqualTo(1);
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertThat(creditNotes()).isEmpty();
     }
 }

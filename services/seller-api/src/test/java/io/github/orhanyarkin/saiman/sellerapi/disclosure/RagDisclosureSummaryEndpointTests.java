@@ -117,7 +117,8 @@ class RagDisclosureSummaryEndpointTests extends RagTestBase {
         INGEST.retrieves(List.of(C1, C2), "v-not-cached");
         router.failWith(new IllegalStateException("boom"));
         getPaid(URI, PRICE).expectStatus().isEqualTo(503);
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertOneCreditNote(503);
 
         // Same corpus version: the failure is negative-cached, so the model is not asked again.
         router.replyWith(reply("Recovered.", "kap:5:0000"));
@@ -135,7 +136,7 @@ class RagDisclosureSummaryEndpointTests extends RagTestBase {
     }
 
     @Test
-    void summaryWithoutAnyValidCitationIs422AndNeverSettled() {
+    void summaryWithoutAnyValidCitationIs422AndCredited() {
         INGEST.retrieves(List.of(C1, C2), "v-no-citation");
         router.replyWith(reply("Summary.", "kap:1:0001"));
 
@@ -146,23 +147,26 @@ class RagDisclosureSummaryEndpointTests extends RagTestBase {
                 .returnResult()
                 .getResponseBody();
 
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertOneCreditNote(422);
         assertThat(body).doesNotContain("CHUNKTEXTMARKER").doesNotContain("kap:1:0001");
     }
 
     @Test
-    void emptyRetrievalIs404AndNeverSettled() {
+    void emptyRetrievalIs404AndCredited() {
         INGEST.retrieves(List.of(), "v-empty");
         getPaid("/v1/disclosures/ZZZZZZ/summary", PRICE).expectStatus().isNotFound();
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertOneCreditNote(404);
         assertThat(router.routerRequests()).isZero();
     }
 
     @Test
-    void malformedModelOutputIs502AndNeverSettled() {
+    void malformedModelOutputIs502AndCredited() {
         INGEST.retrieves(List.of(C1, C2), "v-malformed");
         router.replyWith("no json here");
         getPaid(URI, PRICE).expectStatus().isEqualTo(502);
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertOneCreditNote(502);
     }
 }

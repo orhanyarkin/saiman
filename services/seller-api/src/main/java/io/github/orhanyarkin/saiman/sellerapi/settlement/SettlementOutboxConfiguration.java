@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.sellerapi.settlement;
 
+import io.github.orhanyarkin.saiman.shared.payments.CreditNoteIssued;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentFailed;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentSettled;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
@@ -33,10 +34,11 @@ import tools.jackson.databind.json.JsonMapper;
 @EnableConfigurationProperties(SettlementOutboxProperties.class)
 class SettlementOutboxConfiguration {
 
-    /** Transaction timeout of the settlement recorder, which runs on the paid request's thread. */
+    /** Transaction timeout of the settlement and credit-note recorders, which runs on the paid request's thread. */
     static final int RECORD_TIMEOUT_SECONDS = 2;
 
-    private static final Set<Class<?>> EXTERNALIZED = Set.of(PaymentSettled.class, PaymentFailed.class);
+    private static final Set<Class<?>> EXTERNALIZED =
+            Set.of(PaymentSettled.class, PaymentFailed.class, CreditNoteIssued.class);
 
     /** Static: Modulith's listener factory needs this bean before Boot's Jackson configuration exists. */
     @Bean
@@ -50,6 +52,10 @@ class SettlementOutboxConfiguration {
                 .route(
                         PaymentFailed.class,
                         event -> RoutingTarget.forTarget(PaymentTopics.FAILED)
+                                .andKey(event.authorization().paymentKey()))
+                .route(
+                        CreditNoteIssued.class,
+                        event -> RoutingTarget.forTarget(PaymentTopics.CREDIT_NOTE_ISSUED)
                                 .andKey(event.authorization().paymentKey()))
                 .build();
     }
@@ -78,7 +84,8 @@ class SettlementOutboxConfiguration {
     /** Same names and partition count as the orchestrator declares, so the two do not conflict. */
     @Bean
     KafkaAdmin.NewTopics sellerTopics() {
-        return new KafkaAdmin.NewTopics(topic(PaymentTopics.SETTLED), topic(PaymentTopics.FAILED));
+        return new KafkaAdmin.NewTopics(
+                topic(PaymentTopics.SETTLED), topic(PaymentTopics.FAILED), topic(PaymentTopics.CREDIT_NOTE_ISSUED));
     }
 
     private static NewTopic topic(String name) {

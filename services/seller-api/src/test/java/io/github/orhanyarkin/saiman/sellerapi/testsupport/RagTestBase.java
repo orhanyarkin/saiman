@@ -1,8 +1,11 @@
 package io.github.orhanyarkin.saiman.sellerapi.testsupport;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
 import io.github.orhanyarkin.saiman.testsupport.RedisContainerConfiguration;
 import io.github.orhanyarkin.x402.core.Eip3009Authorization;
+import io.github.orhanyarkin.x402.core.PaymentFlow;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
 import io.github.orhanyarkin.x402.core.X402Codec;
@@ -12,6 +15,7 @@ import io.github.orhanyarkin.x402.testing.FakeFacilitator;
 import io.github.orhanyarkin.x402.testing.PaymentPayloads;
 import io.github.orhanyarkin.x402.testing.TestWallets;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +27,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.client.RestTestClient;
@@ -73,6 +78,9 @@ public abstract class RagTestBase {
     @Autowired
     protected StringRedisTemplate redis;
 
+    @Autowired
+    protected JdbcClient jdbc;
+
     @BeforeEach
     void resetFakes() {
         // Summary cache, single-flight locks, negative cache and run-guard counters: per-test state.
@@ -84,6 +92,10 @@ public abstract class RagTestBase {
         FACILITATOR.resetCallCounts();
         INGEST.reset();
         router.replyWith("{}");
+        // Settlement records, credit notes and outbox publications: per-test state as well.
+        jdbc.sql("DELETE FROM event_publication").update();
+        jdbc.sql("DELETE FROM settlement").update();
+        jdbc.sql("DELETE FROM credit_note").update();
     }
 
     protected final PaymentRequirements offer(String price) {
@@ -94,7 +106,13 @@ public abstract class RagTestBase {
                 TestnetAssets.USDC_ADDRESS,
                 PAY_TO,
                 60,
-                Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION));
+                Map.of(
+                        "name",
+                        TestnetAssets.USDC_NAME,
+                        "version",
+                        TestnetAssets.USDC_VERSION,
+                        PaymentFlow.EXTRA_KEY,
+                        PaymentFlow.UPFRONT.wireValue()));
     }
 
     /** A fresh, validly signed {@code PAYMENT-SIGNATURE} header value for {@code price} atomic units. */
@@ -116,6 +134,23 @@ public abstract class RagTestBase {
                 Long.toString(now + windowSeconds),
                 Eip3009TypedData.randomNonce());
         return PaymentPayloads.header(codec, PaymentPayloads.sign(TestWallets.PAYER, offer(price), authorization));
+    }
+
+    /** The {@code credit_note} rows, oldest first. */
+    protected final List<Map<String, Object>> creditNotes() {
+        return jdbc.sql("SELECT * FROM credit_note ORDER BY created_at").query().listOfRows();
+    }
+
+    /**
+     * Exactly one credit note exists (upfront flow, ADR-0021: paid and not served) for {@code status},
+     * with the starter's reason code for that status class.
+     */
+    protected final void assertOneCreditNote(int status) {
+        List<Map<String, Object>> notes = creditNotes();
+        assertThat(notes).hasSize(1);
+        assertThat(notes.get(0))
+                .containsEntry("http_status", status)
+                .containsEntry("reason_code", status >= 500 ? "handler_server_error" : "handler_client_error");
     }
 
     protected final RestTestClient.ResponseSpec getPaid(String uri, String price) {

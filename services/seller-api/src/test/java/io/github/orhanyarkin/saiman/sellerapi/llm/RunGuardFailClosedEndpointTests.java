@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.sellerapi.llm;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 
@@ -17,14 +18,14 @@ class RunGuardFailClosedEndpointTests extends RagTestBase {
     private UnsettledRunGuard guard;
 
     @Test
-    void noGuardMeansNoModelCallNoSettlementAndAFixed503() {
+    void noGuardMeansNoModelCallACreditNoteAndAFixed503() {
         INGEST.retrieves(
                 List.of(
                         FakeIngestServer.chunk("kap:5:0000", "THYAO", "one"),
                         FakeIngestServer.chunk("kap:5:0001", "THYAO", "two")),
                 "v-fail-closed");
         router.replyWith("{\"answer\":\"Text.\",\"citedChunkIds\":[\"kap:5:0000\",\"kap:5:0001\"]}");
-        doThrow(new RunGuardUnavailableException()).when(guard).tryStart(anyString());
+        doThrow(new RunGuardUnavailableException()).when(guard).tryStart(anyString(), anyBoolean());
 
         String body = postPaid("/v1/disclosures/THYAO/questions", "20000", "{\"question\":\"What happened?\"}")
                 .expectStatus()
@@ -34,7 +35,8 @@ class RunGuardFailClosedEndpointTests extends RagTestBase {
                 .getResponseBody();
 
         assertThat(router.routerRequests()).isZero();
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1); // upfront: settled before the handler
+        assertOneCreditNote(503);
         assertThat(body).doesNotContain("What happened");
     }
 }

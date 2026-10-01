@@ -64,7 +64,7 @@ public class SettlementRecorder {
 
     private static final Logger LOG = LoggerFactory.getLogger(SettlementRecorder.class);
     private static final Pattern REASON_CODE = Pattern.compile("[a-z0-9_]{1,64}");
-    private static final int MAX_RESOURCE_LENGTH = 512;
+    static final int MAX_RESOURCE_LENGTH = 512;
 
     private final JdbcClient jdbc;
     private final TransactionTemplate transaction;
@@ -153,7 +153,7 @@ public class SettlementRecorder {
                     eventId(key, settled ? "SETTLED" : "FAILED").toString(),
                     occurredAt.truncatedTo(ChronoUnit.MICROS),
                     PRODUCER,
-                    correlationId(key));
+                    correlationId(tracer.getIfAvailable(), key));
             // Built before anything is written: an invalid record throws and nothing is stored.
             Object event = settled
                     ? new PaymentSettled(
@@ -213,8 +213,7 @@ public class SettlementRecorder {
     }
 
     /** The request's trace id, else a hash of the payment key; never the nonce or a secret. */
-    private String correlationId(String paymentKey) {
-        Tracer current = tracer.getIfAvailable();
+    static String correlationId(@Nullable Tracer current, String paymentKey) {
         if (current != null) {
             Span span = current.currentSpan();
             if (span != null) {

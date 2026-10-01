@@ -17,11 +17,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * F1/F3: the model runs before settlement, so a request that ends non-2xx after the model ran has
- * cost money and paid nothing. The starter keeps that request's nonce claim (no replay of the same
- * authorization) and the run guard bounds what fresh authorizations can do.
+ * F1/F3 under the x402 upfront flow (ADR-0021): both LLM endpoints settle before the handler runs, so
+ * every model run is paid. A request that then ends non-2xx is credited, its nonce claim is kept (no
+ * replay of the same authorization), the run guard's per-payer limits still apply, and the unsettled
+ * day counter is never touched.
  */
-class UnpaidRunControlsTests extends RagTestBase {
+class UpfrontRunControlsTests extends RagTestBase {
 
     private static final String ANSWER_PRICE = "20000";
     private static final String SUMMARY_PRICE = "10000";
@@ -41,22 +42,22 @@ class UnpaidRunControlsTests extends RagTestBase {
         return "{\"answer\":\"Text.\",\"citedChunkIds\":[\"" + String.join("\",\"", ids) + "\"]}";
     }
 
-    private String unsettledCounter() {
-        String value = redis.opsForValue().get("seller:runs:unsettled:" + LocalDate.now(ZoneOffset.UTC));
-        return value == null ? "0" : value;
+    private String unsettledKey() {
+        return "seller:runs:unsettled:" + LocalDate.now(ZoneOffset.UTC);
     }
 
     @Test
-    void aWorkDone422KeepsTheClaimSoTheSameAuthorizationCanNotBuyAnotherModelRun() {
+    void aPaid422IsCreditedAndTheSameAuthorizationCanNotBuyAnotherModelRun() {
         router.replyWith(answer("kap:1:0001", "kap:2:0002")); // ungrounded: 422 after the model ran
         String header = payment(ANSWER_PRICE);
 
         postWith(QUESTIONS, header, BODY).expectStatus().isEqualTo(422);
         assertThat(router.modelCalls()).isEqualTo(1);
+        assertOneCreditNote(422);
 
         postWith(QUESTIONS, header, BODY).expectStatus().isEqualTo(402);
         assertThat(router.modelCalls()).isEqualTo(1);
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
     }
 
     @Test
@@ -78,45 +79,54 @@ class UnpaidRunControlsTests extends RagTestBase {
                 .isEqualTo(402);
 
         assertThat(router.modelCalls()).isEqualTo(1);
-    }
-
-    @Test
-    void aFailureBeforeAnythingWasSentToTheProviderStillReleasesTheClaim() {
-        router.failWith(new DailyCapExceededException("cap"));
-        String header = payment(ANSWER_PRICE);
-        postWith(QUESTIONS, header, BODY).expectStatus().isEqualTo(503);
-
-        // Nothing was spent, so the buyer may retry the very same authorization.
-        router.replyWith(answer("kap:5:0000", "kap:5:0001"));
-        postWith(QUESTIONS, header, BODY).expectStatus().isOk();
         assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
     }
 
     @Test
-    void aRejectedBodyBeforeAnyModelRunStillReleasesTheClaim() {
+    void aFailureBeforeAnythingWasSentToTheProviderIsStillCreditedAndNotReplayable() {
+        router.failWith(new DailyCapExceededException("cap"));
+        String header = payment(ANSWER_PRICE);
+        postWith(QUESTIONS, header, BODY).expectStatus().isEqualTo(503);
+        assertOneCreditNote(503);
+
+        // The money moved before the handler ran, so the authorization is spent.
+        router.replyWith(answer("kap:5:0000", "kap:5:0001"));
+        postWith(QUESTIONS, header, BODY).expectStatus().isEqualTo(402);
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+    }
+
+    @Test
+    void aRejectedBodyIsCreditedAndNotReplayable() {
         router.replyWith(answer("kap:5:0000", "kap:5:0001"));
         String header = payment(ANSWER_PRICE);
 
         postWith(QUESTIONS, header, "{\"question\":\"x\"}").expectStatus().isEqualTo(400);
-        postWith(QUESTIONS, header, BODY).expectStatus().isOk();
+        assertOneCreditNote(400);
+        postWith(QUESTIONS, header, BODY).expectStatus().isEqualTo(402);
+        assertThat(router.modelCalls()).isZero();
     }
 
     @Test
-    void settledRunsGiveTheirUnsettledSlotBackAndUnpaidOnesKeepIt() {
+    void settledRunsNeitherCountAgainstNorAreRefusedByTheUnsettledDayBudget() {
+        // The day's unsettled budget (100 by default) is already used up: settled runs still go through.
+        redis.opsForValue().set(unsettledKey(), "1000");
+
         router.replyWith(answer("kap:1:0001", "kap:2:0002"));
         postPaid(QUESTIONS, ANSWER_PRICE, BODY).expectStatus().isEqualTo(422);
-        assertThat(unsettledCounter()).isEqualTo("1");
-
         router.replyWith(answer("kap:5:0000", "kap:5:0001"));
         postPaid(QUESTIONS, ANSWER_PRICE, BODY).expectStatus().isOk();
-        // +1 at start, -1 at settlement: only the unpaid run is left.
-        assertThat(unsettledCounter()).isEqualTo("1");
-
         router.replyWith("{\"summary\":\"S.\",\"citedChunkIds\":[\"kap:5:0000\"]}");
-        // A summary served from the cache starts no run, so its settlement must not give a slot back.
-        getPaid(SUMMARY, SUMMARY_PRICE).expectStatus().isOk(); // generates: +1 -1
-        getPaid(SUMMARY, SUMMARY_PRICE).expectStatus().isOk(); // cache hit: no change
-        assertThat(unsettledCounter()).isEqualTo("1");
+        getPaid(SUMMARY, SUMMARY_PRICE).expectStatus().isOk(); // generates
+        getPaid(SUMMARY, SUMMARY_PRICE).expectStatus().isOk(); // cache hit
+
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(4);
+        assertThat(redis.opsForValue().get(unsettledKey())).isEqualTo("1000");
+
+        // And without a pre-set counter, nothing creates one.
+        redis.delete(unsettledKey());
+        router.replyWith(answer("kap:5:0000", "kap:5:0001"));
+        postPaid(QUESTIONS, ANSWER_PRICE, BODY).expectStatus().isOk();
+        assertThat(redis.hasKey(unsettledKey())).isFalse();
     }
 
     @Test
@@ -134,10 +144,11 @@ class UnpaidRunControlsTests extends RagTestBase {
         assertThat(router.maxConcurrentModelCalls()).isLessThanOrEqualTo(2);
         assertThat(statuses).allMatch(status -> status == 200 || status == 429);
         assertThat(statuses).contains(429);
-        assertThat(router.modelCalls())
-                .isEqualTo(
-                        Math.toIntExact(statuses.stream().filter(s -> s == 200).count()));
-        assertThat(FACILITATOR.settleCallCount()).isEqualTo(router.modelCalls());
-        assertThat(unsettledCounter()).isEqualTo("0");
+        long served = statuses.stream().filter(s -> s == 200).count();
+        assertThat(router.modelCalls()).isEqualTo(Math.toIntExact(served));
+        // Every request settled up front; every refused one is credited.
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(8);
+        assertThat(creditNotes()).hasSize(8 - Math.toIntExact(served));
+        assertThat(redis.hasKey(unsettledKey())).isFalse();
     }
 }

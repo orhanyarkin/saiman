@@ -130,6 +130,40 @@ class UnsettledRunGuardTests {
     }
 
     @Test
+    void aSettledRunLeavesTheDayCounterAloneButKeepsThePerPayerLimits() {
+        // The day's unsettled budget (4) is used up by other payers.
+        for (int i = 0; i < 4; i++) {
+            String payer = "0x00000000000000000000000000000000000000" + String.format("%02d", 20 + i);
+            guard.tryStart(payer);
+            guard.finish(payer);
+        }
+        assertThat(unsettled()).isEqualTo("4");
+
+        // Settled (upfront) runs neither count nor are refused by the day budget...
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
+        guard.tryStart(PAYER, true);
+        guard.tryStart(PAYER, true);
+        assertThat(unsettled()).isEqualTo("4");
+        // ...nor mark the request, so a settlement event gives nothing back.
+        guard.onSettled(settledEvent());
+        assertThat(unsettled()).isEqualTo("4");
+
+        // The per-payer in-flight cap (2) still applies.
+        assertThatThrownBy(() -> guard.tryStart(PAYER, true)).isInstanceOf(RunLimitExceededException.class);
+        guard.finish(PAYER);
+        guard.finish(PAYER);
+
+        // And the per-payer hourly cap (5): two more settled runs fit, the next does not.
+        UnsettledRunGuard hourly = guardWith(10, 5, 4);
+        for (int i = 0; i < 3; i++) {
+            hourly.tryStart(PAYER, true);
+            hourly.finish(PAYER);
+        }
+        assertThatThrownBy(() -> hourly.tryStart(PAYER, true)).isInstanceOf(RunLimitExceededException.class);
+        assertThat(unsettled()).isEqualTo("4");
+    }
+
+    @Test
     void finishNeverGoesBelowZero() {
         for (int i = 0; i < 5; i++) {
             guard.finish(PAYER);
