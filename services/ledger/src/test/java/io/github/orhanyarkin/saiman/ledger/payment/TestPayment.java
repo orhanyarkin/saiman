@@ -109,9 +109,15 @@ public record TestPayment(AuthorizationRef authorization, Money amount, String p
         return authorization.paymentKey();
     }
 
-    /** A deterministic tx hash for this authorization (same for buyer and seller). */
+    /**
+     * A deterministic tx hash for this authorization (same for buyer and seller). Never equal to the nonce: the first
+     * hex digit is always changed, so "the payload does not contain the nonce" assertions cannot pass or fail by
+     * coincidence.
+     */
     public String txHash() {
-        return "0x" + authorization.nonce().substring(2, 66).replace('0', 'a');
+        String hex = authorization.nonce().substring(2, 66).toLowerCase(java.util.Locale.ROOT);
+        char first = hex.charAt(0) == 'f' ? 'e' : 'f';
+        return "0x" + first + hex.substring(1).replace('0', 'a');
     }
 
     public static String address(SplittableRandom random) {
