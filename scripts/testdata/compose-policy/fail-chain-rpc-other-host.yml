@@ -1,0 +1,8 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: SAIMAN_CHAIN_RPC_URL must be an https URL whose host is exactly sepolia.base.org
+name: cptest-fail-chain-rpc-other-host
+services:
+  ledger:
+    image: busybox:1
+    environment:
+      SAIMAN_CHAIN_RPC_URL: https://mainnet.base.org

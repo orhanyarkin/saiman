@@ -1,0 +1,8 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: SAIMAN_CHAIN_ALLOWED_HOSTS must be exactly sepolia.base.org
+name: cptest-fail-chain-allowed-hosts-wildcard
+services:
+  ledger:
+    image: busybox:1
+    environment:
+      SAIMAN_CHAIN_ALLOWED_HOSTS: sepolia.base.org,evil.example

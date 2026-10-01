@@ -162,11 +162,18 @@ services:
       # A payment strictly above 10000 atomic waits for a human approval: the 0.02 USDC
       # questions tool does, the 0.01 USDC summary tool does not (USDC has 6 decimals).
       SAIMAN_ORCHESTRATOR_SPEND_APPROVAL_THRESHOLD_ATOMIC: "10000"
+      # M4 (ADR-0018): HeldPaymentResolver reads chain state;
+      # chain reads go only to the public Base Sepolia RPC (not a secret; testnet
+      # only). The allowlist is the exact host; scripts/check-compose-policy.sh pins both.
+      SAIMAN_CHAIN_RPC_URL: https://sepolia.base.org
+      SAIMAN_CHAIN_ALLOWED_HOSTS: sepolia.base.org
     depends_on:
       <<: *app-common-depends-on
       postgres:
         condition: service_healthy
       valkey:
+        condition: service_healthy
+      redpanda:
         condition: service_healthy
       # No shell in the image, so no healthcheck: started is the strongest signal compose has;
       # `make up` polls /actuator/health on the host (scripts/wait-for-health.sh).
@@ -198,6 +205,9 @@ services:
       <<: *app-common-depends-on
       valkey:
         condition: service_healthy
+      # M4: seller-api publishes payment events to Redpanda (outbox relay).
+      redpanda:
+        condition: service_healthy
       ingest:
         condition: service_started
 
@@ -205,7 +215,24 @@ services:
     <<: *app-common
     image: ghcr.io/orhanyarkin/saiman-ledger:dev
     ports:
+      # The ledger API has no authentication until M6 (ADR-0018): keep it on loopback.
       - "127.0.0.1:8082:8082"
+    environment:
+      <<: *app-common-env
+      # M4 (ADR-0018): chain reads go only to the public Base Sepolia RPC (not a secret; testnet
+      # only). The allowlist is the exact host; scripts/check-compose-policy.sh pins both.
+      SAIMAN_CHAIN_RPC_URL: https://sepolia.base.org
+      SAIMAN_CHAIN_ALLOWED_HOSTS: sepolia.base.org
+      # DNS-rebinding guard for /api/** (saiman.ledger.api.allowed-hosts, a comma-separated list).
+      SAIMAN_LEDGER_API_ALLOWED_HOSTS: localhost,127.0.0.1,[::1],ledger,ledger:8082,localhost:8082,127.0.0.1:8082
+    # Topics are created by the producers' NewTopic beans (Spring Kafka KafkaAdmin) at startup;
+    # compose does not pre-create them. The ledger consumes payments.* and publishes ledger.*.
+    depends_on:
+      <<: *app-common-depends-on
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
 
   ingest:
     <<: *app-common

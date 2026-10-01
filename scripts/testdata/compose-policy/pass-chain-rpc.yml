@@ -1,0 +1,14 @@
+# Fixture for scripts/test-check-compose-policy.sh: must PASS.
+# M4 shape: only ledger and orchestrator carry the public Base Sepolia RPC settings.
+name: cptest-pass-chain-rpc
+services:
+  ledger:
+    image: busybox:1
+    environment:
+      SAIMAN_CHAIN_RPC_URL: https://sepolia.base.org
+      SAIMAN_CHAIN_ALLOWED_HOSTS: sepolia.base.org
+  orchestrator:
+    image: busybox:1
+    environment:
+      SAIMAN_CHAIN_RPC_URL: https://sepolia.base.org
+      SAIMAN_CHAIN_ALLOWED_HOSTS: sepolia.base.org

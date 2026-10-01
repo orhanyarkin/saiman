@@ -1,0 +1,8 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: is only allowed on ledger and orchestrator
+name: cptest-fail-chain-rpc-on-seller
+services:
+  seller-api:
+    image: busybox:1
+    environment:
+      SAIMAN_CHAIN_RPC_URL: https://sepolia.base.org
