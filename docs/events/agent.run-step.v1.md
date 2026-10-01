@@ -19,7 +19,7 @@ Envelope (SSE `id` = `seq`, `event` = `type`, `data` = JSON below):
 | TOOL_CALL_REQUESTED | tool, arguments (code-rendered, validated) |
 | PAYMENT_APPROVAL_REQUIRED | approvalId, paymentIntentId, amount, payTo, resource, expiresAt |
 | PAYMENT_APPROVAL_DECIDED | approvalId, decision (APPROVED, REJECTED, EXPIRED) |
-| PAYMENT_DENIED | reason (RUN_BUDGET, DAILY_CAP, PAYEE_NOT_ALLOWED, OVER_PER_REQUEST_MAX, UNKNOWN_INTENT, APPROVAL_REJECTED, APPROVAL_EXPIRED, APPROVAL_MISMATCH (the fresh 402 differs from the approved amount/payTo/resource), OFFER_NOT_PAYABLE (unsupported network/asset or malformed offer), MAX_PAID_CALLS, INVALID_ARGS), amount |
+| PAYMENT_DENIED | reason (RUN_BUDGET, DAILY_CAP, PAYEE_NOT_ALLOWED, OVER_PER_REQUEST_MAX, UNKNOWN_INTENT, APPROVAL_REJECTED, APPROVAL_EXPIRED, APPROVAL_MISMATCH (the fresh 402 differs from the approved amount/payTo/resource), OFFER_NOT_PAYABLE (unsupported network/asset or malformed offer), MAX_PAID_CALLS, HOURLY_PAID_CALLS (the wallet's paid calls in the last hour reached the seller's per-payer limit), INVALID_ARGS), amount |
 | PAYMENT_SETTLED | paymentIntentId, amount, txHash |
 | PAYMENT_AMBIGUOUS | paymentIntentId, amount (signed, outcome unknown, reservation stays counted) |
 | TOOL_CALL_COMPLETED | tool, paid, citationCount |
