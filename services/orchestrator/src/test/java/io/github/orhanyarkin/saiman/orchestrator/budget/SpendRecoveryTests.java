@@ -2,14 +2,21 @@ package io.github.orhanyarkin.saiman.orchestrator.budget;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.orhanyarkin.saiman.orchestrator.events.RunEventAppender;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentHandle;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentStatus;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentTestAccess;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.FakeSeller;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.SpendTestSupport;
+import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.github.orhanyarkin.saiman.shared.run.RunCost;
+import io.github.orhanyarkin.saiman.shared.run.RunEvent;
+import io.github.orhanyarkin.saiman.shared.run.RunEventData;
+import io.github.orhanyarkin.saiman.shared.run.RunEventType;
 import io.github.orhanyarkin.x402.client.PaymentIntent;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -27,6 +34,24 @@ class SpendRecoveryTests extends SpendTestSupport {
 
     @Autowired
     private SpendRecovery recovery;
+
+    @Autowired
+    private RunEventAppender eventLog;
+
+    @Test
+    void anInterruptedRunsTerminalEventCarriesItsCommittedAndLlmCost() {
+        UUID run = createRun(50_000);
+        jdbc.sql("UPDATE run SET committed_atomic = 10000, llm_cost_usd_micros = 1234 WHERE id = :id")
+                .param("id", run)
+                .update();
+
+        recovery.recover();
+
+        assertThat(eventLog.readAfter(run, 0))
+                .extracting(RunEvent::data)
+                .containsExactly(new RunEventData.RunFailed(
+                        SpendRecovery.INTERRUPTED, RunCost.of(Money.usdc(10_000), Money.usdMicros(1_234))));
+    }
 
     @Test
     void aCrashedProcessIsRecoveredFailClosedAndIdempotently() {
@@ -58,8 +83,17 @@ class SpendRecoveryTests extends SpendTestSupport {
                         .single())
                 .isEqualTo(SpendRecovery.INTERRUPTED);
         assertThat(runStatus(finishedRun)).isEqualTo("SUCCEEDED");
+        // the interrupted run's stream ends with a terminal event carrying the persisted cost so far
+        List<RunEvent> events = eventLog.readAfter(run, 0);
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).type()).isEqualTo(RunEventType.RUN_FAILED);
+        assertThat(events.get(0).data())
+                .isEqualTo(new RunEventData.RunFailed(
+                        SpendRecovery.INTERRUPTED, RunCost.of(Money.usdc(0), Money.usdMicros(0))));
+        assertThat(eventLog.readAfter(finishedRun, 0)).isEmpty();
 
         assertThat(recovery.recover()).isEqualTo(new SpendRecovery.Outcome(0, 0, 0));
+        assertThat(eventLog.readAfter(run, 0)).hasSize(1); // no second terminal event
         assertThat(run(run)).isEqualTo(new RunCounters(50_000, 12_000, 0));
         assertThat(today()).isEqualTo(new RunCounters(0, 12_000, 0));
     }

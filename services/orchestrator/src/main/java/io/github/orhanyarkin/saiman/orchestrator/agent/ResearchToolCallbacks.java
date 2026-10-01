@@ -13,6 +13,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -39,6 +40,7 @@ public class ResearchToolCallbacks {
     private final Map<UUID, Binding> bindings = new ConcurrentHashMap<>();
     private final int maxCallsPerRun;
 
+    @Autowired
     public ResearchToolCallbacks(ToolCatalog catalog, SpendProperties spend) {
         this(catalog.definitions(), spend.maxToolCallsPerRun());
     }
