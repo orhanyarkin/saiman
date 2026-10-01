@@ -238,13 +238,9 @@ class ChainReconcilerTests {
         assertThat(outcome.adjustment()).isNull();
     }
 
-    @Test
-    void buyerAndSellerReportingDifferentTransactionsIsAConflictWithoutPosting() {
-        TestPayment seller = new TestPayment(
-                payment.authorization(), payment.amount(), payment.payTo(), payment.intentId(), payment.runId());
-        Books books = Books.of(List.of(PaymentFact.of(payment.buyerSettled()), PaymentFact.of(seller.sellerSettled())));
-        PaymentProjection p = books.projection();
-        PaymentProjection conflicting = new PaymentProjection(
+    /** The projection with these reported hashes (buyer, seller) and no chain facts. */
+    private static PaymentProjection withTx(PaymentProjection p, String buyerTx, String sellerTx) {
+        return new PaymentProjection(
                 p.id(),
                 p.paymentKey(),
                 p.network(),
@@ -259,21 +255,85 @@ class ChainReconcilerTests {
                 p.buyerState(),
                 p.sellerState(),
                 p.chainState(),
-                p.buyerTxHash(),
-                txHash('c'),
+                buyerTx,
+                sellerTx,
                 null,
                 null);
+    }
+
+    @Test
+    void bogusSellerHashDoesNotFreezeThePaymentTheValidReceiptWins() {
+        Books books = settledBothBooks();
+        String real = payment.txHash();
+        PaymentProjection p = withTx(books.projection(), real, txHash('c'));
+        Map<String, Optional<UsdcReceipt>> receipts =
+                Map.of(real, Optional.of(matching(p, real)), txHash('c'), Optional.empty());
+
+        assertThat(ChainReconciler.needsAuthorizationState(p, receipts, SAFE_LATE))
+                .isFalse();
+        var outcome = ChainReconciler.reconcile(
+                p, books.nets(), evidence(SAFE_LATE, receipts, null), SETTINGS, UUID.randomUUID(), NOW);
+
+        assertThat(outcome.findings())
+                .extracting(ChainReconciler.Finding::kind, ChainReconciler.Finding::reportedTxHash)
+                .containsExactly(tuple(MismatchKind.TX_NOT_FOUND, txHash('c')));
+        assertThat(outcome.next().chainState()).isEqualTo(ChainState.USED);
+        assertThat(outcome.next().chainTxHash()).isEqualTo(real);
+        assertThat(outcome.adjustment()).isNull();
+    }
+
+    @Test
+    void bogusBuyerHashOfAnotherTransferIsNotForTheAuthorization() {
+        Books books = settledBothBooks();
+        String real = payment.txHash();
+        String bogus = txHash('d');
+        PaymentProjection p = withTx(books.projection(), bogus, real);
+        var unrelated = new UsdcReceipt(
+                bogus, 999_000, true, List.of(new UsdcTransfer(p.payer(), p.payTo(), 20_000)), List.of());
+        Map<String, Optional<UsdcReceipt>> receipts =
+                Map.of(real, Optional.of(matching(p, real)), bogus, Optional.of(unrelated));
 
         var outcome = ChainReconciler.reconcile(
-                conflicting, books.nets(), evidence(SAFE_LATE, Map.of(), null), SETTINGS, UUID.randomUUID(), NOW);
+                p, books.nets(), evidence(SAFE_LATE, receipts, null), SETTINGS, UUID.randomUUID(), NOW);
+
+        assertThat(outcome.findings())
+                .extracting(ChainReconciler.Finding::kind)
+                .containsExactly(MismatchKind.TX_NOT_FOR_AUTHORIZATION);
+        assertThat(outcome.next().chainTxHash()).isEqualTo(real);
+        assertThat(outcome.adjustment()).isNull();
+    }
+
+    @Test
+    void twoDifferentValidReceiptsAreAConflictWithoutPosting() {
+        Books books = settledBothBooks();
+        String real = payment.txHash();
+        PaymentProjection p = withTx(books.projection(), real, txHash('c'));
+        Map<String, Optional<UsdcReceipt>> receipts =
+                Map.of(real, Optional.of(matching(p, real)), txHash('c'), Optional.of(matching(p, txHash('c'))));
+
+        var outcome = ChainReconciler.reconcile(
+                p, books.nets(), evidence(SAFE_LATE, receipts, null), SETTINGS, UUID.randomUUID(), NOW);
 
         assertThat(outcome.status()).isEqualTo(ItemStatus.MISMATCH);
         assertThat(outcome.findings())
                 .extracting(ChainReconciler.Finding::kind)
                 .containsExactly(MismatchKind.CONFLICTING_TX);
         assertThat(outcome.adjustment()).isNull();
-        assertThat(ChainReconciler.needsAuthorizationState(conflicting, Map.of(), SAFE_LATE))
-                .isFalse();
+        assertThat(outcome.next().chainState()).isEqualTo(p.chainState());
+    }
+
+    @Test
+    void twoUnknownHashesWithinTheGraceArePending() {
+        Books books = settledBothBooks();
+        PaymentProjection p = withTx(books.projection(), payment.txHash(), txHash('c'));
+        Map<String, Optional<UsdcReceipt>> receipts =
+                Map.of(payment.txHash(), Optional.empty(), txHash('c'), Optional.empty());
+
+        var outcome = ChainReconciler.reconcile(
+                p, books.nets(), evidence(SAFE_EARLY, receipts, null), SETTINGS, UUID.randomUUID(), NOW);
+
+        assertThat(outcome.status()).isEqualTo(ItemStatus.PENDING);
+        assertThat(outcome.findings()).isEmpty();
     }
 
     @Test

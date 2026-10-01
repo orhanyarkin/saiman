@@ -334,8 +334,7 @@ public class ReconciliationService {
     private ChainReconciler.Evidence fetch(PaymentProjection p, ChainBlock safe, BaseSepoliaUsdc chain) {
         List<String> reported = ChainReconciler.reportedTxHashes(p);
         Map<String, Optional<UsdcReceipt>> receipts = new HashMap<>();
-        if (reported.size() == 1) {
-            String tx = reported.getFirst();
+        for (String tx : reported) {
             receipts.put(tx, chain.receipt(tx));
         }
         Boolean used = null;
