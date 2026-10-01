@@ -18,3 +18,6 @@ All LLM calls go through `ModelRouter` (a library, `libs/model-router`, per ADR-
 + Swap models by config; evals compare routes on cost and quality.
 + A concrete, explainable data-residency story for interviews.
 − We maintain adapters ourselves (small, well-tested surface).
+
+## Amendment (2026-10-01, M4): run steps on Kafka
+From M4 the orchestrator externalizes `agent.run-step.v1` to Redpanda. Those events carry the user's question, model-written answers and tool arguments, approval amounts, payees and resource URLs, so the question's `INTERNAL` class now also applies to the broker. Redpanda has no authentication until M6: it must stay on the compose network and loopback, no external consumer may subscribe before M6, and users must not enter personal data in questions (M5 UI note).
