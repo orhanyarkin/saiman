@@ -110,7 +110,8 @@ class RunEventStreamTests extends RunTestSupport {
                 CompletableFuture.supplyAsync(() -> stream(run, null), Executors.newVirtualThreadPerTaskExecutor());
         await().atMost(Duration.ofSeconds(5)).until(() -> bus.subscriberCount(run) == 1);
 
-        Thread.sleep(500); // at least one 200 ms heartbeat while idle
+        long heartbeats = RunEventStream.HEARTBEATS.get();
+        await().atMost(Duration.ofSeconds(5)).until(() -> RunEventStream.HEARTBEATS.get() > heartbeats);
         eventLog.append(run, RunEventType.STEP_COMPLETED, step());
         eventLog.append(run, RunEventType.RUN_FAILED, failed());
 

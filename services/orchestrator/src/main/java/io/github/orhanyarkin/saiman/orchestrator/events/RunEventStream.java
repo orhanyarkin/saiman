@@ -8,6 +8,7 @@ import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -24,6 +25,9 @@ final class RunEventStream implements Runnable {
 
     /** Bounded: a full buffer drops the event and the gap check backfills it from the database. */
     private static final int BUFFER = 256;
+
+    /** Heartbeats sent by all streams since startup (observable by tests in this package). */
+    static final AtomicLong HEARTBEATS = new AtomicLong();
 
     private final UUID runId;
     private final SseEmitter emitter;
@@ -72,6 +76,7 @@ final class RunEventStream implements Runnable {
                 RunEvent event = queue.poll(heartbeat.toMillis(), TimeUnit.MILLISECONDS);
                 if (event == null) {
                     emitter.send(SseEmitter.event().comment("heartbeat"));
+                    HEARTBEATS.incrementAndGet();
                     // Status before backfill: the terminal status and the terminal event commit
                     // together, so a terminal status read first means the backfill sees the event.
                     boolean runTerminal = runIsTerminal.test(runId);

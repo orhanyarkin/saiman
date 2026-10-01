@@ -15,8 +15,6 @@ public enum FailureCode {
     CATALOGUE_UNAVAILABLE,
     /** The plan named no ticker the seller knows. */
     INVALID_PLAN,
-    /** The run's payment budget could not pay for the evidence it needed. */
-    BUDGET_EXHAUSTED,
     /** The run's LLM cost scope or the global daily LLM cap was reached. */
     LLM_BUDGET_EXHAUSTED,
     /** Every model route failed. */
