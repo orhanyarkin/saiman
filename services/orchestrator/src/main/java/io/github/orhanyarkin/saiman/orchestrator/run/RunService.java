@@ -190,6 +190,9 @@ public class RunService {
             tagCost(observation, cost);
         } catch (RuntimeException e) {
             LOG.error("Run {} failed unexpectedly ({})", runId, e.getClass().getSimpleName());
+            // The span records the exception type and status; the exporter's message is the class
+            // name only (a fixed-text wrapper), since the original message may carry model text.
+            observation.error(fixedTextError(e));
             outcome = RunOutcome.failed(FailureCode.INTERNAL_ERROR);
             try {
                 tagCost(observation, finish(runId, outcome));
@@ -206,6 +209,11 @@ public class RunService {
             observation.lowCardinalityKeyValue(
                     "failure_code",
                     outcome instanceof RunOutcome.Failed failed ? failed.code().name() : "none");
+            if (outcome instanceof RunOutcome.Failed failed) {
+                // On the span only (high cardinality keys are not metric tags): the fixed code.
+                observation.highCardinalityKeyValue(
+                        "saiman.run.failure_code", failed.code().name());
+            }
             observation.stop();
             permits.release();
         }
@@ -231,6 +239,10 @@ public class RunService {
         } catch (RuntimeException e) {
             // Never the message: it may carry model or seller text.
             LOG.warn("Pipeline of run {} threw {}", runId, e.getClass().getSimpleName());
+            Observation root = observations.getCurrentObservation();
+            if (root != null) {
+                root.error(fixedTextError(e));
+            }
             return RunOutcome.failed(FailureCode.INTERNAL_ERROR);
         }
     }
@@ -298,6 +310,13 @@ public class RunService {
                 runs.changeActiveStatus(runId, RunStatus.AWAITING_APPROVAL, RunStatus.RUNNING);
             }
         };
+    }
+
+    /** An error for the span: the type's simple name only, never the message (it may hold model text). */
+    private static Throwable fixedTextError(RuntimeException e) {
+        IllegalStateException error = new IllegalStateException(e.getClass().getSimpleName());
+        error.setStackTrace(new StackTraceElement[0]);
+        return error;
     }
 
     /** The root span's cost attributes: exactly the persisted numbers the terminal event carries. */
