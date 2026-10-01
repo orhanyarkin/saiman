@@ -69,7 +69,8 @@ class SpendGuardWiringTests {
 
     @BeforeEach
     void reset() {
-        jdbc.sql("TRUNCATE tool_result, approval, payment_intent, run_event, spend_day, run")
+        jdbc.sql("TRUNCATE event_publication, payment_event_log, tool_result, approval, payment_intent,"
+                        + " run_event, spend_day, run")
                 .update();
         seller.reset();
     }

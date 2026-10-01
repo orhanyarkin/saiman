@@ -8,6 +8,20 @@ spring:
     # No Valkey in these tests: without a StringRedisTemplate the model router uses its in-memory
     # daily cap and run scopes (cost-guard=memory below). The router library tests the Valkey guards.
     exclude: org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
+  # No broker in most tests: publications stay incomplete (which tests inspect); the Redpanda tests override
+  # these. A refused loopback port fails each send after max.block.ms instead of hanging.
+  kafka:
+    bootstrap-servers: 127.0.0.1:1
+    admin:
+      auto-create: false
+    producer:
+      properties:
+        max.block.ms: 1000
+        request.timeout.ms: 1000
+        delivery.timeout.ms: 2000
+logging:
+  level:
+    org.apache.kafka: error
 saiman:
   router:
     cost-guard: memory
