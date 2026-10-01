@@ -7,6 +7,8 @@ import io.github.orhanyarkin.saiman.ledger.journal.JournalEntry;
 import io.github.orhanyarkin.saiman.ledger.journal.JournalRepository;
 import io.github.orhanyarkin.saiman.ledger.journal.TrialBalanceRow;
 import io.github.orhanyarkin.saiman.ledger.pbt.Pbt;
+import io.github.orhanyarkin.saiman.shared.payments.PaymentAuthorized;
+import io.github.orhanyarkin.saiman.shared.payments.PaymentSettled;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -95,11 +97,37 @@ class PaymentLedgerServiceTests {
 
         assertThat(first).hasSize(2);
         assertThat(again).isEmpty();
-        assertThat(jdbc.sql("SELECT count(*) FROM inbox WHERE event_id = :id AND consumer = 'ledger'")
+        assertThat(jdbc.sql(
+                                "SELECT count(*) FROM inbox WHERE event_id = :id AND consumer = 'ledger:payments.settled.v1'")
                         .param("id", settled.meta().eventId())
                         .query(Long.class)
                         .single())
                 .isEqualTo(1L);
+    }
+
+    @Test
+    void anEventIdSeenOnAnotherTopicDoesNotShadowTheEvent() {
+        TestPayment payment = TestPayment.random(new SplittableRandom(), 20_000);
+        PaymentAuthorized authorized = payment.authorized();
+        PaymentSettled settled = payment.buyerSettled();
+        PaymentSettled sameId = new PaymentSettled(
+                authorized.meta(),
+                settled.authorization(),
+                settled.amount(),
+                settled.payTo(),
+                settled.resource(),
+                settled.book(),
+                settled.txHash(),
+                settled.evidence(),
+                settled.paymentIntentId(),
+                settled.runId());
+
+        assertThat(ledger.record(PaymentFact.of(authorized), PaymentTopics.AUTHORIZED))
+                .hasSize(1);
+        assertThat(ledger.record(PaymentFact.of(sameId), PaymentTopics.SETTLED))
+                .extracting(JournalEntry::kind)
+                .extracting(Enum::name)
+                .containsExactly("SETTLE");
     }
 
     @Test

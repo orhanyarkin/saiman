@@ -23,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class PaymentLedgerService {
 
-    /** The inbox consumer name. */
+    /** The ledger's producer name in {@code meta.producer}, and the prefix of its inbox consumer values. */
     public static final String CONSUMER = "ledger";
 
     private final InboxGuard inbox;
@@ -56,7 +56,9 @@ public class PaymentLedgerService {
      */
     @Transactional
     public List<JournalEntry> record(PaymentFact fact, String topic) {
-        if (!inbox.firstDelivery(fact.meta().eventId(), CONSUMER, topic)) {
+        // The inbox consumer is scoped to the topic: an event id reused on another topic (a forged record on an
+        // unauthenticated broker) cannot shadow the real event there.
+        if (!inbox.firstDelivery(fact.meta().eventId(), inboxConsumer(topic), topic)) {
             meters.counter("saiman.ledger.events", "topic", topic, "outcome", "duplicate")
                     .increment();
             return List.of();
@@ -77,6 +79,11 @@ public class PaymentLedgerService {
         meters.counter("saiman.ledger.events", "topic", topic, "outcome", "booked")
                 .increment();
         return outcome.entries();
+    }
+
+    /** The inbox consumer value for {@code topic}: {@code ledger:<topic>}. */
+    public static String inboxConsumer(String topic) {
+        return CONSUMER + ":" + topic;
     }
 
     /** The {@code ledger.entry-posted.v1} event of a payment entry (event id = entry id, producer {@code ledger}). */
