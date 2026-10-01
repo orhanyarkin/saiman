@@ -250,6 +250,14 @@ public class PaymentIntentService {
                 .list();
     }
 
+    /** {@code resolved_by} (FACILITATOR or CHAIN) of a resolved intent. */
+    public Optional<String> resolvedBy(UUID id) {
+        return jdbc.sql("SELECT resolved_by FROM payment_intent WHERE id = :id AND resolved_by IS NOT NULL")
+                .param("id", id)
+                .query(String.class)
+                .optional();
+    }
+
     /** HELD intents with no recorded authorization: they stay counted until an operator looks at them. */
     public int countHeldWithoutAuthorization() {
         return jdbc.sql("SELECT count(*) FROM payment_intent WHERE status = 'HELD' AND auth_nonce IS NULL")
