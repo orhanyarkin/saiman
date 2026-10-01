@@ -40,6 +40,14 @@ public class PaymentEventListener {
         book(PaymentFact.of(parser.failed(record.value())), record.topic());
     }
 
+    @KafkaListener(
+            id = "ledger-payments-credit-note-issued",
+            groupId = "ledger",
+            topics = PaymentTopics.CREDIT_NOTE_ISSUED)
+    void onCreditNoteIssued(ConsumerRecord<String, String> record) {
+        book(PaymentFact.of(parser.creditNoteIssued(record.value())), record.topic());
+    }
+
     /**
      * Books the fact; a conflicting one first leaves a {@code CONFLICTING_FACT} row (its own transaction, the
      * booking one has rolled back), then goes on to the error handler and the dead-letter topic.

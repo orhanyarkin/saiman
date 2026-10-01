@@ -240,6 +240,28 @@ class ChainReconcilerTests {
                         "CREDIT seller:" + p.payTo() + ":wallet 20000");
     }
 
+    /**
+     * ADR-0021 edge: the seller credited a payment the chain says was never used. The SALE's wallet movement goes
+     * to suspense as SETTLED_BUT_UNUSED; the credit note touches no wallet, so its liability is left for a human
+     * REVERSAL.
+     */
+    @Test
+    void creditedButUnusedMovesOnlyTheSellerWalletToSuspense() {
+        Books books = Books.of(List.of(PaymentFact.of(payment.creditNoted())));
+        PaymentProjection p = books.projection();
+        String tx = payment.txHash();
+
+        var outcome = reconcile(books, evidence(SAFE_LATE, Map.of(tx, Optional.empty()), false));
+
+        assertThat(outcome.status()).isEqualTo(ItemStatus.MISMATCH);
+        assertThat(outcome.findings())
+                .extracting(ChainReconciler.Finding::kind, ChainReconciler.Finding::adjusted)
+                .contains(tuple(MismatchKind.SETTLED_BUT_UNUSED, true));
+        assertThat(legs(outcome))
+                .containsExactlyInAnyOrder(
+                        "DEBIT platform:suspense:usdc 20000", "CREDIT seller:" + p.payTo() + ":wallet 20000");
+    }
+
     @Test
     void missingReceiptIsPendingWithinTheGraceAndNotFoundAfterIt() {
         Books books = settledBothBooks();

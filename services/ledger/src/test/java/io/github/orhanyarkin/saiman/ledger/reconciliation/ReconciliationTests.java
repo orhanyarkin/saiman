@@ -128,6 +128,35 @@ class ReconciliationTests {
         assertThat(mismatchKinds(payment)).isEmpty();
     }
 
+    /**
+     * ADR-0021: a credited payment (seller settled up front, then did not serve) matches its receipt like any
+     * settled one. The credit note touches no wallet, so nothing is adjusted and the liability stays.
+     */
+    @Test
+    void creditedPaymentWithMatchingReceiptIsMatched() {
+        TestPayment payment = TestPayment.random(random, 20_000);
+        ledger.record(PaymentFact.of(payment.authorized()), PaymentTopics.AUTHORIZED);
+        ledger.record(PaymentFact.of(payment.buyerSettled()), PaymentTopics.SETTLED);
+        ledger.record(PaymentFact.of(payment.creditNoted()), PaymentTopics.CREDIT_NOTE_ISSUED);
+        ledger.record(PaymentFact.of(payment.sellerSettled()), PaymentTopics.SETTLED);
+        chain.mine(receipt(payment, payment.txHash(), payment.payTo(), 20_000, true));
+        int entries = entryCount(payment);
+
+        ReconciliationReport.Item item = item(runNow(), payment);
+
+        assertThat(item.status()).isEqualTo("MATCHED");
+        assertThat(item.sellerState()).isEqualTo("CREDITED");
+        assertThat(item.mismatch()).isNull();
+        assertThat(mismatchKinds(payment)).isEmpty();
+        assertThat(entryCount(payment)).isEqualTo(entries);
+        assertThat(jdbc.sql("""
+                                SELECT sum(CASE p.side WHEN 'CREDIT' THEN p.amount_atomic ELSE -p.amount_atomic END)
+                                  FROM posting p JOIN journal_entry e ON e.id = p.entry_id
+                                 WHERE e.payment_key = :key AND p.account_code LIKE '%:liability:customer-credits'
+                                """).param("key", payment.key()).query(Long.class).single())
+                .isEqualTo(20_000L);
+    }
+
     @Test
     void unavailableRpcAndReceiptAboveSafeAreBothPending() {
         TestPayment down = settledBothBooks(20_000);

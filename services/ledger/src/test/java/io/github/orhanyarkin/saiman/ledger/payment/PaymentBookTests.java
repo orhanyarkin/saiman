@@ -3,8 +3,10 @@ package io.github.orhanyarkin.saiman.ledger.payment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.orhanyarkin.saiman.ledger.journal.AccountType;
 import io.github.orhanyarkin.saiman.ledger.journal.EntryKind;
 import io.github.orhanyarkin.saiman.ledger.journal.JournalEntry;
+import io.github.orhanyarkin.saiman.ledger.journal.LedgerBook;
 import io.github.orhanyarkin.saiman.ledger.journal.Posting;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.saiman.shared.payments.AuthorizationRef;
@@ -155,6 +157,141 @@ class PaymentBookTests {
                 .isEqualTo(p.paymentKey().toLowerCase(Locale.ROOT))
                 .contains(buyer);
         assertThat(p.payer()).isEqualTo(auth.payer().toLowerCase(Locale.ROOT));
+    }
+
+    @Test
+    void creditNoteAfterSettledPostsCreditNoteWithTheDesignAccounts() {
+        List<JournalEntry> posted = run(
+                PaymentFact.of(payment.authorized()),
+                PaymentFact.of(payment.sellerSettled()),
+                PaymentFact.of(payment.creditNoted()));
+
+        assertThat(posted)
+                .extracting(JournalEntry::kind)
+                .containsExactly(EntryKind.ENCUMBER, EntryKind.SALE, EntryKind.CREDIT_NOTE);
+        JournalEntry creditNote = posted.get(2);
+        assertThat(lines(creditNote))
+                .containsExactly(
+                        "DEBIT seller:" + seller + ":revenue:credit-notes 20000",
+                        "CREDIT seller:" + seller + ":liability:customer-credits 20000");
+        assertThat(creditNote.postings())
+                .extracting(p -> p.account().type())
+                .containsExactly(AccountType.REVENUE, AccountType.LIABILITY);
+        assertThat(creditNote.book()).isEqualTo(LedgerBook.SELLER);
+        assertThat(creditNote.id()).isEqualTo(PaymentBook.entryId(payment.key(), LedgerBook.SELLER, "CREDIT_NOTE"));
+        assertThat(balances(posted))
+                .containsEntry("seller:" + seller + ":wallet", 20_000L)
+                .containsEntry("seller:" + seller + ":revenue:data", -20_000L)
+                .containsEntry("seller:" + seller + ":revenue:credit-notes", 20_000L)
+                .containsEntry("seller:" + seller + ":liability:customer-credits", -20_000L);
+    }
+
+    @Test
+    void creditNoteBeforeSettledPostsSaleAndCreditNoteAndTheLateSettledPostsNothing() {
+        PaymentFact credited = PaymentFact.of(payment.creditNoted());
+        PaymentBook.Outcome first = PaymentBook.apply(PaymentProjection.initial(credited), credited);
+        assertThat(first.entries())
+                .extracting(JournalEntry::kind)
+                .containsExactly(EntryKind.SALE, EntryKind.CREDIT_NOTE);
+        assertThat(first.next().sellerState()).isEqualTo(SellerState.CREDITED);
+        assertThat(first.next().sellerTxHash()).isEqualTo(payment.txHash());
+        assertThat(first.next().buyerState()).isEqualTo(BuyerState.NONE);
+
+        PaymentBook.Outcome late = PaymentBook.apply(first.next(), PaymentFact.of(payment.sellerSettled()));
+        assertThat(late.entries()).isEmpty();
+        assertThat(late.next()).isEqualTo(first.next());
+
+        assertThat(balances(first.entries()))
+                .isEqualTo(
+                        balances(run(PaymentFact.of(payment.sellerSettled()), PaymentFact.of(payment.creditNoted()))));
+    }
+
+    @Test
+    void creditNoteWithoutAnySettledReportStillBooksTheSale() {
+        List<JournalEntry> posted = run(PaymentFact.of(payment.authorized()), PaymentFact.of(payment.creditNoted()));
+
+        assertThat(posted)
+                .extracting(JournalEntry::kind)
+                .containsExactly(EntryKind.ENCUMBER, EntryKind.SALE, EntryKind.CREDIT_NOTE);
+    }
+
+    @Test
+    void duplicateCreditNotePostsNothing() {
+        PaymentFact credited = PaymentFact.of(payment.creditNoted());
+        PaymentBook.Outcome first = PaymentBook.apply(PaymentProjection.initial(credited), credited);
+        PaymentBook.Outcome again = PaymentBook.apply(first.next(), credited);
+        // A second credit note for the same payment (another event id) is no second liability either.
+        PaymentBook.Outcome another = PaymentBook.apply(first.next(), PaymentFact.of(payment.creditNoted()));
+
+        assertThat(again.entries()).isEmpty();
+        assertThat(again.next()).isEqualTo(first.next());
+        assertThat(another.entries()).isEmpty();
+    }
+
+    @Test
+    void creditNoteAfterASettleFailureIsAConflict() {
+        PaymentFact failed = PaymentFact.of(payment.sellerSettleFailed());
+        PaymentBook.Outcome first = PaymentBook.apply(PaymentProjection.initial(failed), failed);
+
+        assertThatThrownBy(() -> PaymentBook.apply(first.next(), PaymentFact.of(payment.creditNoted())))
+                .isInstanceOf(ConflictingFactException.class)
+                .extracting(e -> ((ConflictingFactException) e).paymentId())
+                .isEqualTo(first.next().id());
+    }
+
+    @Test
+    void settleFailureAfterACreditNoteIsAConflictToo() {
+        PaymentFact credited = PaymentFact.of(payment.creditNoted());
+        PaymentBook.Outcome first = PaymentBook.apply(PaymentProjection.initial(credited), credited);
+
+        assertThatThrownBy(() -> PaymentBook.apply(first.next(), PaymentFact.of(payment.sellerSettleFailed())))
+                .isInstanceOf(ConflictingFactException.class)
+                .extracting(e -> ((ConflictingFactException) e).paymentId())
+                .isEqualTo(first.next().id());
+    }
+
+    @Test
+    void creditNoteAfterAFailureThatASettledOverruledIsBooked() {
+        List<JournalEntry> posted = run(
+                PaymentFact.of(payment.sellerSettleFailed()),
+                PaymentFact.of(payment.sellerSettled()),
+                PaymentFact.of(payment.creditNoted()));
+
+        assertThat(posted).extracting(JournalEntry::kind).containsExactly(EntryKind.SALE, EntryKind.CREDIT_NOTE);
+    }
+
+    @Test
+    void creditNoteWithAnotherTxHashThanTheSettledOneIsAConflict() {
+        PaymentFact settled = PaymentFact.of(payment.sellerSettled());
+        PaymentBook.Outcome first = PaymentBook.apply(PaymentProjection.initial(settled), settled);
+        String otherTx = "0x" + "ab".repeat(32);
+
+        assertThatThrownBy(() -> PaymentBook.apply(first.next(), PaymentFact.of(payment.creditNoted(otherTx))))
+                .isInstanceOf(ConflictingFactException.class);
+        // Upper-case hex is the same hash.
+        assertThat(PaymentBook.apply(
+                                first.next(),
+                                PaymentFact.of(payment.creditNoted(
+                                        "0x" + payment.txHash().substring(2).toUpperCase(Locale.ROOT))))
+                        .entries())
+                .extracting(JournalEntry::kind)
+                .containsExactly(EntryKind.CREDIT_NOTE);
+    }
+
+    @Test
+    void settledWithAnotherTxHashThanTheCreditNoteIsAConflict() {
+        PaymentFact credited = PaymentFact.of(payment.creditNoted("0x" + "cd".repeat(32)));
+        PaymentBook.Outcome first = PaymentBook.apply(PaymentProjection.initial(credited), credited);
+
+        assertThatThrownBy(() -> PaymentBook.apply(first.next(), PaymentFact.of(payment.sellerSettled())))
+                .isInstanceOf(ConflictingFactException.class);
+    }
+
+    @Test
+    void creditNotesNeverTouchTheBuyerBook() {
+        List<JournalEntry> posted = run(PaymentFact.of(payment.creditNoted()));
+
+        assertThat(posted).allMatch(e -> e.book() == LedgerBook.SELLER);
     }
 
     static List<JournalEntry> run(PaymentFact... facts) {

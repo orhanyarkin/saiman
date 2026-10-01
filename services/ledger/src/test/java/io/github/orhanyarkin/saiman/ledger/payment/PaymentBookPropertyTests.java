@@ -28,8 +28,9 @@ class PaymentBookPropertyTests {
 
     /**
      * P1: any interleaving of events about many payments (shared wallets, duplicates, reorderings, contradictory
-     * reports) posts only balanced entries, each one-per-payment kind at most once, and the trial balance of every
-     * asset sums to zero.
+     * reports, credit notes) posts only balanced entries, each one-per-payment kind at most once, and the trial
+     * balance of every asset sums to zero. A conflicting fact is rejected whole, as the listener does (quarantine).
+     * Every credited payment carries a credit note of its full amount and nets to zero seller revenue.
      */
     @Test
     void p1EveryEntryBalancesAndTheTrialBalanceSumsToZero() {
@@ -48,7 +49,7 @@ class PaymentBookPropertyTests {
                     payers.get(random.nextInt(payers.size())),
                     payees.get(random.nextInt(payees.size())),
                     Stories.amount(random));
-            Stories.story(random).forEach(step -> stream.add(Stories.fact(payment, step)));
+            Stories.anyStory(random).forEach(step -> stream.add(Stories.fact(payment, step)));
         }
         List<PaymentFact> delivered = Stories.permutedWithDuplicates(stream, stream.size(), random);
 
@@ -58,7 +59,13 @@ class PaymentBookPropertyTests {
             for (PaymentFact fact : delivered) {
                 PaymentProjection current =
                         projections.computeIfAbsent(fact.paymentKey(), k -> PaymentProjection.initial(fact));
-                PaymentBook.Outcome outcome = PaymentBook.apply(current, fact);
+                PaymentBook.Outcome outcome;
+                try {
+                    outcome = PaymentBook.apply(current, fact);
+                } catch (ConflictingFactException e) {
+                    assertThat(fact).isInstanceOfAny(PaymentFact.CreditNoted.class, PaymentFact.Failed.class);
+                    continue;
+                }
                 projections.put(fact.paymentKey(), outcome.next());
                 posted.addAll(outcome.entries());
             }
@@ -85,7 +92,29 @@ class PaymentBookPropertyTests {
                     .forEach(p -> assertThat(postedKinds(posted, p.paymentKey()))
                             .as("entries match the final states of %s", p.paymentKey())
                             .isEqualTo(expectedKinds(p, posted)));
+            projections.values().stream()
+                    .filter(p -> p.sellerState() == SellerState.CREDITED)
+                    .forEach(p -> {
+                        Map<String, Long> net = netPerAccount(posted, p.paymentKey());
+                        long amount = p.amount().atomicUnits();
+                        String seller = "seller:" + p.payTo() + ":";
+                        assertThat(net.get(seller + "revenue:credit-notes"))
+                                .as("credit-notes debit of %s", p.paymentKey())
+                                .isEqualTo(amount);
+                        assertThat(net.get(seller + "liability:customer-credits"))
+                                .as("customer-credits credit of %s", p.paymentKey())
+                                .isEqualTo(-amount);
+                        assertThat(net.get(seller + "revenue:data") + net.get(seller + "revenue:credit-notes"))
+                                .as("net seller revenue of %s", p.paymentKey())
+                                .isZero();
+                    });
         });
+    }
+
+    /** Signed ({@code debit - credit}) net per account over one payment's entries. */
+    private static Map<String, Long> netPerAccount(List<JournalEntry> posted, String paymentKey) {
+        return PaymentBookTests.balances(
+                posted.stream().filter(e -> paymentKey.equals(e.paymentKey())).toList());
     }
 
     /**
@@ -204,6 +233,7 @@ class PaymentBookPropertyTests {
             sb.append("  ")
                     .append(fact.getClass().getSimpleName())
                     .append(fact instanceof PaymentFact.Settled s ? " " + s.book() : "")
+                    .append(fact instanceof PaymentFact.CreditNoted c ? " tx=" + c.txHash() : "")
                     .append(
                             fact instanceof PaymentFact.Failed f
                                     ? " " + f.book() + " " + f.event().finality()

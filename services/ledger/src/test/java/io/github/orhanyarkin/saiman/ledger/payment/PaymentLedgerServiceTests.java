@@ -184,6 +184,7 @@ class PaymentLedgerServiceTests {
             case PaymentFact.Authorized a -> PaymentTopics.AUTHORIZED;
             case PaymentFact.Settled s -> PaymentTopics.SETTLED;
             case PaymentFact.Failed f -> PaymentTopics.FAILED;
+            case PaymentFact.CreditNoted c -> PaymentTopics.CREDIT_NOTE_ISSUED;
         };
     }
 
@@ -205,7 +206,7 @@ class PaymentLedgerServiceTests {
     private List<String> oncePerPaymentKinds(String paymentKey) {
         return jdbc.sql("""
                         SELECT kind FROM journal_entry
-                         WHERE payment_key = :key AND kind IN ('ENCUMBER', 'SETTLE', 'RELEASE', 'SALE')
+                         WHERE payment_key = :key AND kind IN ('ENCUMBER', 'SETTLE', 'RELEASE', 'SALE', 'CREDIT_NOTE')
                         """).param("key", paymentKey).query(String.class).list();
     }
 

@@ -34,6 +34,16 @@ public final class ChartOfAccounts {
         return seller(payTo, "revenue:data", AccountType.REVENUE);
     }
 
+    /** Contra-revenue: sales the seller credited back because it did not serve them (ADR-0021). */
+    public static Account sellerCreditNotes(String payTo) {
+        return seller(payTo, "revenue:credit-notes", AccountType.REVENUE);
+    }
+
+    /** What the seller owes buyers for credit notes until they are redeemed (out of scope) or reversed. */
+    public static Account sellerCustomerCredits(String payTo) {
+        return seller(payTo, "liability:customer-credits", AccountType.LIABILITY);
+    }
+
     /** {@code platform:suspense:usdc}: where reconciliation parks differences until a human clears them. */
     public static Account suspense(Money of) {
         return new Account(

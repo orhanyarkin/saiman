@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import io.github.orhanyarkin.saiman.ledger.LedgerIntegrationTest;
+import io.github.orhanyarkin.saiman.ledger.journal.JournalRepository;
+import io.github.orhanyarkin.saiman.ledger.journal.TrialBalanceRow;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentProjection;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentRepository;
 import io.github.orhanyarkin.saiman.ledger.payment.TestPayment;
@@ -18,13 +20,16 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.SplittableRandom;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -68,6 +73,9 @@ class PaymentEventsKafkaTests {
 
     @Autowired
     private PaymentRepository payments;
+
+    @Autowired
+    private JournalRepository journal;
 
     @Autowired
     private JdbcClient jdbc;
@@ -153,6 +161,104 @@ class PaymentEventsKafkaTests {
 
         await().atMost(TIMEOUT)
                 .untilAsserted(() -> assertThat(kinds(key)).containsExactlyInAnyOrder("ENCUMBER", "SETTLE"));
+    }
+
+    /**
+     * The golden {@code payments.credit-note-issued.v1} fixture (fresh nonce and event id), delivered twice before
+     * any settled report: SALE and CREDIT_NOTE are booked once each, both published, and the trial balance still
+     * sums to zero.
+     */
+    @Test
+    void goldenCreditNoteIsBookedOnceAndTheTrialBalanceSumsToZero() throws Exception {
+        String nonce = "0x" + UUID.randomUUID().toString().replace("-", "")
+                + UUID.randomUUID().toString().replace("-", "");
+        String eventId = UUID.randomUUID().toString();
+        String fixture = fixture("payments.credit-note-issued.v1.json")
+                .replace("0x5f1c8a2b9d3e4f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8", nonce)
+                .replace("3e7a9c41-5b2d-4f8e-a1c6-9d0e2f4b6a83", eventId);
+        assertThat(fixture).contains(nonce, eventId);
+        String key = ("eip155:84532:0x036CbD53842c5426634e7929541eC2318f3dCF7e:"
+                        + "0xdD542d774e0c0E546d76721396C69e113A644795:" + nonce)
+                .toLowerCase(Locale.ROOT);
+        PaymentAuthorized sentinel = TestPayment.random(random(), 20_000).authorized();
+
+        send(PaymentTopics.CREDIT_NOTE_ISSUED, key, fixture);
+        send(PaymentTopics.CREDIT_NOTE_ISSUED, key, fixture);
+        await().atMost(TIMEOUT).untilAsserted(() -> assertThat(inboxed(eventId)).isTrue());
+        // A record behind both copies on the same partition: once it is booked, the duplicate was consumed too.
+        send(
+                PaymentTopics.CREDIT_NOTE_ISSUED,
+                "sentinel",
+                "{\"sentinel\":\"" + sentinel.meta().eventId() + "\"}");
+        drainValues(
+                PaymentTopics.CREDIT_NOTE_ISSUED + LedgerMessagingConfiguration.DLT_SUFFIX,
+                "{\"sentinel\":\"" + sentinel.meta().eventId() + "\"}");
+
+        assertThat(kinds(key)).containsExactlyInAnyOrder("SALE", "CREDIT_NOTE");
+        PaymentProjection projection = payments.findByKey(key).orElseThrow();
+        assertThat(projection.sellerState().name()).isEqualTo("CREDITED");
+        assertThat(projection.sellerTxHash())
+                .isEqualTo("0x68592d03c4a7b1e9f2d6c8a0b3e5f7091a2c4e6b8d0f1a3c5e7b9d1f3a5c7e9b");
+        assertThat(jdbc.sql("""
+                                SELECT a.type, p.side, p.amount_atomic
+                                  FROM posting p
+                                  JOIN journal_entry e ON e.id = p.entry_id
+                                  JOIN account a ON a.code = p.account_code AND a.asset = p.asset
+                                 WHERE e.payment_key = :key AND e.kind = 'CREDIT_NOTE'
+                                 ORDER BY p.side DESC
+                                """)
+                        .param("key", key)
+                        .query((rs, row) -> rs.getString(1) + " " + rs.getString(2) + " " + rs.getLong(3))
+                        .list())
+                .containsExactly("REVENUE DEBIT 20000", "LIABILITY CREDIT 20000");
+        Map<String, BigInteger> perAsset = journal.trialBalance().stream()
+                .collect(Collectors.groupingBy(
+                        TrialBalanceRow::asset,
+                        Collectors.reducing(BigInteger.ZERO, TrialBalanceRow::balance, BigInteger::add)));
+        assertThat(perAsset.values()).isNotEmpty().containsOnly(BigInteger.ZERO);
+
+        List<ConsumerRecord<String, String>> posted =
+                drain(LedgerTopics.ENTRY_POSTED, projection.id().toString(), 2);
+        assertThat(posted.stream()
+                        .map(r -> json.readValue(r.value(), EntryPosted.class).kind()))
+                .containsExactlyInAnyOrder("SALE", "CREDIT_NOTE");
+    }
+
+    @Test
+    void malformedCreditNoteGoesToTheDeadLetterTopicAndBooksNothing() throws Exception {
+        TestPayment payment = TestPayment.random(random(), 20_000);
+        // A 2xx is served, never credited: the shared record rejects it.
+        String malformed =
+                json.writeValueAsString(payment.creditNoted()).replace("\"httpStatus\":503", "\"httpStatus\":200");
+        assertThat(malformed).contains("\"httpStatus\":200");
+
+        send(PaymentTopics.CREDIT_NOTE_ISSUED, payment.key(), malformed);
+
+        assertThat(drainValues(PaymentTopics.CREDIT_NOTE_ISSUED + LedgerMessagingConfiguration.DLT_SUFFIX, malformed))
+                .containsExactly(malformed);
+        assertThat(payments.findByKey(payment.key())).isEmpty();
+    }
+
+    @Test
+    void creditNoteAfterASettleFailureIsDeadLetteredAsAConflictingFact() throws Exception {
+        TestPayment payment = TestPayment.random(random(), 20_000);
+        send(PaymentTopics.FAILED, payment.key(), json.writeValueAsString(payment.sellerSettleFailed()));
+        await().atMost(TIMEOUT)
+                .untilAsserted(() -> assertThat(payments.findByKey(payment.key()))
+                        .hasValueSatisfying(
+                                p -> assertThat(p.sellerState().name()).isEqualTo("SETTLE_FAILED")));
+
+        String creditNote = json.writeValueAsString(payment.creditNoted());
+        send(PaymentTopics.CREDIT_NOTE_ISSUED, payment.key(), creditNote);
+
+        assertThat(drainValues(PaymentTopics.CREDIT_NOTE_ISSUED + LedgerMessagingConfiguration.DLT_SUFFIX, creditNote))
+                .containsExactly(creditNote);
+        assertThat(jdbc.sql("SELECT kind FROM reconciliation_mismatch WHERE payment_id = :id AND run_id IS NULL")
+                        .param("id", PaymentProjection.paymentId(payment.key()))
+                        .query(String.class)
+                        .list())
+                .containsExactly("CONFLICTING_FACT");
+        assertThat(kinds(payment.key())).isEmpty();
     }
 
     @Test
