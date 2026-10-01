@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.orchestrator.tool;
 import java.text.Normalizer;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -36,7 +37,45 @@ public final class UntrustedText {
     /** Longest run of consecutive non-spacing marks kept ("zalgo" text is capped, not refused). */
     static final int MAX_COMBINING_RUN = 3;
 
-    private static final Pattern DELIMITER = Pattern.compile("tool_data", Pattern.CASE_INSENSITIVE);
+    /** What replaces a link-like token in display text. */
+    public static final String LINK_REMOVED = "[link removed]";
+
+    private static final Pattern DELIMITER = Pattern.compile("tool_data");
+
+    private static final Pattern MARKDOWN_LINK = Pattern.compile("!?\\[([^\\]]{0,500})\\]\\([^)]{0,2000}\\)");
+
+    /**
+     * Link-like tokens, generically: any {@code scheme://}, the script-capable schemes without
+     * slashes, protocol-relative {@code //host}, defanged {@code hxxp(s)}, {@code www.}, a bare IPv4
+     * address (octets without leading zeros, not part of a longer dotted number), and {@code
+     * host.tld} followed by a path, port, query or fragment for any 2+ letter TLD (or a bare host on a
+     * common TLD). Dates ({@code 20.06.2016}), amounts ({@code 59.368.579,- Euro}) and abbreviations
+     * ({@code A.Ş.}, {@code T.C.}) do not match.
+     */
+    private static final Pattern LINK = Pattern.compile("(?iu)(?:"
+            + "(?:[a-z][a-z0-9+.-]*://|www\\d{0,3}\\.)\\S*"
+            + "|(?<![\\p{L}\\p{N}])(?:javascript|data|vbscript|mailto|file|blob|about):\\S+"
+            + "|(?<![\\p{L}\\p{N}])hxxps?\\S*"
+            + "|(?<![\\p{L}\\p{N}:/])//\\S+"
+            + "|(?<![\\p{N}.,])(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)"
+            + "(?![\\p{N}]|[.,]\\p{N})\\S*"
+            + "|(?<![\\p{L}\\p{N}@.-])(?:[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]*[\\p{L}\\p{N}])?\\.)+"
+            + "(?:(?:[a-z]{2,24}|xn--[a-z0-9-]{1,59})(?=[/?#:]\\S)"
+            + "|(?:com|net|org|io|ai|co|me|xyz|info|biz|app|dev|top|site|online|link|click|ru|cn|tk|tr|uk|de)"
+            + "(?![\\p{L}\\p{N}]))\\S*"
+            + ")");
+
+    /** Look-alikes of {@code <} and {@code >} that NFKC leaves alone. */
+    private static final String LESS_THAN_LIKE = "\u1438\u3008\u02C2\u276C\u276E\u2770\u29FC\u2A79\u2AA6";
+
+    private static final String GREATER_THAN_LIKE = "\u1433\u3009\u02C3\u276D\u276F\u2771\u29FD\u2A7A\u2AA7";
+
+    /** Cyrillic and Greek letters that look like the Latin letters of the delimiter name. */
+    private static final String CONFUSABLE_FROM =
+            "\u043E\u041E\u03BF\u039F\u0430\u0410\u03B1\u0391\u0442\u0422\u03C4\u03A4"
+                    + "\u0501\u04CF\u0406\u0456\u0399\u03B9";
+
+    private static final String CONFUSABLE_TO = "ooooaaaatttt" + "dllili";
 
     private UntrustedText() {}
 
@@ -79,18 +118,72 @@ public final class UntrustedText {
     }
 
     /**
-     * Cleans text that will be shown to a model inside a {@code <tool_data>} block: {@link #clean}
-     * plus {@code <} and {@code >} replaced by {@code ‹} and {@code ›} (no tag can be formed), and the
-     * delimiter name itself defused.
+     * Free text that leaves the process (an event, a report, a model prompt): {@link #clean}, markdown
+     * links reduced to their text, link-like tokens replaced by {@value #LINK_REMOVED}, and {@code <},
+     * {@code >} and their look-alikes replaced by {@code ‹} and {@code ›} (no tag can be formed).
+     * Idempotent.
      */
-    public static String forModel(String raw, int maxCodePoints) {
-        String cleaned = clean(raw, maxCodePoints).replace('<', '‹').replace('>', '›');
-        return DELIMITER.matcher(cleaned).replaceAll("tool-data");
+    public static String forDisplay(String raw, int maxCodePoints) {
+        String text = clean(raw, maxCodePoints);
+        text = MARKDOWN_LINK.matcher(text).replaceAll(match -> Matcher.quoteReplacement(match.group(1)));
+        text = LINK.matcher(text).replaceAll(Matcher.quoteReplacement(LINK_REMOVED));
+        text = neutraliseAngles(text);
+        return clean(text, maxCodePoints);
     }
 
     /**
-     * A question as a run or a tool accepts it: cleaned, {@value #MIN_QUESTION}..{@value
-     * #MAX_QUESTION} code points.
+     * Text that will be shown to a model inside a {@code <tool_data>} block: {@link #forDisplay} plus
+     * the delimiter name defused, also when spelt with Cyrillic or Greek look-alike letters.
+     */
+    public static String forModel(String raw, int maxCodePoints) {
+        String text = forDisplay(raw, maxCodePoints);
+        String skeleton = skeleton(text);
+        Matcher matcher = DELIMITER.matcher(skeleton);
+        if (!matcher.find()) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        int last = 0;
+        do {
+            out.append(text, last, matcher.start()).append("tool-data");
+            last = matcher.end();
+        } while (matcher.find());
+        return out.append(text, last, text.length()).toString();
+    }
+
+    private static String neutraliseAngles(String text) {
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '<' || LESS_THAN_LIKE.indexOf(c) >= 0) {
+                out.append('‹');
+            } else if (c == '>' || GREATER_THAN_LIKE.indexOf(c) >= 0) {
+                out.append('›');
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * A same-length lower-case Latin skeleton for the delimiter check: one char per char (BMP
+     * look-alikes only), so match positions map back to the original text.
+     */
+    private static String skeleton(String text) {
+        char[] chars = new char[text.length()];
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            int at = CONFUSABLE_FROM.indexOf(c);
+            char mapped = at >= 0 ? CONFUSABLE_TO.charAt(at) : c;
+            chars[i] = Character.toLowerCase(mapped) == '\u0131' ? 'i' : Character.toLowerCase(mapped);
+        }
+        return new String(chars);
+    }
+
+    /**
+     * A question as a run or a tool accepts it: {@link #forDisplay} (it is shown in events and sent
+     * to the seller), {@value #MIN_QUESTION}..{@value #MAX_QUESTION} code points.
      *
      * @return empty if the raw input is too long or the cleaned text is out of bounds
      */
@@ -98,7 +191,7 @@ public final class UntrustedText {
         if (raw.length() > MAX_RAW_QUESTION) {
             return Optional.empty();
         }
-        String cleaned = clean(raw, MAX_QUESTION + 1);
+        String cleaned = forDisplay(raw, MAX_QUESTION + 1);
         int length = cleaned.codePointCount(0, cleaned.length());
         if (length < MIN_QUESTION || length > MAX_QUESTION) {
             return Optional.empty();
