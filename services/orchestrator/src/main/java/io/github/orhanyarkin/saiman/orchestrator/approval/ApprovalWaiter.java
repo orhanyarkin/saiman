@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.orchestrator.approval;
 
 import io.github.orhanyarkin.saiman.orchestrator.budget.SpendProperties;
+import io.github.orhanyarkin.saiman.orchestrator.events.AfterCommit;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -9,9 +10,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
  * Lets a run's (virtual) thread wait for a human decision. The future only wakes the thread; the
@@ -88,11 +88,13 @@ public class ApprovalWaiter {
     }
 
     /** Wakes the waiter once the deciding transaction has committed. */
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    @EventListener
     void onDecided(ApprovalDecidedEvent event) {
-        CompletableFuture<ApprovalStatus> future = waiting.get(event.approvalId());
-        if (future != null) {
-            future.complete(event.status());
-        }
+        AfterCommit.run(() -> {
+            CompletableFuture<ApprovalStatus> future = waiting.get(event.approvalId());
+            if (future != null) {
+                future.complete(event.status());
+            }
+        });
     }
 }

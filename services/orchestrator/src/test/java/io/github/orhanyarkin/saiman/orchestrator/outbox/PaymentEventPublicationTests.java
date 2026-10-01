@@ -16,6 +16,7 @@ import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentStatus;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.FakeSeller;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.SpendTestSupport;
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.github.orhanyarkin.saiman.shared.payments.PaymentAuthorized;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentSettled;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
 import io.github.orhanyarkin.saiman.shared.run.AgentStep;
@@ -28,13 +29,21 @@ import io.github.orhanyarkin.x402.client.SpendReservation;
 import io.github.orhanyarkin.x402.core.Eip3009Authorization;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.kafka.support.converter.RecordMessageConverter;
+import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.modulith.events.EventExternalizationConfiguration;
 import org.springframework.modulith.events.RoutingTarget;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -72,6 +81,9 @@ class PaymentEventPublicationTests extends SpendTestSupport {
 
     @Autowired
     private JsonMapper json;
+
+    @Autowired
+    private RecordMessageConverter converter;
 
     @Autowired
     private PlatformTransactionManager transactionManager;
@@ -125,12 +137,11 @@ class PaymentEventPublicationTests extends SpendTestSupport {
         PaymentSettled event = json.treeToValue(stored, PaymentSettled.class);
 
         RoutingTarget target = externalization.determineTarget(event);
-        Object value = externalization.map(event);
+        String value = kafkaValue(externalization.map(event));
 
         assertThat(target.getTarget()).isEqualTo(PaymentTopics.SETTLED);
         assertThat(target.getKey()).isEqualTo(event.authorization().paymentKey());
-        assertThat(value).isInstanceOf(String.class);
-        JsonNode wire = json.readTree((String) value);
+        JsonNode wire = json.readTree(value);
         assertThat(wire.propertyNames())
                 .containsExactlyInAnyOrder(
                         "meta",
@@ -145,8 +156,11 @@ class PaymentEventPublicationTests extends SpendTestSupport {
                         "runId");
         assertThat(wire.get("amount").propertyNames()).containsExactlyInAnyOrder("atomicUnits", "asset", "decimals");
         assertThat(wire.get("amount").get("atomicUnits").isIntegralNumber()).isTrue();
-        assertThat((String) value).doesNotContainIgnoringCase("signature").doesNotContain("idempotency");
-        assertThat(json.readValue((String) value, PaymentSettled.class)).isEqualTo(event);
+        assertThat(wire.propertyNames())
+                .containsExactlyInAnyOrderElementsOf(
+                        fixture("payments.settled.v1").propertyNames());
+        assertThat(value).doesNotContainIgnoringCase("signature").doesNotContain("idempotency");
+        assertThat(json.readValue(value, PaymentSettled.class)).isEqualTo(event);
         assertThat(event.amount()).isEqualTo(Money.usdc(10_000));
     }
 
@@ -161,7 +175,53 @@ class PaymentEventPublicationTests extends SpendTestSupport {
         RunStepExternalized step = json.treeToValue(steps.get(0).event(), RunStepExternalized.class);
         assertThat(externalization.determineTarget(step).getTarget()).isEqualTo(OutboxConfiguration.RUN_STEPS);
         assertThat(externalization.determineTarget(step).getKey()).isEqualTo(run.toString());
-        assertThat(externalization.map(step)).isEqualTo(codec.encodeEnvelope(appended));
+        assertThat(json.readTree(kafkaValue(externalization.map(step))))
+                .isEqualTo(json.readTree(codec.encodeEnvelope(appended)));
+    }
+
+    @Test
+    void aPaymentAuthorizedValueMatchesTheGoldenFixtureShapeWithoutATypeHeader() {
+        UUID run = createRun(50_000);
+        client.send(newIntent(run), null);
+        PaymentAuthorized event = json.treeToValue(
+                OutboxTestAccess.publications(jdbc, "PaymentAuthorized").get(0).event(), PaymentAuthorized.class);
+
+        ProducerRecord<?, ?> record = producerRecord(externalization.map(event));
+
+        assertThat(record.value()).isInstanceOf(String.class);
+        assertThat(record.headers().lastHeader("__TypeId__")).isNull();
+        JsonNode wire = json.readTree((String) record.value());
+        JsonNode golden = fixture("payments.authorized.v1");
+        assertThat(wire.propertyNames()).containsExactlyInAnyOrderElementsOf(golden.propertyNames());
+        for (String nested : List.of("meta", "authorization", "amount")) {
+            assertThat(wire.get(nested).propertyNames())
+                    .as(nested)
+                    .containsExactlyInAnyOrderElementsOf(golden.get(nested).propertyNames());
+        }
+    }
+
+    private String kafkaValue(Object payload) {
+        Object value = producerRecord(payload).value();
+        assertThat(value).isInstanceOf(String.class);
+        return (String) value;
+    }
+
+    /** What KafkaTemplate.send(Message) hands to the producer, built by the application's converter. */
+    private ProducerRecord<?, ?> producerRecord(Object payload) {
+        return converter.fromMessage(
+                MessageBuilder.withPayload(payload)
+                        .setHeader(KafkaHeaders.TOPIC, "t")
+                        .build(),
+                "t");
+    }
+
+    private JsonNode fixture(String topic) {
+        try {
+            return json.readTree(Files.readString(
+                    Path.of("../../libs/shared/src/test/resources/fixtures/events/" + topic + ".json")));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Test
