@@ -15,6 +15,10 @@ import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentStatus;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentTestAccess;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.FakeSeller;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.SpendTestSupport;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -140,6 +144,44 @@ class HeldPaymentResolverTests extends SpendTestSupport {
         assertThat(intents.find(held).orElseThrow().status()).isEqualTo(PaymentIntentStatus.HELD);
         assertThat(run(run)).isEqualTo(new RunCounters(50_000, AMOUNT, 0));
         assertThat(chain.stateBlocks).isEmpty();
+    }
+
+    @Test
+    void expiredAtTheSafeBlockButNotYetByTheLocalClockNothingChanges() {
+        UUID run = createRun(50_000);
+        UUID held = heldIntent(run);
+        chain.safe = new ChainBlock(1_000_000, validBefore(held) + 20);
+        chain.clockAheadOfSafe = -30; // the safe block is 30 s ahead: tolerated, but now < validBefore
+        chain.used = false;
+        try {
+            assertThat(resolver.resolveDue()).isEqualTo(new HeldPaymentResolver.Pass(0, 0, 0));
+        } finally {
+            chain.clockAheadOfSafe = 0;
+        }
+
+        assertThat(intents.find(held).orElseThrow().status()).isEqualTo(PaymentIntentStatus.HELD);
+        assertThat(run(run)).isEqualTo(new RunCounters(50_000, AMOUNT, 0));
+        assertThat(chain.stateBlocks).isEmpty();
+    }
+
+    @Test
+    void aSafeBlockFarAheadOfTheLocalClockSkipsThePass() {
+        UUID run = createRun(50_000);
+        UUID held = heldIntent(run);
+        chain.safeAfter(validBefore(held));
+        chain.clockAheadOfSafe = -(HeldPaymentResolver.MAX_SAFE_AHEAD_SECONDS + 1);
+        chain.used = false;
+        try {
+            assertThat(resolver.resolveDue()).isEqualTo(new HeldPaymentResolver.Pass(0, 0, 0));
+        } finally {
+            chain.clockAheadOfSafe = 0;
+        }
+        assertThat(intents.find(held).orElseThrow().status()).isEqualTo(PaymentIntentStatus.HELD);
+        assertThat(chain.stateBlocks).isEmpty();
+
+        assertThat(resolver.resolveDue())
+                .as("with the clocks in step again, it resolves")
+                .isEqualTo(new HeldPaymentResolver.Pass(0, 1, 0));
     }
 
     @Test
@@ -332,11 +374,35 @@ class HeldPaymentResolverTests extends SpendTestSupport {
         ScriptedChain scriptedChain() {
             return new ScriptedChain();
         }
+
+        /** The resolver's local clock: the scripted safe block's time plus {@code clockAheadOfSafe} seconds. */
+        @Bean
+        Clock resolverClock(ScriptedChain chain) {
+            return new Clock() {
+                @Override
+                public ZoneId getZone() {
+                    return ZoneOffset.UTC;
+                }
+
+                @Override
+                public Clock withZone(ZoneId zone) {
+                    return this;
+                }
+
+                @Override
+                public Instant instant() {
+                    return Instant.ofEpochSecond(chain.safe.timestamp() + chain.clockAheadOfSafe);
+                }
+            };
+        }
     }
 
     /** Answers as scripted; {@code used == null} or {@code down} throw {@link ChainUnavailableException}. */
     static final class ScriptedChain implements BaseSepoliaUsdc {
         volatile ChainBlock safe = new ChainBlock(1, 1);
+        /** Seconds the local clock is ahead of the safe block (negative: the safe block is ahead). */
+        volatile long clockAheadOfSafe;
+
         volatile @Nullable Boolean used;
         volatile Optional<String> tx = Optional.empty();
         volatile boolean down;

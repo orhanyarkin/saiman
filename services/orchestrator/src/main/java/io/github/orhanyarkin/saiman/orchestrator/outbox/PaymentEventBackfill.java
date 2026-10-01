@@ -4,6 +4,7 @@ import io.github.orhanyarkin.saiman.orchestrator.payment.IntentAuthorization;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentService;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentStatus;
 import io.github.orhanyarkin.saiman.shared.payments.SettlementEvidence;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -33,15 +34,23 @@ class PaymentEventBackfill implements ApplicationRunner {
 
     private static final Logger LOG = LoggerFactory.getLogger(PaymentEventBackfill.class);
 
+    /** Counter of intents whose backfill failed and was skipped (tag {@code kind}). */
+    static final String SKIPPED_METRIC = "saiman.outbox.backfill_skipped";
+
     private final PaymentIntentService intents;
     private final PaymentEventPublisher events;
     private final TransactionTemplate tx;
+    private final MeterRegistry meters;
 
     PaymentEventBackfill(
-            PaymentIntentService intents, PaymentEventPublisher events, PlatformTransactionManager transactionManager) {
+            PaymentIntentService intents,
+            PaymentEventPublisher events,
+            PlatformTransactionManager transactionManager,
+            MeterRegistry meters) {
         this.intents = intents;
         this.events = events;
         this.tx = new TransactionTemplate(transactionManager);
+        this.meters = meters;
     }
 
     @Override
@@ -67,7 +76,27 @@ class PaymentEventBackfill implements ApplicationRunner {
         return published;
     }
 
+    /**
+     * One intent and kind in its own transaction. A historical row that cannot be published (it fails a contract
+     * check, say) is logged by id, counted in {@value #SKIPPED_METRIC} and skipped: it must not stop the backfill of
+     * the others, nor the application's startup. It is retried at the next startup.
+     */
     private int publish(UUID id, PaymentEventPublisher.Kind kind) {
+        try {
+            return publishLocked(id, kind);
+        } catch (RuntimeException e) {
+            // Class name only: the message may echo row contents.
+            LOG.error(
+                    "Backfill of {} for payment intent {} failed ({}); skipped",
+                    kind,
+                    id,
+                    e.getClass().getName());
+            meters.counter(SKIPPED_METRIC, "kind", kind.name()).increment();
+            return 0;
+        }
+    }
+
+    private int publishLocked(UUID id, PaymentEventPublisher.Kind kind) {
         return Objects.requireNonNull(tx.execute(status -> {
             IntentAuthorization intent = intents.lockAuthorization(id).orElse(null);
             if (intent == null) {

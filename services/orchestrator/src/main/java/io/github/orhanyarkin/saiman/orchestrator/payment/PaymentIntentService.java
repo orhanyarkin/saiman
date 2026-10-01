@@ -311,13 +311,6 @@ public class PaymentIntentService {
                 .optional();
     }
 
-    /** HELD intents with no recorded authorization: they stay counted until an operator looks at them. */
-    public int countHeldWithoutAuthorization() {
-        return jdbc.sql("SELECT count(*) FROM payment_intent WHERE status = 'HELD' AND auth_nonce IS NULL")
-                .query(Integer.class)
-                .single();
-    }
-
     /**
      * Signed intents in one of {@code statuses} whose {@code kind} payment event was never published
      * (no {@code payment_event_log} row): the startup backfill's work list.

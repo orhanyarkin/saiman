@@ -13,6 +13,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -56,6 +57,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * resolution_attempted_at} (never attempted first), stamped on every attempt, so intents that keep failing
  * cannot starve the ones behind them.
  *
+ * <p>"Past {@code validBefore}" means before both the safe block's timestamp and the local clock; a safe block more
+ * than {@value #MAX_SAFE_AHEAD_SECONDS} s ahead of the local clock skips the chain part of the pass.
+ *
  * <p>Runs only when a {@link BaseSepoliaUsdc} client exists ({@code saiman.chain.rpc-url} set); the orchestrator
  * consumes nothing from Kafka for this (a forged "unused" message must not free budget).
  */
@@ -70,6 +74,8 @@ public class HeldPaymentResolver {
     static final long BLOCK_SECONDS = 2;
     /** Blocks searched after the estimated {@code validBefore} block (the estimate can be a little off). */
     static final long SLACK_BLOCKS = 30;
+    /** A safe block further ahead of the local clock than this is not trusted: the pass is skipped. */
+    static final long MAX_SAFE_AHEAD_SECONDS = 60;
 
     private final ObjectProvider<BaseSepoliaUsdc> chain;
     private final HeldResolutionProperties properties;
@@ -78,6 +84,7 @@ public class HeldPaymentResolver {
     private final PaymentIntentService intents;
     private final BudgetSpendGuard guard;
     private final MeterRegistry meters;
+    private final ObjectProvider<Clock> clock;
 
     HeldPaymentResolver(
             ObjectProvider<BaseSepoliaUsdc> chain,
@@ -86,7 +93,8 @@ public class HeldPaymentResolver {
             PlatformTransactionManager transactionManager,
             PaymentIntentService intents,
             BudgetSpendGuard guard,
-            MeterRegistry meters) {
+            MeterRegistry meters,
+            ObjectProvider<Clock> clock) {
         this.chain = chain;
         this.properties = properties;
         this.dataSource = dataSource;
@@ -95,6 +103,7 @@ public class HeldPaymentResolver {
         this.intents = intents;
         this.guard = guard;
         this.meters = meters;
+        this.clock = clock;
     }
 
     @Scheduled(
@@ -196,9 +205,20 @@ public class HeldPaymentResolver {
             LOG.info("HELD resolution skipped: the chain RPC is unavailable");
             return new Pass(settled, released, skipped);
         }
-        List<UUID> due = intents.claimHeldExpiredBefore(safe.timestamp(), properties.batchSize());
+        long now = clock.getIfAvailable(Clock::systemUTC).instant().getEpochSecond();
+        if (safe.timestamp() > now + MAX_SAFE_AHEAD_SECONDS) {
+            // A safe block from the future is a lying or broken RPC; trusting it would release live authorizations.
+            count("safe_in_future");
+            LOG.warn(
+                    "HELD resolution skipped: the safe block is {} s ahead of the local clock", safe.timestamp() - now);
+            return new Pass(settled, released, skipped);
+        }
+        // Expired by both the chain's and the local clock: neither a fast RPC nor a fast local clock alone can
+        // make an authorization final early.
+        long expiredBefore = Math.min(safe.timestamp(), now);
+        List<UUID> due = intents.claimHeldExpiredBefore(expiredBefore, properties.batchSize());
         for (UUID id : due) {
-            String outcome = guarded(id, () -> resolveOne(usdc, id, safe));
+            String outcome = guarded(id, () -> resolveOne(usdc, id, safe, expiredBefore));
             count(outcome);
             switch (outcome) {
                 case "settled" -> settled++;
@@ -236,13 +256,13 @@ public class HeldPaymentResolver {
         }));
     }
 
-    private String resolveOne(BaseSepoliaUsdc usdc, UUID id, ChainBlock safe) {
+    private String resolveOne(BaseSepoliaUsdc usdc, UUID id, ChainBlock safe, long expiredBefore) {
         // Reads first, outside any transaction: no row lock or pooled transaction across RPC latency.
         IntentAuthorization held = intents.readAuthorization(id).orElse(null);
         if (held == null || held.status() != PaymentIntentStatus.HELD) {
             return "already_resolved";
         }
-        if (held.validBefore() >= safe.timestamp()) {
+        if (held.validBefore() >= expiredBefore) {
             return "not_expired";
         }
         boolean used;
