@@ -37,7 +37,7 @@ Contract for M4b. Decisions: ADR-0021 (implements ADR-0015). Accept (docs/PLAN.m
 - CREDIT_NOTE postings (book SELLER, full amount): Dr `seller:<S>:revenue:credit-notes` (REVENUE, contra) / Cr `seller:<S>:liability:customer-credits` (LIABILITY); entry id `entryId(key, SELLER, "CREDIT_NOTE")`.
 - Migration `V4__credit_notes.sql`: widen the seller-state check to include `CREDITED` (look up the generated constraint name first).
 - New `@KafkaListener` on `payments.credit-note-issued.v1` with inbox dedupe and DLT, declared topic + DLT `NewTopic`s.
-- Reconciliation unchanged: credited + matching receipt = MATCHED. Edge: chain UNUSED but CREDITED → SETTLED_BUT_UNUSED, wallet difference to suspense, liability stays until a human REVERSAL (document).
+- Reconciliation: credited + matching receipt = MATCHED **only if corroborated** by seller-api (`GET /internal/credit-notes/{paymentKey}`, Host allowlist `seller-api,seller-api:8081`; ledger client `saiman.ledger.seller.*` with Resilience4j; positive answers cached in `credit_note_corroboration`, V5); otherwise `CREDIT_NOTE_UNCORROBORATED` (no posting) or PENDING when the seller is unreachable (M4b audit fix). Edge: chain UNUSED but CREDITED → SETTLED_BUT_UNUSED, wallet difference to suspense, liability stays until a human REVERSAL (document).
 - Tests: `PaymentBook` orders (credited before/after settled, duplicates, credited without settled, conflicts); P1/P2 generators extended with credit-note facts (one `@Test` per property, ADR-0019); P1 also asserts credit-notes debit = customer-credits credit = amount, net revenue 0; Kafka end-to-end with trial balance 0; DLT for a malformed credit note; reconciliation MATCHED.
 
 ## Live verification (T2, orchestrator)
