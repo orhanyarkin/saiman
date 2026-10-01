@@ -1,3 +1,5 @@
+import java.util.HashSet
+
 plugins {
     id("saiman.spring-boot-service")
 }
@@ -5,6 +7,7 @@ plugins {
 dependencies {
     implementation(project(":libs:shared"))
     implementation(project(":libs:eventing")) // InboxGuard + Modulith registry defaults (ADR-0016)
+    implementation(project(":libs:evm-rpc")) // Base Sepolia reads for reconciliation (ADR-0018)
     implementation(platform(libs.spring.modulith.bom))
     implementation(libs.spring.modulith.starter.jdbc) // event publication registry in schema `ledger`
     implementation(libs.spring.modulith.events.kafka) // @Externalized -> ledger.entry-posted.v1
@@ -26,4 +29,18 @@ dependencies {
 // so a failure printed with its base seed reproduces exactly.
 tasks.withType<Test>().configureEach {
     providers.systemProperty("saiman.pbt.seed").orNull?.let { systemProperty("saiman.pbt.seed", it) }
+}
+
+// Live reconciliation against the public Base Sepolia RPC (free, no key): `./gradlew :services:ledger:testnetTest`.
+// The shared conventions exclude the "testnet" tag from every other test task, so `check` stays hermetic.
+tasks.register<Test>("testnetTest") {
+    description = "Runs the @Tag(\"testnet\") reconciliation test against the public Base Sepolia RPC."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        setExcludeTags(HashSet<String>())
+        includeTags("testnet")
+    }
+    outputs.upToDateWhen { false }
 }

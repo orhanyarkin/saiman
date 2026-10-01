@@ -89,7 +89,31 @@ public record PaymentProjection(
                 lastCheckedAt);
     }
 
-    static String lower(String value) {
+    /** The same row after a reconciliation check: what the chain says and when it was read. */
+    public PaymentProjection withChain(ChainState state, @Nullable String txHash, Instant checkedAt) {
+        return new PaymentProjection(
+                id,
+                paymentKey,
+                network,
+                assetAddress,
+                payer,
+                nonce,
+                payTo,
+                amount,
+                validBefore,
+                paymentIntentId,
+                runId,
+                buyerState,
+                sellerState,
+                state,
+                buyerTxHash,
+                sellerTxHash,
+                txHash,
+                checkedAt);
+    }
+
+    /** Hex strings from producers and the chain are compared lower-case. */
+    public static String lower(String value) {
         return value.toLowerCase(Locale.ROOT);
     }
 }
