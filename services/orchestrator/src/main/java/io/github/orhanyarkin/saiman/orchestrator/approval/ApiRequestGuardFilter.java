@@ -33,6 +33,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
  *       <em>both</em> {@code Content-Type: application/json} and {@code X-Saiman-Csrf: 1}, else
  *       403. A cross-site page can't send either without a CORS preflight, which is never answered
  *       (no CORS config).
+ *   <li><b>Body size:</b> a POST/PUT/PATCH body larger than {@value #MAX_BODY_BYTES} bytes, or one
+ *       of unknown length ({@code Transfer-Encoding}), gets a 413 before anything reads it (the
+ *       largest legitimate body, a run's question, is far smaller).
  * </ol>
  *
  * Error bodies are fixed text: nothing from the request is echoed.
@@ -44,6 +47,10 @@ public class ApiRequestGuardFilter extends OncePerRequestFilter {
     public static final String CSRF_HEADER = "X-Saiman-Csrf";
     private static final Set<String> STATE_CHANGING = Set.of("POST", "PUT", "PATCH", "DELETE");
     private static final String HEALTH = "/actuator/health";
+    private static final Set<String> WITH_BODY = Set.of("POST", "PUT", "PATCH");
+
+    /** Largest request body accepted, in bytes. */
+    public static final int MAX_BODY_BYTES = 16 * 1024;
 
     private final List<String> allowedHosts;
 
@@ -65,6 +72,11 @@ public class ApiRequestGuardFilter extends OncePerRequestFilter {
         boolean healthProbe = !stateChanging && (path.equals(HEALTH) || path.startsWith(HEALTH + "/"));
         if (!healthProbe && !hostAllowed(request.getHeader(HttpHeaders.HOST))) {
             reject(response, HttpServletResponse.SC_BAD_REQUEST, "Host not allowed");
+            return;
+        }
+        if (WITH_BODY.contains(request.getMethod()) && !bodySizeAllowed(request)) {
+            response.setHeader(HttpHeaders.CONNECTION, "close");
+            reject(response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE, "Request body too large");
             return;
         }
         if (stateChanging && !("1".equals(request.getHeader(CSRF_HEADER)) && isJson(request.getContentType()))) {
@@ -101,6 +113,18 @@ public class ApiRequestGuardFilter extends OncePerRequestFilter {
         String pathInfo = request.getPathInfo();
         String normalised = request.getServletPath() + (pathInfo == null ? "" : pathInfo);
         return rawPath.equals(normalised) ? rawPath : null;
+    }
+
+    /**
+     * A declared length up to the limit, or no body at all (neither {@code Content-Length} nor
+     * {@code Transfer-Encoding}). A chunked body has no length to check up front, so it is refused.
+     */
+    private static boolean bodySizeAllowed(HttpServletRequest request) {
+        if (request.getHeader(HttpHeaders.TRANSFER_ENCODING) != null) {
+            return false;
+        }
+        long length = request.getContentLengthLong();
+        return length <= MAX_BODY_BYTES; // -1: no Content-Length and no Transfer-Encoding, so no body
     }
 
     private boolean hostAllowed(@Nullable String hostHeader) {
