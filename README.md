@@ -110,7 +110,7 @@ wire-level contract.
 
 ## Known limits
 
-- **Unsettled-run budget (ADR-0015).** The seller verifies, serves and then settles. The RAG endpoints call a paid LLM while serving, so a burst of requests from funded wallets can use up the day's unsettled budget; until UTC midnight every payer then gets HTTP 429. Spend stays bounded (per-payer run guard, the router's daily USD cap, the provider limit); availability does not. Settle-before-serve (opt-in, with ledger credit notes) arrives in M4.
+- **Paid but not served (ADR-0015, ADR-0021).** The RAG endpoints use the x402 `upfront` flow: the seller settles before it runs the paid LLM call, so no unpaid LLM run exists and the old unsettled-day-budget exhaustion is gone. The price is that every non-2xx answer after settlement (including the buyer's own mistakes, e.g. an unknown ticker) is paid; the seller has no key for on-chain refunds, so it records a full credit note (a liability in the ledger). Credits cannot be redeemed yet.
 - **Testnet only.** x402 runs on Base Sepolia with test USDC; the corpus is a frozen 2023 snapshot of the official MKK KAP API (ADR-0010).
 
 ## Stack
