@@ -86,7 +86,13 @@ public class ApprovalService {
      * Applies a human's decision to a PENDING approval of {@code runId}. A decision that arrives
      * after {@code expires_at} expires the approval instead; a decided approval is left unchanged.
      *
+     * <p>The run's status is read after the approval row is locked. A run finishing concurrently
+     * locks the same approval rows first (it expires them) and then closes the run's open intents, so
+     * either the run is already terminal here (refused) or the finish sees this decision and releases
+     * an APPROVED intent that will never be sent.
+     *
      * @throws ApprovalNotFoundException if no approval with this id belongs to this run
+     * @throws RunAlreadyFinishedException if the run has ended
      */
     @Transactional
     public DecisionOutcome decide(UUID runId, UUID approvalId, ApprovalDecision decision) {
@@ -97,6 +103,14 @@ public class ApprovalService {
                 .query((rs, row) -> new LockedApproval(map(rs, row), rs.getBoolean("expired")))
                 .optional()
                 .orElseThrow(ApprovalNotFoundException::new);
+        boolean runFinished = jdbc.sql("SELECT status IN ('SUCCEEDED', 'FAILED') FROM run WHERE id = :runId")
+                .param("runId", runId)
+                .query(Boolean.class)
+                .optional()
+                .orElse(true);
+        if (runFinished) {
+            throw new RunAlreadyFinishedException();
+        }
         ApprovalView approval = locked.approval();
         if (approval.status() != ApprovalStatus.PENDING) {
             return new DecisionOutcome(approval, false);

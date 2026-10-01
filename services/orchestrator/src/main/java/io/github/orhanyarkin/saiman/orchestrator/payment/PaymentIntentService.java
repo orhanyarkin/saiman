@@ -293,15 +293,21 @@ public class PaymentIntentService {
     }
 
     /**
-     * Every PENDING intent of a run -> RELEASED: the run has ended, so nothing it prepared can be
-     * sent any more (T4 hook for the run lifecycle).
+     * Closes every intent of an ended run that never reserved anything: PENDING and APPROVED ->
+     * RELEASED, AWAITING_APPROVAL -> EXPIRED ({@code APPROVAL_EXPIRED}). Nothing the run prepared
+     * can be sent any more, and an approval decided in the last moment leaves no open APPROVED intent
+     * behind. Reserved, signed and held intents are not touched (they are money, handled elsewhere).
      *
      * @return how many intents were closed
      */
     public int closeUnsentForRun(UUID runId) {
         return jdbc.sql("""
-                        UPDATE payment_intent SET status = 'RELEASED', updated_at = now()
-                         WHERE run_id = :runId AND status = 'PENDING'
+                        UPDATE payment_intent
+                           SET status = CASE WHEN status = 'AWAITING_APPROVAL' THEN 'EXPIRED' ELSE 'RELEASED' END,
+                               deny_reason = CASE WHEN status = 'AWAITING_APPROVAL' THEN 'APPROVAL_EXPIRED'
+                                                  ELSE deny_reason END,
+                               updated_at = now()
+                         WHERE run_id = :runId AND status IN ('PENDING', 'APPROVED', 'AWAITING_APPROVAL')
                         """).param("runId", runId).update();
     }
 

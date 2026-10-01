@@ -2,6 +2,8 @@ package io.github.orhanyarkin.saiman.orchestrator.budget;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.orhanyarkin.saiman.orchestrator.approval.ApprovalService;
+import io.github.orhanyarkin.saiman.orchestrator.approval.ApprovalStatus;
 import io.github.orhanyarkin.saiman.orchestrator.events.RunEventAppender;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentHandle;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentStatus;
@@ -9,6 +11,7 @@ import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentTestAccess;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.FakeSeller;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.SpendTestSupport;
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.github.orhanyarkin.saiman.shared.run.DenyReason;
 import io.github.orhanyarkin.saiman.shared.run.RunCost;
 import io.github.orhanyarkin.saiman.shared.run.RunEvent;
 import io.github.orhanyarkin.saiman.shared.run.RunEventData;
@@ -16,11 +19,14 @@ import io.github.orhanyarkin.saiman.shared.run.RunEventType;
 import io.github.orhanyarkin.x402.client.PaymentIntent;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Startup crash recovery: what a process that died mid-run left in the database is resolved fail
@@ -37,6 +43,12 @@ class SpendRecoveryTests extends SpendTestSupport {
 
     @Autowired
     private RunEventAppender eventLog;
+
+    @Autowired
+    private ApprovalService approvals;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void anInterruptedRunsTerminalEventCarriesItsCommittedAndLlmCost() {
@@ -72,7 +84,7 @@ class SpendRecoveryTests extends SpendTestSupport {
         assertThat(first).isEqualTo(new SpendRecovery.Outcome(1, 1, 1));
         assertThat(status(reserved)).isEqualTo(PaymentIntentStatus.RELEASED);
         assertThat(status(signed)).isEqualTo(PaymentIntentStatus.HELD);
-        assertThat(status(approved)).isEqualTo(PaymentIntentStatus.APPROVED);
+        assertThat(status(approved)).isEqualTo(PaymentIntentStatus.RELEASED);
         // The held 12000 keeps counting on the run and the day; the released 10000 does not.
         assertThat(run(run)).isEqualTo(new RunCounters(50_000, 12_000, 0));
         assertThat(today()).isEqualTo(new RunCounters(0, 12_000, 0));
@@ -99,15 +111,26 @@ class SpendRecoveryTests extends SpendTestSupport {
     }
 
     @Test
-    void anApprovedIntentStaysApprovedAndUnreserved() {
+    void anInterruptedRunLeavesNoOpenApprovalOrIntent() {
         UUID run = createRun(50_000);
         PaymentIntentHandle approved = newIntent(run);
         setStatus(approved, "APPROVED");
+        PaymentIntentHandle pending = newIntent(run);
+        PaymentIntentHandle awaiting = newIntent(run);
+        setStatus(awaiting, "AWAITING_APPROVAL");
+        UUID approvalId = new TransactionTemplate(transactionManager)
+                .execute(status -> approvals.request(
+                        awaiting.id(), run, 18_000, FakeSeller.PAY_TO, "http://seller/x", Duration.ofMinutes(5)));
 
         recovery.recover();
 
-        assertThat(status(approved)).isEqualTo(PaymentIntentStatus.APPROVED);
+        assertThat(status(approved)).isEqualTo(PaymentIntentStatus.RELEASED);
+        assertThat(status(pending)).isEqualTo(PaymentIntentStatus.RELEASED);
+        assertThat(status(awaiting)).isEqualTo(PaymentIntentStatus.EXPIRED);
+        assertThat(intents.find(awaiting.id()).orElseThrow().denyReason()).isEqualTo(DenyReason.APPROVAL_EXPIRED);
+        assertThat(approvals.find(approvalId).orElseThrow().status()).isEqualTo(ApprovalStatus.EXPIRED);
         assertThat(run(run)).isEqualTo(new RunCounters(50_000, 0, 0));
+        assertThat(recovery.recover()).isEqualTo(new SpendRecovery.Outcome(0, 0, 0));
     }
 
     private PaymentIntentHandle reserve(UUID run, long amount) {

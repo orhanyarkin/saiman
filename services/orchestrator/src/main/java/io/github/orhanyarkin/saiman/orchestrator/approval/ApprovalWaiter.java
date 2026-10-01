@@ -42,7 +42,8 @@ public class ApprovalWaiter {
      * Waits for a decision on {@code approvalId}, at most {@code timeout} and never past the
      * approval's {@code expires_at}.
      *
-     * @return APPROVED, REJECTED or EXPIRED, as stored in the database
+     * @return APPROVED, REJECTED or EXPIRED, as stored in the database; EXPIRED without any write if
+     *     the waiting thread is interrupted (the interrupt flag is restored)
      * @throws ApprovalNotFoundException if the approval does not exist
      */
     public ApprovalStatus await(UUID approvalId, Duration timeout) {
@@ -61,7 +62,11 @@ public class ApprovalWaiter {
         } catch (TimeoutException e) {
             // Fall through: expire below.
         } catch (InterruptedException e) {
+            // The run is being torn down: nobody decided, so nothing is written here. The approval
+            // stays PENDING and the run's finish expires it (and releases an intent approved in the
+            // meantime), in the same transaction that ends the run.
             Thread.currentThread().interrupt();
+            return ApprovalStatus.EXPIRED;
         } catch (ExecutionException e) {
             // Never completed exceptionally; the DB decides below.
         } finally {

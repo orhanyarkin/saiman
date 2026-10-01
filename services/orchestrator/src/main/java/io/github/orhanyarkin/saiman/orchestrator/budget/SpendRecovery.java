@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.orchestrator.budget;
 
+import io.github.orhanyarkin.saiman.orchestrator.approval.ApprovalService;
 import io.github.orhanyarkin.saiman.orchestrator.events.RunEventAppender;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentService;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentView;
@@ -32,11 +33,11 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       before a signature may leave the process, so a RESERVED intent provably sent nothing.
  *   <li><b>SIGNED -> HELD</b>: the signature may have been sent; the amount keeps counting in the
  *       reserved counters until M4 reconciles it on chain (fail closed).
- *   <li><b>APPROVED</b> stays APPROVED: an approved intent is never reserved until its paid attempt
- *       starts, so there is nothing to release.
  *   <li><b>Unfinished runs</b> (QUEUED, RUNNING, AWAITING_APPROVAL) become FAILED with {@code
- *       failure_code = INTERRUPTED} and get a terminal {@code RUN_FAILED} event with the cost so
- *       far, so their event stream ends; their in-process virtual thread is gone.
+ *       failure_code = INTERRUPTED}; their PENDING approvals expire, their PENDING/APPROVED intents
+ *       are released and AWAITING_APPROVAL ones expire (nothing was reserved for them), and each gets
+ *       a terminal {@code RUN_FAILED} event with the cost so far, so its event stream ends; their
+ *       in-process virtual thread is gone.
  * </ul>
  *
  * Idempotent: a second pass finds nothing to do. Assumes one orchestrator instance per database
@@ -56,6 +57,7 @@ class SpendRecovery implements ApplicationRunner {
     private final PaymentIntentService intents;
     private final BudgetSpendGuard guard;
     private final RunEventAppender events;
+    private final ApprovalService approvals;
     private final MeterRegistry meters;
 
     SpendRecovery(
@@ -64,7 +66,9 @@ class SpendRecovery implements ApplicationRunner {
             PaymentIntentService intents,
             BudgetSpendGuard guard,
             RunEventAppender events,
+            ApprovalService approvals,
             MeterRegistry meters) {
+        this.approvals = approvals;
         this.jdbc = jdbc;
         this.tx = new TransactionTemplate(transactionManager);
         this.intents = intents;
@@ -97,8 +101,11 @@ class SpendRecovery implements ApplicationRunner {
                                     Money.usdc(rs.getLong("committed_atomic")),
                                     Money.usdMicros(rs.getLong("llm_cost_usd_micros")))))
                     .list();
-            // Each interrupted run gets its terminal event, so its stream and export end (ADR-0014).
+            // Each interrupted run: its PENDING approvals expire and its unsent intents close (as the
+            // normal finish does), then the terminal event, so its stream and export end (ADR-0014).
             for (InterruptedRun run : interrupted) {
+                approvals.expirePendingForRun(run.id());
+                intents.closeUnsentForRun(run.id());
                 events.append(run.id(), RunEventType.RUN_FAILED, new RunEventData.RunFailed(INTERRUPTED, run.cost()));
             }
             return new Outcome(reserved.size(), held, interrupted.size());
