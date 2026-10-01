@@ -35,3 +35,6 @@ Revisit if: the official SDK ships a v2 release on Maven Central, or we need a s
 
 ## Amendment (2026-10-01): Redis and Apache Kafka (ADR-0020)
 The seller-api nonce store runs on Redis instead of Valkey. The starter itself is unchanged: `RedisPaymentNonceStore` speaks the Redis protocol and works with either server.
+
+## Amendment (2026-10-01): M4b upfront flow and credit notes (ADR-0021)
+The starter supports the spec's `upfront` payment flow per handler (`@RequiresPayment(paymentFlow = UPFRONT)`); the client accepts `paymentFlow` authorization or upfront and prefers authorization. Details in ADR-0021.

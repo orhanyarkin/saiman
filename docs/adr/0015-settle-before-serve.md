@@ -20,3 +20,6 @@ The starter verifies, runs the handler, then settles (ADR-0008). For handlers th
 
 ## Amendment (2026-10-01): scheduled as M4b
 By the human's decision the opt-in settle-first mode is split out of M4 into a one-task milestone **M4b** before M5 (opus implementation and opus audit). M4 reserves the `CREDIT_NOTE` entry kind and the `seller:<S>:revenue:credit-notes` / `seller:<S>:liability:customer-credits` accounts so M4b only adds postings.
+
+## Amendment (2026-10-01): M4b upfront flow and credit notes (ADR-0021)
+Implemented in M4b as the x402 `upfront` flow with full credit notes for paid-but-failed requests; both seller RAG endpoints opt in. See ADR-0021.

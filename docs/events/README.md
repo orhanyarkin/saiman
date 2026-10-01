@@ -7,6 +7,7 @@ One JSON Schema file per topic, named `<topic>.schema.json`; a golden example of
 | `payments.authorized.v1` | orchestrator | payment key | ledger |
 | `payments.settled.v1` | orchestrator (BUYER), seller-api (SELLER) | payment key | ledger |
 | `payments.failed.v1` | orchestrator (FINAL), seller-api (AMBIGUOUS) | payment key | ledger |
+| `payments.credit-note-issued.v1` | seller-api (SELLER, upfront flow only; ADR-0021) | payment key | ledger |
 | `agent.run-step.v1` | orchestrator | run id | none in M4 |
 | `ledger.entry-posted.v1` | ledger | payment id | none (M5) |
 | `ledger.reconciliation-mismatch.v1` | ledger | payment id | none (M5) |

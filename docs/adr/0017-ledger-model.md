@@ -14,3 +14,6 @@ Status: Accepted (2026-10-01).
 + The balanced-postings invariant is enforced by the database, not only by code.
 + Replays, duplicates and reordering produce the same books.
 − A superuser can still disable triggers (shared DB role; M6 adds per-service roles). The tamper demo uses exactly this gap.
+
+## Amendment (2026-10-01): M4b upfront flow and credit notes (ADR-0021)
+The reserved CREDIT_NOTE kind and accounts are now used: seller state `CREDITED`, CREDIT_NOTE = Dr `revenue:credit-notes` / Cr `liability:customer-credits`, full amount. See ADR-0021.
