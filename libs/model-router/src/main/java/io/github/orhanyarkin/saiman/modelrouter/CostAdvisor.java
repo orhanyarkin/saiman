@@ -179,6 +179,8 @@ final class CostAdvisor implements CallAdvisor, StreamAdvisor {
                     finishCall(reservation, "ok", null);
                 } else if (signal == SignalType.CANCEL) {
                     finishCall(reservation, "cancelled", null);
+                } else if (signal == SignalType.ON_ERROR) {
+                    reservation.stop("error");
                 }
             };
             return upstream.doOnNext(response -> {
@@ -192,7 +194,9 @@ final class CostAdvisor implements CallAdvisor, StreamAdvisor {
                         if (e instanceof RequestNotSentException) {
                             notSent.set(true);
                         }
-                        finishCall(reservation, "error", e);
+                        // settle (which tags the cost) before the observation is stopped
+                        reservation.observation.error(e);
+                        metrics.call(tier, "error");
                         finish.accept(SignalType.ON_ERROR);
                     })
                     .doOnCancel(() -> finish.accept(SignalType.CANCEL))
@@ -205,11 +209,13 @@ final class CostAdvisor implements CallAdvisor, StreamAdvisor {
                 .lowCardinalityKeyValue("tier", tier)
                 .lowCardinalityKeyValue("model", costing.model());
         try {
+            // started first: every refusal below is recorded on a running observation (a tracing
+            // handler throws on error()/stop() of one that was never started)
+            observation.start();
             String scope = scopeOf(request);
             if (scope != null) {
                 observation.highCardinalityKeyValue("saiman.cost.scope", scope);
             }
-            observation.start();
             Money estimate = costing.estimate(request.prompt());
             ScopedCostGuard.ScopeReservation scoped = null;
             ScopedCostGuard scopedGuard = scopePolicy.guard();
@@ -241,9 +247,17 @@ final class CostAdvisor implements CallAdvisor, StreamAdvisor {
 
     private void refused(Observation observation, String outcome, RuntimeException e) {
         metrics.call(tier, outcome);
-        observation.error(e);
-        observation.lowCardinalityKeyValue("outcome", outcome);
-        observation.stop();
+        try {
+            observation.error(e);
+            observation.lowCardinalityKeyValue("outcome", outcome);
+            observation.stop();
+        } catch (RuntimeException handlerFailure) {
+            // observability must never replace the refusal the caller has to see
+            log.error(
+                    "Ending the model call observation on {} failed: {}",
+                    tier,
+                    handlerFailure.getClass().getName());
+        }
     }
 
     /** The scope id of the request, or {@code null} when it has none and none is required. */
@@ -292,8 +306,10 @@ final class CostAdvisor implements CallAdvisor, StreamAdvisor {
     private void afterFailure(Held reservation, RuntimeException failure) {
         if (failure instanceof RequestNotSentException) {
             release(reservation);
+        } else {
+            // the outcome is unknown: the reservation stays as the charge, and the observation shows it
+            keepEstimate(reservation, "failed after the request was sent");
         }
-        // otherwise the outcome is unknown: the reservation stays as the charge
     }
 
     private void release(Held held) {

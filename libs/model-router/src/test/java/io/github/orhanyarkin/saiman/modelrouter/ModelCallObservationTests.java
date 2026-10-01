@@ -148,4 +148,154 @@ class ModelCallObservationTests {
         assertThat(low(call, "outcome")).isEqualTo("error");
         assertThat(call.getError()).isNotNull();
     }
+
+    /** Like a tracing handler: error()/stop() of an observation that was never started is a bug. */
+    private static final class StrictHandler implements ObservationHandler<Observation.Context> {
+        final java.util.Set<Observation.Context> started = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+        @Override
+        public boolean supportsContext(Observation.Context context) {
+            return true;
+        }
+
+        @Override
+        public void onStart(Observation.Context context) {
+            started.add(context);
+        }
+
+        @Override
+        public void onError(Observation.Context context) {
+            requireStarted(context);
+        }
+
+        @Override
+        public void onStop(Observation.Context context) {
+            requireStarted(context);
+        }
+
+        private void requireStarted(Observation.Context context) {
+            if (!started.contains(context)) {
+                throw new IllegalStateException("observation was not started");
+            }
+        }
+    }
+
+    private static DefaultModelRouter scopedRouter(
+            ChatModel chat, boolean requireScope, InMemoryCostGuard day, InMemoryScopedCostGuard scopes, Recorder rec) {
+        ObservationRegistry registry = ObservationRegistry.create();
+        registry.observationConfig().observationHandler(new StrictHandler());
+        registry.observationConfig().observationHandler(rec);
+        RouterProperties base = RouterProperties.defaults();
+        RouterProperties props = new RouterProperties(
+                base.routes(),
+                base.embedding(),
+                base.dailyCapUsdMicros(),
+                base.prices(),
+                base.openai(),
+                null,
+                requireScope,
+                200_000);
+        return new DefaultModelRouter(
+                props,
+                new ModelFactory() {
+                    @Override
+                    public ChatModel chatModel(RouterProperties.Route route) {
+                        return chat;
+                    }
+
+                    @Override
+                    public EmbeddingModel embeddingModel(RouterProperties.Embedding route) {
+                        return new FakeEmbeddingModel(1536);
+                    }
+                },
+                day,
+                RouterMetrics.NOOP,
+                scopes,
+                registry);
+    }
+
+    private static InMemoryCostGuard day() {
+        return new InMemoryCostGuard(700_000, new MutableClock(Instant.parse("2026-09-30T10:00:00Z")));
+    }
+
+    @Test
+    void aMissingRequiredScopeIsRefusedWithRequestNotSentEvenUnderAStrictTracingHandler() {
+        var recorder = new Recorder();
+        var model = new FakeChatModel("x");
+        var client = scopedRouter(model, true, day(), new InMemoryScopedCostGuard(), recorder)
+                .chatClient(Tier.TIER0, DataClass.PUBLIC);
+
+        assertThatThrownBy(() -> client.prompt().user("hi").call().content())
+                .isInstanceOf(RequestNotSentException.class);
+
+        assertThat(low(recorder.calls().get(0), "outcome")).isEqualTo("no_scope");
+        assertThat(model.callCount()).isZero();
+    }
+
+    @Test
+    void aCallThatFailsAfterBeingSentTagsTheKeptEstimateAsTheObservationCost() {
+        var recorder = new Recorder();
+        var day = day();
+        var scopes = new InMemoryScopedCostGuard();
+        ChatModel failing = new ChatModel() {
+            @Override
+            public org.springframework.ai.chat.model.ChatResponse call(org.springframework.ai.chat.prompt.Prompt p) {
+                throw new IllegalStateException("boom");
+            }
+        };
+        var client = scopedRouter(failing, true, day, scopes, recorder).chatClient(Tier.TIER0, DataClass.PUBLIC);
+
+        assertThatThrownBy(() -> client.prompt()
+                        .advisors(a -> a.param(RouterAdvisorParams.COST_SCOPE, "run-9"))
+                        .user("hi")
+                        .call()
+                        .content())
+                .hasMessage("boom");
+
+        Observation.Context call = recorder.calls().get(0);
+        assertThat(low(call, "outcome")).isEqualTo("error");
+        long charged = day.todayTotal().atomicUnits();
+        assertThat(charged).isPositive();
+        assertThat(scopes.spent("run-9").atomicUnits()).isEqualTo(charged);
+        assertThat(high(call, "saiman.cost.usd_micros")).isEqualTo(Long.toString(charged));
+    }
+
+    @Test
+    void aStreamThatErrorsAfterBeingSentTagsTheKeptEstimateBeforeTheObservationStops() {
+        var recorder = new Recorder();
+        var day = day();
+        var scopes = new InMemoryScopedCostGuard();
+        ChatModel failing = new ChatModel() {
+            @Override
+            public org.springframework.ai.chat.model.ChatResponse call(org.springframework.ai.chat.prompt.Prompt p) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public reactor.core.publisher.Flux<org.springframework.ai.chat.model.ChatResponse> stream(
+                    org.springframework.ai.chat.prompt.Prompt p) {
+                return reactor.core.publisher.Flux.error(new IllegalStateException("stream broke"));
+            }
+        };
+        var client = scopedRouter(failing, true, day, scopes, recorder).chatClient(Tier.TIER0, DataClass.PUBLIC);
+
+        assertThatThrownBy(() ->
+                        client
+                                .prompt()
+                                .advisors(a -> a.param(RouterAdvisorParams.COST_SCOPE, "run-10"))
+                                .user("hi")
+                                .stream()
+                                .content()
+                                .collectList()
+                                .block())
+                .hasMessageContaining("stream broke");
+
+        Observation.Context call = recorder.calls().get(0);
+        assertThat(low(call, "outcome")).isEqualTo("error");
+        assertThat(call.getError()).isNotNull();
+        long charged = day.todayTotal().atomicUnits();
+        assertThat(charged).isPositive();
+        assertThat(scopes.spent("run-10").atomicUnits()).isEqualTo(charged);
+        assertThat(high(call, "saiman.cost.usd_micros")).isEqualTo(Long.toString(charged));
+    }
 }
