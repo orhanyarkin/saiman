@@ -3,6 +3,7 @@ package io.github.orhanyarkin.x402.client;
 import io.github.orhanyarkin.x402.core.AssetAmount;
 import io.github.orhanyarkin.x402.core.Eip3009Authorization;
 import io.github.orhanyarkin.x402.core.ExactEvmPayload;
+import io.github.orhanyarkin.x402.core.PaymentFlow;
 import io.github.orhanyarkin.x402.core.PaymentPayload;
 import io.github.orhanyarkin.x402.core.PaymentRequired;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
@@ -346,11 +347,26 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
                 Eip3009TypedData.randomNonce());
     }
 
+    /**
+     * The first acceptable offer, preferring the {@code authorization} flow (spec section 6.1: a
+     * client SHOULD prefer it, since nothing is settled unless the resource is served): an {@code
+     * upfront} offer is chosen only when no acceptable {@code authorization} offer exists. The commit
+     * rule does not depend on the flow: a non-2xx answer after paying is ambiguous either way.
+     */
     private PaymentRequirements selectOffer(List<PaymentRequirements> accepts) {
+        PaymentRequirements upfront = null;
         for (PaymentRequirements offer : accepts) {
             if (isAcceptable(offer)) {
-                return offer;
+                if (PaymentFlow.of(offer) == PaymentFlow.AUTHORIZATION) {
+                    return offer;
+                }
+                if (upfront == null) {
+                    upfront = offer;
+                }
             }
+        }
+        if (upfront != null) {
+            return upfront;
         }
         throw new PaymentRejectedException(
                 "none of the server's payment offers is one this starter is configured to pay: check"

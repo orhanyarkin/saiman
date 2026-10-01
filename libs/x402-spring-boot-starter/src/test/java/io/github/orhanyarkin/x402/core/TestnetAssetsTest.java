@@ -140,7 +140,26 @@ class TestnetAssetsTest {
         assertThatThrownBy(() -> TestnetAssets.requireSupported(supported(Map.of(
                         "name", TestnetAssets.USDC_NAME,
                         "version", TestnetAssets.USDC_VERSION,
+                        "paymentFlow", "escrow"))))
+                .isInstanceOf(UnsupportedPaymentException.class);
+    }
+
+    @Test
+    void acceptsTheUpfrontPaymentFlowButNoUnknownOrNonStringFlow() {
+        assertThatCode(() -> TestnetAssets.requireSupported(supported(Map.of(
+                        "name", TestnetAssets.USDC_NAME,
+                        "version", TestnetAssets.USDC_VERSION,
                         "paymentFlow", "upfront"))))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> TestnetAssets.requireSupported(supported(Map.of(
+                        "name", TestnetAssets.USDC_NAME,
+                        "version", TestnetAssets.USDC_VERSION,
+                        "paymentFlow", "UPFRONT"))))
+                .isInstanceOf(UnsupportedPaymentException.class);
+        assertThatThrownBy(() -> TestnetAssets.requireSupported(supported(Map.of(
+                        "name", TestnetAssets.USDC_NAME,
+                        "version", TestnetAssets.USDC_VERSION,
+                        "paymentFlow", 1))))
                 .isInstanceOf(UnsupportedPaymentException.class);
     }
 

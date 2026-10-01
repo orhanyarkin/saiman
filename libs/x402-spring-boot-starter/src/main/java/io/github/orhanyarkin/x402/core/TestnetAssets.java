@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.x402.core;
 
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -36,9 +37,6 @@ public final class TestnetAssets {
     /** Default (and only supported) {@code extra.assetTransferMethod} for {@code exact} on EVM. */
     private static final String ASSET_TRANSFER_METHOD_EIP3009 = "eip3009";
 
-    /** Default (and only supported) {@code extra.paymentFlow} (section 6.1 of the spec). */
-    private static final String PAYMENT_FLOW_AUTHORIZATION = "authorization";
-
     private TestnetAssets() {}
 
     /**
@@ -46,8 +44,10 @@ public final class TestnetAssets {
      * {@code exact} scheme, {@link #NETWORK}, test USDC, EIP-712 domain {@code name}/{@code
      * version} matching {@link #USDC_NAME}/{@link #USDC_VERSION}, and -- if present at all --
      * {@code extra.assetTransferMethod} of {@code "eip3009"} and {@code extra.paymentFlow} of
-     * {@code "authorization"} (the protocol-reserved keys from spec section 6.1; both are
-     * optional and default to those values, so their absence is accepted). This is the one shared
+     * {@code "authorization"} or {@code "upfront"} ({@link PaymentFlow}; the protocol-reserved keys
+     * from spec section 6.1; both are optional and default to {@code eip3009}/{@code
+     * authorization}, so their absence is accepted, while {@code escrow} or any other value is
+     * not). This is the one shared
      * check the server and client sides of this starter both call: a payment offer/acceptance
      * that doesn't pass this is not one this starter can ever settle.
      *
@@ -83,10 +83,11 @@ public final class TestnetAssets {
             throw new UnsupportedPaymentException("unsupported extra.assetTransferMethod: this starter only supports "
                     + ASSET_TRANSFER_METHOD_EIP3009);
         }
-        String paymentFlow = requirements.extraString("paymentFlow");
-        if (paymentFlow != null && !PAYMENT_FLOW_AUTHORIZATION.equals(paymentFlow)) {
-            throw new UnsupportedPaymentException(
-                    "unsupported extra.paymentFlow: this starter only supports " + PAYMENT_FLOW_AUTHORIZATION);
+        Map<String, Object> extra = requirements.extra();
+        Object paymentFlow = extra == null ? null : extra.get(PaymentFlow.EXTRA_KEY);
+        if (paymentFlow != null && (!(paymentFlow instanceof String flow) || PaymentFlow.fromWireValue(flow) == null)) {
+            throw new UnsupportedPaymentException("unsupported extra.paymentFlow: this starter only supports "
+                    + PaymentFlow.AUTHORIZATION.wireValue() + " and " + PaymentFlow.UPFRONT.wireValue());
         }
     }
 }

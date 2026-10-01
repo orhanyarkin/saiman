@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.x402.sample;
 
+import io.github.orhanyarkin.x402.core.PaymentFlow;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
@@ -45,7 +46,7 @@ public class ConsoleBuyerApplication {
         List<String> commands = arguments.getNonOptionArgs();
         if (commands.isEmpty()) {
             System.err.println(
-                    "usage: buy --url=<url> [--method=GET|POST] [--json=<body> | --json-file=<path>] | replay --url=<url> | new-wallet | testnet-check");
+                    "usage: buy --url=<url> [--method=GET|POST] [--json=<body> | --json-file=<path>] | replay --url=<url> | new-wallet | testnet-check [--flow=authorization|upfront]");
             return 2;
         }
         String command = commands.get(0);
@@ -94,8 +95,15 @@ public class ConsoleBuyerApplication {
                             : 1;
                 case "replay" ->
                     context.getBean(ReplayCommand.class).run(requireUrl(arguments), System.out, System.err) ? 0 : 1;
-                case "testnet-check" ->
-                    context.getBean(TestnetCheckCommand.class).run(System.out, System.err) ? 0 : 1;
+                case "testnet-check" -> {
+                    String flowOption = optionOrDefault(arguments, "flow", "authorization");
+                    PaymentFlow flow = flowOption == null ? null : PaymentFlow.fromWireValue(flowOption);
+                    if (flow == null) {
+                        System.err.println("--flow must be authorization or upfront");
+                        yield 2;
+                    }
+                    yield context.getBean(TestnetCheckCommand.class).run(flow, System.out, System.err) ? 0 : 1;
+                }
                 default -> {
                     System.err.println("unknown command: " + command);
                     yield 2;
