@@ -31,7 +31,7 @@ saiman:
         region: us
       tier2:
         provider: openai
-        model: gpt-5-chat
+        model: gpt-5-chat # INVALID: OpenAI returned 404 in the M3 live run; tier2 is unused (synthesis runs on tier1) until the M6 evals pick a model
         max-completion-tokens: 6000
         allowed-data-classes: [public, internal]
         region: us
