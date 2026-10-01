@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
  * One listener per {@code payments.*} topic, consumer group {@code ledger}, record acknowledgement (the offset
  * commits after the record's database transaction did). Taking the raw {@link ConsumerRecord} keeps any message
  * converter out of the way: the String value is parsed strictly by {@link PaymentEventParser}. Exceptions go to
- * the container's error handler (bounded retries, then {@code <topic>.ledger-dlt}).
+ * the container's error handler, which classifies them ({@code messaging.RecordFailure}).
  */
 @Component
 public class PaymentEventListener {

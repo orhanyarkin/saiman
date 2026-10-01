@@ -9,10 +9,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.kafka.listener.ConsumerAwareRecordRecoverer;
 
 /**
- * The last step for a quarantined record (malformed or conflicting): publish it to the dead-letter topic and count
- * it in {@code saiman.ledger.dlt}. If even the dead-letter send fails (an oversized forged record, a missing DLT),
+ * The last step for a quarantined record: publish it to the dead-letter topic and count it in {@code
+ * saiman.ledger.dlt} with {@code outcome=published} (a deterministic failure, {@link RecordFailure}) or {@code
+ * outcome=exhausted} (an unclassified failure whose bounded retries ran out). If even the dead-letter send fails (an oversized forged record, a missing DLT),
  * the record is logged by coordinates only, counted with {@code outcome=failed} and skipped: a poison record must
- * advance the consumer, not loop forever. Transient failures never get here (the error handler retries them).
+ * advance the consumer, not loop forever. Transient failures never get here (the error handler retries them
+ * without limit).
  */
 final class QuarantineRecoverer implements ConsumerAwareRecordRecoverer {
 
@@ -34,7 +36,8 @@ final class QuarantineRecoverer implements ConsumerAwareRecordRecoverer {
         String outcome;
         try {
             delegate.accept(record, consumer, exception);
-            outcome = "published";
+            // Deterministic failures arrive on their first delivery; anything else only after its retries ran out.
+            outcome = RecordFailure.classify(exception) == RecordFailure.DETERMINISTIC ? "published" : "exhausted";
             log.warn(
                     "Quarantined {}-{}@{} to the dead-letter topic ({})",
                     record.topic(),
