@@ -2,6 +2,8 @@ package io.github.orhanyarkin.x402.server;
 
 import io.github.orhanyarkin.x402.core.PaymentPayload;
 import io.micrometer.observation.Observation;
+import java.util.List;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -29,6 +31,7 @@ final class X402PaymentAttempt {
 
     private final Observation observation;
     private final RequiresPaymentRegistry.Entry entry;
+    private final Map<String, List<String>> headerSnapshot;
 
     private boolean interceptorRan;
     private @Nullable PaymentPayload payload;
@@ -37,12 +40,17 @@ final class X402PaymentAttempt {
     private @Nullable String payer;
     private @Nullable String txHash;
     private boolean verified;
+    private boolean settleAttempted;
+    private @Nullable String paymentResponseHeader;
+    private boolean paidFailureReported;
     private volatile boolean workDone;
     private String outcome = "unknown";
 
-    X402PaymentAttempt(Observation observation, RequiresPaymentRegistry.Entry entry) {
+    X402PaymentAttempt(
+            Observation observation, RequiresPaymentRegistry.Entry entry, Map<String, List<String>> headerSnapshot) {
         this.observation = observation;
         this.entry = entry;
+        this.headerSnapshot = headerSnapshot;
     }
 
     Observation observation() {
@@ -51,6 +59,56 @@ final class X402PaymentAttempt {
 
     RequiresPaymentRegistry.Entry entry() {
         return entry;
+    }
+
+    /**
+     * The response headers present before dispatch (set by filters earlier in the chain, e.g.
+     * CORS), restored whenever the response is reset to write a payment answer.
+     */
+    Map<String, List<String>> headerSnapshot() {
+        return headerSnapshot;
+    }
+
+    /**
+     * Records that {@code /settle} was called for this attempt <em>before</em> the handler (the
+     * upfront flow), whatever its outcome. From then on the settlement filter must never release the
+     * nonce claim: either money moved, or the outcome is ambiguous.
+     */
+    void markSettleAttempted() {
+        this.settleAttempted = true;
+    }
+
+    boolean settleAttempted() {
+        return settleAttempted;
+    }
+
+    /**
+     * Records a successful settlement: the transaction hash and the encoded client-facing {@code
+     * PAYMENT-RESPONSE} header value.
+     */
+    void markSettled(String transaction, String encodedPaymentResponse) {
+        this.txHash = transaction;
+        this.paymentResponseHeader = encodedPaymentResponse;
+    }
+
+    /** Whether the payment has been settled successfully (only ever before the handler: upfront). */
+    boolean settled() {
+        return paymentResponseHeader != null;
+    }
+
+    /** Records that {@link X402PaidRequestFailedEvent} was published for this attempt (at most once). */
+    void markPaidFailureReported() {
+        this.paidFailureReported = true;
+    }
+
+    boolean paidFailureReported() {
+        return paidFailureReported;
+    }
+
+    /** The encoded {@code PAYMENT-RESPONSE} of a successful settlement, or {@code null}. */
+    @Nullable
+    String paymentResponseHeader() {
+        return paymentResponseHeader;
     }
 
     void markInterceptorRan() {

@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.x402.server;
 
+import io.github.orhanyarkin.x402.core.PaymentFlow;
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -50,4 +51,21 @@ public @interface RequiresPayment {
      * server accepts ({@code x402.server.max-timeout-seconds} + clock skew) fails startup.
      */
     int minWindowSeconds() default 0;
+
+    /**
+     * When the payment is settled relative to the handler (x402 v2 {@code extra.paymentFlow},
+     * ADR-0021).
+     *
+     * <p>{@link PaymentFlow#AUTHORIZATION} (the default): verify, run the handler, settle only after
+     * a 2xx. The offer on the wire carries no {@code paymentFlow} key at all.
+     *
+     * <p>{@link PaymentFlow#UPFRONT}: verify and settle <em>before</em> the handler runs; the offer
+     * carries {@code extra.paymentFlow: "upfront"}. A failed settle answers {@code 402} and the
+     * handler never runs. If the handler then answers 3xx/4xx/5xx or throws, the buyer receives that
+     * status (a {@code 500} Problem Details body for an exception) together with {@code
+     * PAYMENT-RESPONSE}, and an {@link X402PaidRequestFailedEvent} is published so the application
+     * can record what it owes. Use it for handlers that spend money before they know whether they
+     * can answer (e.g. an LLM call), so that no unpaid work is ever done.
+     */
+    PaymentFlow paymentFlow() default PaymentFlow.AUTHORIZATION;
 }

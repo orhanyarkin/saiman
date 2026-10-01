@@ -2,6 +2,7 @@ package io.github.orhanyarkin.x402.sample;
 
 import io.github.orhanyarkin.x402.core.Eip3009Authorization;
 import io.github.orhanyarkin.x402.core.ExactEvmPayload;
+import io.github.orhanyarkin.x402.core.PaymentFlow;
 import io.github.orhanyarkin.x402.core.PaymentPayload;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
@@ -52,12 +53,30 @@ final class TestnetCheckCommand {
     }
 
     boolean run(PrintStream out, PrintStream err) {
+        return run(PaymentFlow.AUTHORIZATION, out, err);
+    }
+
+    /**
+     * @param flow {@link PaymentFlow#AUTHORIZATION} sends the offer without {@code paymentFlow} (as
+     *     before); {@link PaymentFlow#UPFRONT} adds {@code extra.paymentFlow: "upfront"}, exactly as
+     *     an upfront {@code @RequiresPayment} handler offers it, to check the facilitator accepts it
+     */
+    boolean run(PaymentFlow flow, PrintStream out, PrintStream err) {
         PaymentSigner signer = signerProvider.getIfAvailable();
         if (signer == null) {
             err.println("no buyer key configured: set X402_BUYER_PRIVATE_KEY, or run `new-wallet` first");
             return false;
         }
 
+        Map<String, Object> extra = flow == PaymentFlow.AUTHORIZATION
+                ? Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION)
+                : Map.of(
+                        "name",
+                        TestnetAssets.USDC_NAME,
+                        "version",
+                        TestnetAssets.USDC_VERSION,
+                        PaymentFlow.EXTRA_KEY,
+                        flow.wireValue());
         PaymentRequirements requirements = new PaymentRequirements(
                 TestnetAssets.SCHEME_EXACT,
                 TestnetAssets.NETWORK,
@@ -65,7 +84,8 @@ final class TestnetCheckCommand {
                 TestnetAssets.USDC_ADDRESS,
                 signer.address(),
                 (int) VALIDITY_SECONDS,
-                Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION));
+                extra);
+        out.println("paymentFlow: " + flow.wireValue());
 
         Instant now = Instant.now();
         Eip3009Authorization authorization = new Eip3009Authorization(

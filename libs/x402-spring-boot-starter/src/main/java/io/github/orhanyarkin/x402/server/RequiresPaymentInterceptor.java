@@ -25,6 +25,7 @@ import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
@@ -41,9 +42,14 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * startup, so this only matters if something else on the request triggers async processing; either
  * way, payment was already checked on the original {@link DispatcherType#REQUEST} dispatch).
  *
- * <p>For a paid handler, this class alone decides whether the handler runs at all; it never settles
- * a payment itself (that only happens after the handler returns a 2xx, in {@link
- * X402SettlementFilter}), and it communicates its outcome to that filter through the {@link
+ * <p>For a paid handler, this class alone decides whether the handler runs at all. In the default
+ * {@link io.github.orhanyarkin.x402.core.PaymentFlow#AUTHORIZATION authorization} flow it never
+ * settles a payment itself (that only happens after the handler returns a 2xx, in {@link
+ * X402SettlementFilter}); for an {@link io.github.orhanyarkin.x402.core.PaymentFlow#UPFRONT upfront}
+ * handler it settles right after a successful {@code /verify}, and the handler runs only if that
+ * settle succeeded. Every check before that (offer, amount, window, signature, nonce claim, verify)
+ * is the same in both flows, so a refused request never reaches {@code /settle}. It communicates
+ * its outcome to that filter through the {@link
  * X402PaymentAttempt} request attribute the filter created before dispatching. The very first thing
  * this does once it finds that attribute is mark {@link X402PaymentAttempt#markInterceptorRan()} --
  * the filter's runtime backstop for the case this interceptor is somehow never invoked at all.
@@ -72,13 +78,20 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
     private final PaymentNonceStore nonceStore;
     private final X402ServerProperties properties;
     private final Clock clock;
+    private final PaymentSettler settler;
 
+    /**
+     * @param eventPublisher receives the {@link X402PaymentSettledEvent}/{@link
+     *     X402PaymentFailedEvent} of an {@link io.github.orhanyarkin.x402.core.PaymentFlow#UPFRONT
+     *     upfront} handler, which this interceptor settles itself before the handler runs
+     */
     public RequiresPaymentInterceptor(
             RequiresPaymentRegistry registry,
             X402Codec codec,
             FacilitatorClient facilitatorClient,
             PaymentNonceStore nonceStore,
             X402ServerProperties properties,
+            ApplicationEventPublisher eventPublisher,
             Clock clock) {
         this.registry = registry;
         this.codec = codec;
@@ -86,6 +99,7 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
         this.nonceStore = nonceStore;
         this.properties = properties;
         this.clock = clock;
+        this.settler = new PaymentSettler(facilitatorClient, codec, properties, eventPublisher, clock);
     }
 
     @Override
@@ -232,7 +246,15 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
         }
 
         attempt.markVerified(serverPayload, nonceKey, claimToken, authorization.from());
-        return true;
+        if (!entry.upfront()) {
+            return true;
+        }
+        // Upfront flow (ADR-0021): settle now, before the handler can spend anything. From here on
+        // the claim is never released (X402SettlementFilter checks settleAttempted() first): either
+        // the money moved, or the settle outcome is ambiguous. A failed settle has already written
+        // its 402 and published X402PaymentFailedEvent; the handler never runs.
+        attempt.markSettleAttempted();
+        return settler.settle(request, response, attempt);
     }
 
     /**

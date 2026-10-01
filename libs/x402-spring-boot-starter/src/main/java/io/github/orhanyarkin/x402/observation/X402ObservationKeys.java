@@ -19,7 +19,17 @@ public final class X402ObservationKeys {
     /** Low cardinality: token contract address. */
     public static final String ASSET = "x402.asset";
 
-    /** Low cardinality: how the payment attempt concluded, e.g. {@code "settled"}, {@code "replayed"}. */
+    /**
+     * Low cardinality: the handler's payment flow, {@code "authorization"} (settle after serving) or
+     * {@code "upfront"} (settle before serving).
+     */
+    public static final String PAYMENT_FLOW = "x402.payment_flow";
+
+    /**
+     * Low cardinality: how the payment attempt concluded, e.g. {@code "settled"}, {@code
+     * "replayed"}, or {@code "paid_not_served"} (upfront flow: settled, then the handler did not
+     * answer 2xx).
+     */
     public static final String OUTCOME = "x402.outcome";
 
     /** High cardinality: the payer's wallet address (public on chain). */

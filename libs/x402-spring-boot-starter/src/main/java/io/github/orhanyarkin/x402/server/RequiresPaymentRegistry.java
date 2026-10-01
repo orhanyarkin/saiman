@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.x402.server;
 
 import io.github.orhanyarkin.x402.core.AssetAmount;
+import io.github.orhanyarkin.x402.core.PaymentFlow;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
 import io.github.orhanyarkin.x402.facilitator.FacilitatorClient;
@@ -147,6 +148,18 @@ public final class RequiresPaymentRegistry implements SmartInitializingSingleton
         if (amount.atomicUnits() == 0) {
             throw new IllegalStateException("@RequiresPayment price must be greater than zero");
         }
+        PaymentFlow flow = annotation.paymentFlow();
+        // AUTHORIZATION is the spec default: its offer carries no paymentFlow key, exactly as before
+        // the upfront flow existed (byte-for-byte the same offer). UPFRONT must be announced (spec 6.1).
+        Map<String, Object> extra = flow == PaymentFlow.AUTHORIZATION
+                ? Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION)
+                : Map.of(
+                        "name",
+                        TestnetAssets.USDC_NAME,
+                        "version",
+                        TestnetAssets.USDC_VERSION,
+                        PaymentFlow.EXTRA_KEY,
+                        flow.wireValue());
         PaymentRequirements offer = new PaymentRequirements(
                 TestnetAssets.SCHEME_EXACT,
                 TestnetAssets.NETWORK,
@@ -154,14 +167,14 @@ public final class RequiresPaymentRegistry implements SmartInitializingSingleton
                 TestnetAssets.USDC_ADDRESS,
                 payTo,
                 properties.maxTimeoutSeconds(),
-                Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION));
+                extra);
         int minWindow = annotation.minWindowSeconds();
         if (minWindow < 0
                 || minWindow > properties.maxTimeoutSeconds() + RequiresPaymentInterceptor.CLOCK_SKEW.toSeconds()) {
             throw new IllegalStateException("@RequiresPayment minWindowSeconds must be between 0 and"
                     + " x402.server.max-timeout-seconds plus the clock skew allowance");
         }
-        return new Entry(offer, annotation.description(), minWindow);
+        return new Entry(offer, annotation.description(), minWindow, flow);
     }
 
     private String resolve(String value) {
@@ -280,8 +293,15 @@ public final class RequiresPaymentRegistry implements SmartInitializingSingleton
     }
 
     /**
-     * A resolved payment offer for one handler method, plus its human-readable description and the
-     * handler's own minimum authorization window in seconds ({@code 0} = starter default only).
+     * A resolved payment offer for one handler method, plus its human-readable description, the
+     * handler's own minimum authorization window in seconds ({@code 0} = starter default only) and
+     * when the payment is settled ({@link RequiresPayment#paymentFlow()}).
      */
-    record Entry(PaymentRequirements offer, String description, int minWindowSeconds) {}
+    record Entry(PaymentRequirements offer, String description, int minWindowSeconds, PaymentFlow paymentFlow) {
+
+        /** Whether this handler settles before it runs. */
+        boolean upfront() {
+            return paymentFlow == PaymentFlow.UPFRONT;
+        }
+    }
 }
