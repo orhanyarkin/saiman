@@ -313,6 +313,17 @@ class ReconciliationTests {
         assertThat(latest.status()).isEqualTo("COMPLETED");
         assertThat(latest.network()).isEqualTo("eip155:84532");
         assertThat(latest.safeBlock()).isEqualTo(FakeChain.SAFE.number());
+
+        // The run is over, but the previous manual start was less than min-manual-interval (30 s) ago.
+        post(RUNS)
+                .exchange()
+                .expectStatus()
+                .isEqualTo(429)
+                .expectHeader()
+                .exists("Retry-After")
+                .expectBody()
+                .jsonPath("$.status")
+                .isEqualTo(429);
     }
 
     @Test

@@ -61,6 +61,7 @@ saiman:
       grace-after-valid-before: 30m
       receipt-grace: 10m
       batch-size: 50
+      min-manual-interval: 30s
 
 server:
   port: 8082

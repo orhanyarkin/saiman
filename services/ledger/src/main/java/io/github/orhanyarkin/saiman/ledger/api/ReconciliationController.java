@@ -5,6 +5,7 @@ import io.github.orhanyarkin.saiman.ledger.reconciliation.ReconciliationReports;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.ReconciliationService;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -31,7 +32,10 @@ public class ReconciliationController {
         this.reports = reports;
     }
 
-    /** Starts a run in the background: 202 {@code {runId}}, or 409 if one is in progress. */
+    /**
+     * Starts a run in the background: 202 {@code {runId}}, 409 if one is in progress, 429 (with
+     * {@code Retry-After}) if the previous manual run started less than {@code min-manual-interval} ago.
+     */
     @PostMapping
     public ResponseEntity<?> start() {
         return service.start()
@@ -50,6 +54,15 @@ public class ReconciliationController {
     @GetMapping("/{id}")
     public ResponseEntity<ReconciliationReport> report(@PathVariable UUID id) {
         return ResponseEntity.of(reports.report(id));
+    }
+
+    @ExceptionHandler(ReconciliationService.TooSoonException.class)
+    ResponseEntity<ProblemDetail> tooSoon(ReconciliationService.TooSoonException e) {
+        long seconds = Math.max(1, (e.retryAfter().toMillis() + 999) / 1000);
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(seconds))
+                .body(ProblemDetail.forStatusAndDetail(
+                        HttpStatus.TOO_MANY_REQUESTS, "A reconciliation run was started recently; retry later"));
     }
 
     @ExceptionHandler(ReconciliationService.ChainNotConfiguredException.class)
