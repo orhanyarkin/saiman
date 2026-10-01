@@ -1,5 +1,8 @@
 package io.github.orhanyarkin.saiman.orchestrator.events;
 
+import io.github.orhanyarkin.saiman.shared.run.RunEvent;
+import java.io.IOException;
+import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -22,7 +25,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  * <ul>
  *   <li>{@code text/event-stream}: the live SSE stream. {@code id} = seq, {@code event} = type,
  *       {@code data} = the envelope; resumes after {@code Last-Event-ID}; a {@code :heartbeat}
- *       comment every {@code heartbeat}; ends after the terminal event.
+ *       comment every {@code heartbeat}; ends after the terminal event. A finished run is replayed
+ *       from the database without a live subscription (204 if nothing is left after {@code
+ *       Last-Event-ID}); a stream beyond the run's per-run limit replaces the run's oldest one; the
+ *       global limit answers 429.
  *   <li>{@code application/json}: the complete ordered event list, the same envelopes and
  *       timestamps as the stream (the run export {@code make capture-demo} and the static replay
  *       demo use, ADR-0004).
@@ -56,27 +62,42 @@ class RunEventController {
     }
 
     @GetMapping(path = "/api/v1/runs/{runId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    SseEmitter stream(
-            @PathVariable UUID runId,
-            @RequestHeader(name = "Last-Event-ID", required = false) @Nullable String lastId) {
+    ResponseEntity<SseEmitter> stream(
+            @PathVariable UUID runId, @RequestHeader(name = "Last-Event-ID", required = false) @Nullable String lastId)
+            throws IOException {
         int lastEventId = parseLastEventId(lastId);
         requireRun(runId);
+        if (isTerminal(runId)) {
+            return replayFinished(runId, lastEventId);
+        }
         SseEmitter emitter = new SseEmitter(properties.timeout().toMillis());
         RunEventStream stream =
                 new RunEventStream(runId, lastEventId, emitter, log, codec, this::isTerminal, properties.heartbeat());
         RunEventBus.Subscription subscription;
         try {
-            // Subscribe before the stream's replay reads the database (see RunEventStream).
-            subscription = bus.subscribe(runId, stream::offer);
+            // Subscribe before the stream's replay reads the database (see RunEventStream). A newer
+            // stream of the same run may evict this one when the run's slots are full.
+            subscription = bus.subscribe(runId, stream::offer, () -> {
+                stream.close();
+                emitter.complete();
+            });
         } catch (RunEventBus.TooManyStreamsException e) {
             throw problem(HttpStatus.TOO_MANY_REQUESTS, "too many event streams");
         }
+        // Every way a stream ends frees its slot at once (a disconnect surfaces as an error or as a
+        // failed heartbeat write, which completes the emitter).
         emitter.onCompletion(() -> {
             stream.close();
             subscription.close();
         });
-        emitter.onTimeout(stream::close);
-        emitter.onError(error -> stream.close());
+        emitter.onTimeout(() -> {
+            stream.close();
+            subscription.close();
+        });
+        emitter.onError(error -> {
+            stream.close();
+            subscription.close();
+        });
         Thread.ofVirtual().name("run-events-" + runId).start(() -> {
             try {
                 stream.run();
@@ -84,7 +105,28 @@ class RunEventController {
                 subscription.close();
             }
         });
-        return emitter;
+        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body(emitter);
+    }
+
+    /**
+     * A finished run needs no live stream and takes no slot: 204 if nothing is left after {@code
+     * Last-Event-ID} (an {@code EventSource} stops reconnecting on 204), else the remaining events
+     * from the database, then the stream completes.
+     */
+    private ResponseEntity<SseEmitter> replayFinished(UUID runId, int lastEventId) throws IOException {
+        List<RunEvent> remaining = log.readAfter(runId, lastEventId);
+        if (remaining.isEmpty()) {
+            return ResponseEntity.noContent().build();
+        }
+        SseEmitter emitter = new SseEmitter(properties.timeout().toMillis());
+        for (RunEvent event : remaining) {
+            emitter.send(SseEmitter.event()
+                    .id(Integer.toString(event.seq()))
+                    .name(event.type().name())
+                    .data(codec.encodeEnvelope(event)));
+        }
+        emitter.complete();
+        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body(emitter);
     }
 
     @GetMapping(path = "/api/v1/runs/{runId}/events", produces = MediaType.APPLICATION_JSON_VALUE)
