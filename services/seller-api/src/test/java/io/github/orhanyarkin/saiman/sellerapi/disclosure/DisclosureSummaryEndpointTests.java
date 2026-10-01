@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.TestcontainersConfiguration;
 import io.github.orhanyarkin.saiman.testsupport.RedisContainerConfiguration;
+import io.github.orhanyarkin.x402.core.PaymentFlow;
 import io.github.orhanyarkin.x402.core.PaymentPayload;
 import io.github.orhanyarkin.x402.core.PaymentRequired;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
@@ -100,7 +101,13 @@ class DisclosureSummaryEndpointTests {
                 TestnetAssets.USDC_ADDRESS,
                 PAY_TO,
                 60,
-                Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION));
+                Map.of(
+                        "name",
+                        TestnetAssets.USDC_NAME,
+                        "version",
+                        TestnetAssets.USDC_VERSION,
+                        PaymentFlow.EXTRA_KEY,
+                        PaymentFlow.UPFRONT.wireValue()));
     }
 
     @Test
@@ -173,7 +180,7 @@ class DisclosureSummaryEndpointTests {
     }
 
     @Test
-    void unknownTickerWithAValidPaymentReturns404AndIsNotCharged() {
+    void unknownTickerWithAValidPaymentReturns404AfterTheUpfrontSettlement() {
         PaymentPayload payload = PaymentPayloads.build(TestWallets.PAYER, offer());
 
         client.get()
@@ -181,9 +188,11 @@ class DisclosureSummaryEndpointTests {
                 .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, payload))
                 .exchange()
                 .expectStatus()
-                .isNotFound();
+                .isNotFound()
+                .expectHeader()
+                .exists(X402Headers.PAYMENT_RESPONSE);
 
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
     }
 
     @Test
@@ -203,7 +212,7 @@ class DisclosureSummaryEndpointTests {
     }
 
     @Test
-    void malformedTickerWithAValidPaymentReturns400AndIsNotCharged() {
+    void malformedTickerWithAValidPaymentReturns400AfterTheUpfrontSettlement() {
         PaymentPayload payload = PaymentPayloads.build(TestWallets.PAYER, offer());
 
         client.get()
@@ -211,8 +220,11 @@ class DisclosureSummaryEndpointTests {
                 .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, payload))
                 .exchange()
                 .expectStatus()
-                .isBadRequest();
+                .isBadRequest()
+                .expectHeader()
+                .exists(X402Headers.PAYMENT_RESPONSE);
 
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        // Method validation runs after the x402 interceptor, i.e. after the upfront settlement.
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
     }
 }

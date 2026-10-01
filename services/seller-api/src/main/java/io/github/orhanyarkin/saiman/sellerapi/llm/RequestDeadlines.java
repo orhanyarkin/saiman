@@ -10,7 +10,8 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * The time budget of one paid request whose handler works before settlement (ADR-0015).
+ * The time budget of one paid request whose handler works before settlement (ADR-0015), or after it
+ * (upfront flow, ADR-0021: the configured deadline alone).
  *
  * <p>The budget is {@code min(seller.llm.deadline, validBefore - now - settleMargin)}: the
  * configured deadline, cut short when the payer's authorization expires sooner than that. The
@@ -45,8 +46,16 @@ public class RequestDeadlines {
         this.clock = clock;
     }
 
-    /** The deadline for {@code request}, starting now. */
+    /**
+     * The deadline for {@code request}, starting now. A request whose payment already settled
+     * (upfront flow, ADR-0021) gets the configured deadline without the {@code validBefore} cut: the
+     * money has moved, so cutting the run short would only turn paid requests into 503s and credit
+     * notes.
+     */
     public Deadline forRequest(HttpServletRequest request) {
+        if (X402PaymentContext.settled(request)) {
+            return Deadline.after(configured);
+        }
         return Deadline.after(
                 budget(configured, settleMargin, X402PaymentContext.validBefore(request), clock.instant()));
     }

@@ -84,7 +84,8 @@ seller:
     retry-attempts: 2 # total attempts, i.e. at most one retry
     retry-wait: 200ms
     circuit-open-wait: 30s
-  # Model runs happen BEFORE x402 settlement, so their limits and time budget are explicit (F1, F2).
+  # Model runs have explicit limits and a time budget (F1, F2). Both LLM endpoints settle up front
+  # (ADR-0021): their runs skip the unsettled day budget and the validBefore deadline cut.
   llm:
     max-in-flight-per-payer: 2
     max-runs-per-payer-per-hour: 30

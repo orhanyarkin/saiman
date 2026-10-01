@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 
 import io.github.orhanyarkin.saiman.sellerapi.llm.LlmRunProperties;
 import io.github.orhanyarkin.saiman.sellerapi.llm.RequestDeadlines;
+import io.github.orhanyarkin.x402.core.PaymentFlow;
 import io.github.orhanyarkin.x402.server.RequiresPayment;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.Pattern;
@@ -15,10 +16,12 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>{@link RequiresPayment} makes {@code RequiresPaymentInterceptor} (from
  * {@code x402-spring-boot-starter}) reject any request without a valid, unused payment for {@code
- * seller.prices.disclosure-summary} atomic units before this method ever runs; {@code
- * X402SettlementFilter} settles the payment only after this method returns a 2xx. A malformed
- * ticker (this method never runs) or an unknown one ({@link TickerNotFoundException}, 404) is
- * therefore never charged.
+ * seller.prices.disclosure-summary} atomic units before this method ever runs. In the {@code
+ * upfront} flow (ADR-0021) it also settles the payment before this method runs, so a summary is
+ * never generated unpaid. A malformed ticker (400, method validation runs after the interceptor) or
+ * an unknown one ({@link TickerNotFoundException}, 404) is therefore paid and not served: the buyer
+ * gets the error with {@code PAYMENT-RESPONSE}, and the seller issues a credit note for the full
+ * amount ({@code CreditNoteRecorder}). Fixture mode uses the same flow.
  *
  * <p>The {@code @Pattern} constraint on {@code ticker} is validated by Spring MVC's built-in
  * handler-method validation (Spring Framework 6.1+): a constraint directly on an
@@ -45,7 +48,8 @@ class DisclosureSummaryController {
     @RequiresPayment(
             price = "${seller.prices.disclosure-summary}",
             description = "BIST public disclosure summary",
-            minWindowSeconds = LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS)
+            minWindowSeconds = LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS,
+            paymentFlow = PaymentFlow.UPFRONT)
     DisclosureSummaryResponse summary(
             @PathVariable @Pattern(regexp = TICKER_PATTERN) String ticker, HttpServletRequest http) {
         return service.summaryFor(ticker, deadlines.forRequest(http));

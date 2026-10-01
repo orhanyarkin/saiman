@@ -16,7 +16,7 @@ import org.springframework.test.context.TestPropertySource;
 class IngestOutageEndpointTests extends RagTestBase {
 
     @Test
-    void serverErrorIsRetriedThenReturns503WithoutSettling() {
+    void serverErrorIsRetriedThenReturns503AndIsCredited() {
         INGEST.failWith(500);
 
         getPaid("/v1/disclosures/THYAO/summary", "10000")
@@ -27,19 +27,21 @@ class IngestOutageEndpointTests extends RagTestBase {
 
         assertThat(INGEST.tickerCalls()).isEqualTo(2); // the ticker check fails first: no paid retrieval
         assertThat(INGEST.retrieveCalls()).isZero();
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertOneCreditNote(503);
         assertThat(router.routerRequests()).isZero();
     }
 
     @Test
-    void slowIngestTimesOutAndReturns503WithoutSettling() {
+    void slowIngestTimesOutAndReturns503AndIsCredited() {
         INGEST.delayResponses(1_500);
 
         getPaid("/v1/disclosures/THYAO/summary", "10000").expectStatus().isEqualTo(503);
 
         assertThat(INGEST.tickerCalls()).isEqualTo(2); // the ticker check fails first: no paid retrieval
         assertThat(INGEST.retrieveCalls()).isZero();
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertOneCreditNote(503);
     }
 
     @Test
@@ -51,7 +53,8 @@ class IngestOutageEndpointTests extends RagTestBase {
                 .isEqualTo(503);
 
         assertThat(INGEST.tickerCalls()).isEqualTo(1);
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertOneCreditNote(503);
         assertThat(router.routerRequests()).isZero();
     }
 }

@@ -94,7 +94,9 @@ class GroundingHardeningEndpointTests extends RagTestBase {
 
         assertThat(router.modelCalls()).isEqualTo(1);
         assertThat(statuses).containsOnly(502, 503);
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        // Upfront: every request settled before the handler, and every failure is credited.
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(5);
+        assertThat(creditNotes()).hasSize(5);
     }
 
     // ---- F6 ----
@@ -106,7 +108,8 @@ class GroundingHardeningEndpointTests extends RagTestBase {
         assertThat(INGEST.tickerCalls()).isEqualTo(1);
         assertThat(INGEST.retrieveCalls()).isZero();
         assertThat(router.routerRequests()).isZero();
-        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(1);
+        assertOneCreditNote(404);
     }
 
     // ---- F7 ----

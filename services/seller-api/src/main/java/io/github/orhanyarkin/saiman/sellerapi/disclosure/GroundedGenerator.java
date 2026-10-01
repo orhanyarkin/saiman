@@ -205,11 +205,12 @@ class GroundedGenerator {
      *     (fail closed)
      */
     <T> T withRunSlot(Supplier<T> work) {
-        String payer = X402PaymentContext.payer(currentRequest());
+        HttpServletRequest request = currentRequest();
+        String payer = X402PaymentContext.payer(request);
         if (payer == null) {
             throw new RunGuardUnavailableException();
         }
-        guard.tryStart(payer);
+        guard.tryStart(payer, X402PaymentContext.settled(request));
         try {
             return work.get();
         } finally {

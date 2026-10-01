@@ -20,11 +20,11 @@ import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 
 /**
- * Bounds the money-free model runs an attacker can cause. The LLM endpoints call the model
- * <em>before</em> the x402 payment settles (the starter serves only after the handler answers 2xx,
- * then settles), so a request that ends non-2xx has cost real money at the provider and paid
- * nothing. The starter keeps the nonce claim for such requests (no replay of one authorization);
- * this guard bounds what fresh authorizations can do:
+ * Bounds the model runs one payer, and unpaid traffic as a whole, can cause. Since ADR-0021 both
+ * LLM endpoints use the x402 {@code upfront} flow, so their runs start after settlement and are
+ * paid; the unsettled day budget below still protects any handler in the default flow, where the
+ * model runs <em>before</em> the payment settles and a non-2xx answer costs the provider call and
+ * pays nothing:
  *
  * <ul>
  *   <li>per payer: at most {@code maxInFlightPerPayer} runs at the same time and {@code
@@ -38,9 +38,10 @@ import org.springframework.web.context.request.RequestContextHolder;
  * concurrent requests and instances. All keys live under {@code seller:runs:}. When Redis is
  * unavailable the guard fails closed ({@link RunGuardUnavailableException}): no state, no model call.
  *
- * <p>Residual risk (documented, accepted for M2): an attacker with many funded wallets can still
- * use up the day's unsettled budget and make the LLM endpoints answer 429 until midnight UTC (an
- * availability problem, with spend bounded by the budget). The real fix is settle-before-serve.
+ * <p>The M2 residual risk (an attacker with many funded wallets using up the day's unsettled budget
+ * and making the LLM endpoints answer 429 until midnight UTC) is closed for both LLM endpoints by
+ * the upfront flow (ADR-0021): their runs are settled, so {@link #tryStart(String, boolean)} with
+ * {@code settled = true} neither counts them nor refuses them on the day budget.
  */
 @Component
 @ConditionalOnProperty(name = "seller.disclosures.source", havingValue = "rag")
@@ -64,21 +65,27 @@ public class UnsettledRunGuard {
 
     /**
      * KEYS: inflight, hourly zset, unsettled-day. ARGV: nowMillis, windowMillis, maxInFlight,
-     * maxPerHour, maxUnsettled, member, inflightTtl, hourTtl, dayTtl.
+     * maxPerHour, maxUnsettled, member, inflightTtl, hourTtl, dayTtl, counted ('1': the run is unsettled
+     * and counts against, and is checked against, the day budget; '0': already settled, skipped).
      */
     private static final RedisScript<Long> START = new DefaultRedisScript<>("""
             local inflight = tonumber(redis.call('GET', KEYS[1]) or '0')
             if inflight >= tonumber(ARGV[3]) then return 1 end
             redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', tonumber(ARGV[1]) - tonumber(ARGV[2]))
             if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[4]) then return 2 end
-            local unsettled = tonumber(redis.call('GET', KEYS[3]) or '0')
-            if unsettled >= tonumber(ARGV[5]) then return 3 end
+            local counted = ARGV[10] == '1'
+            if counted then
+              local unsettled = tonumber(redis.call('GET', KEYS[3]) or '0')
+              if unsettled >= tonumber(ARGV[5]) then return 3 end
+            end
             redis.call('INCR', KEYS[1])
             redis.call('EXPIRE', KEYS[1], ARGV[7])
             redis.call('ZADD', KEYS[2], ARGV[1], ARGV[6])
             redis.call('EXPIRE', KEYS[2], ARGV[8])
-            redis.call('INCR', KEYS[3])
-            redis.call('EXPIRE', KEYS[3], ARGV[9])
+            if counted then
+              redis.call('INCR', KEYS[3])
+              redis.call('EXPIRE', KEYS[3], ARGV[9])
+            end
             return 0
             """, Long.class);
 
@@ -102,14 +109,22 @@ public class UnsettledRunGuard {
         this.clock = clock;
     }
 
+    /** {@link #tryStart(String, boolean)} for a run whose payment has not settled yet. */
+    public void tryStart(String payer) {
+        tryStart(payer, false);
+    }
+
     /**
      * Reserves a model run for {@code payer}; call before ANY model call and pair it with {@link
      * #finish(String)} in a {@code finally} block.
      *
+     * @param settled whether the request's payment already settled ({@code
+     *     X402PaymentContext.settled}, upfront flow): such a run is paid, so it neither counts against
+     *     nor is refused by the unsettled day budget; the per-payer limits apply either way
      * @throws RunLimitExceededException if a limit is reached (nothing was reserved)
      * @throws RunGuardUnavailableException if the state store could not be reached (fail closed)
      */
-    public void tryStart(String payer) {
+    public void tryStart(String payer, boolean settled) {
         String normalised = payer.toLowerCase(Locale.ROOT);
         long now = clock.millis();
         Long verdict;
@@ -125,7 +140,8 @@ public class UnsettledRunGuard {
                     UUID.randomUUID().toString(),
                     Long.toString(INFLIGHT_KEY_TTL_SECONDS),
                     Long.toString(HOUR_KEY_TTL_SECONDS),
-                    Long.toString(DAY_KEY_TTL_SECONDS));
+                    Long.toString(DAY_KEY_TTL_SECONDS),
+                    settled ? "0" : "1");
         } catch (RuntimeException e) {
             log.error("run guard unavailable: {}", e.getClass().getSimpleName());
             throw new RunGuardUnavailableException();
@@ -142,7 +158,7 @@ public class UnsettledRunGuard {
             throw new RunLimitExceededException();
         }
         RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
-        if (attributes != null) {
+        if (attributes != null && !settled) {
             attributes.setAttribute(STARTED_ATTRIBUTE, true, RequestAttributes.SCOPE_REQUEST);
         }
     }
@@ -160,8 +176,8 @@ public class UnsettledRunGuard {
     /**
      * The payment of a request that started a run settled: that run is no longer "unsettled". The
      * event is published synchronously on the request thread, so the request attribute set by
-     * {@link #tryStart} is visible here; a settlement of a request that never started a run (a
-     * cache hit) changes nothing.
+     * {@link #tryStart} is visible here; a settlement of a request that never started an unsettled
+     * run (a cache hit, or an upfront request, settled before its run started) changes nothing.
      */
     @EventListener
     void onSettled(X402PaymentSettledEvent event) {

@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.sellerapi.disclosure;
 
 import io.github.orhanyarkin.saiman.sellerapi.llm.LlmRunProperties;
 import io.github.orhanyarkin.saiman.sellerapi.llm.RequestDeadlines;
+import io.github.orhanyarkin.x402.core.PaymentFlow;
 import io.github.orhanyarkin.x402.server.RequiresPayment;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -18,14 +19,15 @@ import org.springframework.web.bind.annotation.RestController;
  * mode: without a corpus and a model there is nothing to sell, so in fixture mode the path is a
  * plain 404 and is not even registered as a paid resource.
  *
- * <p>The model runs before settlement, so this endpoint asks the starter for a long enough
- * authorization window ({@link LlmRunProperties#MIN_AUTHORIZATION_WINDOW_SECONDS}) and answers
- * within a deadline derived from that authorization ({@link RequestDeadlines}); see {@code
- * UnsettledRunGuard} for the limits on unpaid runs.
+ * <p>The x402 {@code upfront} flow (ADR-0021): the starter verifies <em>and settles</em> the payment
+ * before this method runs, so no model run is ever unpaid. The endpoint still asks for a long
+ * authorization window ({@link LlmRunProperties#MIN_AUTHORIZATION_WINDOW_SECONDS}); once settled,
+ * the handler gets the full configured deadline ({@link RequestDeadlines}).
  *
  * <p>Every non-2xx outcome (400 bad ticker or question, 404 unknown ticker, 422 too few
- * citations, 502/503 model or retrieval trouble) is produced here or below, after the starter
- * verified the payment and before it would settle, so none of them is ever charged.
+ * citations, 429 per-payer limit, 502/503 model or retrieval trouble) is produced after the
+ * settlement: the buyer gets that status with {@code PAYMENT-RESPONSE}, and the seller issues a
+ * credit note for the full amount ({@code CreditNoteRecorder}).
  */
 @RestController
 @RequestMapping("/v1/disclosures")
@@ -46,7 +48,8 @@ class DisclosureQuestionController {
     @RequiresPayment(
             price = "${seller.prices.disclosure-answer}",
             description = "Cited answer to a question about a BIST company's public KAP disclosures",
-            minWindowSeconds = LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS)
+            minWindowSeconds = LlmRunProperties.MIN_AUTHORIZATION_WINDOW_SECONDS,
+            paymentFlow = PaymentFlow.UPFRONT)
     DisclosureAnswerResponse ask(
             @PathVariable @Pattern(regexp = TICKER_PATTERN) String ticker,
             @RequestBody @Valid DisclosureQuestionRequest request,

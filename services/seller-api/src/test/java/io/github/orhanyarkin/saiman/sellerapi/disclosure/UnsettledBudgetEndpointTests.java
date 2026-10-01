@@ -10,9 +10,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * F1(b): attacker-steerable failures that all end 422 after the model ran stop at the day's
- * unsettled-run budget (3 here) and later requests never reach the model. Own context: it needs a
- * small budget.
+ * ADR-0021 closes the ADR-0015 availability gap: under the upfront flow, attacker-steerable failures
+ * (422 after the model ran) are paid and credited, so they can no longer use up the day's
+ * unsettled-run budget (3 here) and lock honest buyers out until midnight UTC. Own context: it needs
+ * a small budget.
  */
 @TestPropertySource(properties = {"seller.llm.max-unsettled-per-day=3", "seller.llm.max-runs-per-payer-per-hour=100"})
 class UnsettledBudgetEndpointTests extends RagTestBase {
@@ -32,50 +33,21 @@ class UnsettledBudgetEndpointTests extends RagTestBase {
     }
 
     @Test
-    void freshAuthorizationsThatAllEnd422StopAtTheBudgetAndNeverReachTheModelAgain() {
+    void paidFailuresBeyondTheUnsettledBudgetAreCreditedAndNeverRefused() {
         router.replyWith(UNGROUNDED);
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 5; i++) {
             postPaid(URI, "20000", BODY).expectStatus().isEqualTo(422);
         }
-        assertThat(router.modelCalls()).isEqualTo(3);
-
-        for (int i = 0; i < 3; i++) {
-            postPaid(URI, "20000", BODY).expectStatus().isEqualTo(429);
-        }
-        assertThat(router.modelCalls()).isEqualTo(3);
-        assertThat(FACILITATOR.settleCallCount()).isZero();
-    }
-
-    @Test
-    void aSettledRunFreesItsSlotSoHonestTrafficKeepsFlowing() {
-        router.replyWith(UNGROUNDED);
-        postPaid(URI, "20000", BODY).expectStatus().isEqualTo(422);
-        postPaid(URI, "20000", BODY).expectStatus().isEqualTo(422);
+        assertThat(router.modelCalls()).isEqualTo(5);
+        assertThat(FACILITATOR.settleCallCount()).isEqualTo(5);
+        assertThat(creditNotes())
+                .hasSize(5)
+                .allSatisfy(note -> assertThat(note)
+                        .containsEntry("http_status", 422)
+                        .containsEntry("reason_code", "handler_client_error"));
 
         router.replyWith(GROUNDED);
-        for (int i = 0; i < 5; i++) {
-            postPaid(URI, "20000", BODY).expectStatus().isOk();
-        }
-        assertThat(FACILITATOR.settleCallCount()).isEqualTo(5);
-
-        // Two unpaid runs are still on the books, so one more unpaid run fits and the next does not.
-        router.replyWith(UNGROUNDED);
-        postPaid(URI, "20000", BODY).expectStatus().isEqualTo(422);
-        postPaid(URI, "20000", BODY).expectStatus().isEqualTo(429);
-    }
-
-    @Test
-    void theRefusalIsAFixedProblemDetailWithoutQuestionOrChunkText() {
-        router.replyWith(UNGROUNDED);
-        for (int i = 0; i < 3; i++) {
-            postPaid(URI, "20000", BODY).expectStatus().isEqualTo(422);
-        }
-        String body = postPaid(URI, "20000", BODY)
-                .expectStatus()
-                .isEqualTo(429)
-                .expectBody(String.class)
-                .returnResult()
-                .getResponseBody();
-        assertThat(body).contains("Too many answers requested right now").doesNotContain("board");
+        postPaid(URI, "20000", BODY).expectStatus().isOk();
+        assertThat(creditNotes()).hasSize(5);
     }
 }

@@ -192,21 +192,21 @@ class DisclosureQuestionEndpointTests extends RagTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"thyao", "TH", "TOOLONGX", "TH-YAO"})
-    void badTickerIs400AndNeverSettled(String ticker) {
+    void badTickerIs400AndCredited(String ticker) {
         assertRejected(postPaid("/v1/disclosures/" + ticker + "/questions", PRICE, BODY), 400);
         assertThat(router.routerRequests()).isZero();
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"{\"question\":\"ab\"}", "{\"question\":\"   \"}", "{}", "not json", "{\"question\":null}"})
-    void badQuestionIs400AndNeverSettled(String body) {
+    void badQuestionIs400AndCredited(String body) {
         assertRejected(postPaid(URI, PRICE, body), 400);
         assertThat(INGEST.retrieveCalls()).isZero();
         assertThat(router.routerRequests()).isZero();
     }
 
     @Test
-    void tooLongQuestionIs400AndNeverSettled() {
+    void tooLongQuestionIs400AndCredited() {
         assertRejected(postPaid(URI, PRICE, "{\"question\":\"" + "x".repeat(501) + "\"}"), 400);
     }
 
@@ -219,14 +219,14 @@ class DisclosureQuestionEndpointTests extends RagTestBase {
     }
 
     @Test
-    void tickerNotInTheCorpusIs404AndNeverSettled() {
+    void tickerNotInTheCorpusIs404AndCredited() {
         assertRejected(postPaid("/v1/disclosures/ZZZZZZ/questions", PRICE, BODY), 404);
         assertThat(INGEST.retrieveCalls()).isZero();
         assertThat(router.routerRequests()).isZero();
     }
 
     @Test
-    void modelCitingOnlyIdsOutsideTheRetrievedSetIs422AndNeverSettled() {
+    void modelCitingOnlyIdsOutsideTheRetrievedSetIs422AndCredited() {
         router.replyWith(reply("Answer.", "kap:1:0001", "kap:2:0002"));
         assertRejected(postPaid(URI, PRICE, BODY), 422);
     }
@@ -245,32 +245,32 @@ class DisclosureQuestionEndpointTests extends RagTestBase {
     }
 
     @Test
-    void ingestServerErrorIs503AndNeverSettled() {
+    void ingestServerErrorIs503AndCredited() {
         INGEST.failWith(500);
         assertRejected(postPaid(URI, PRICE, BODY), 503);
         assertThat(router.routerRequests()).isZero();
     }
 
     @Test
-    void dailyCapExceededIs503AndNeverSettled() {
+    void dailyCapExceededIs503AndCredited() {
         router.failWith(new DailyCapExceededException("cap reached " + KEY_MARKER));
         assertRejected(postPaid(URI, PRICE, BODY), 503);
     }
 
     @Test
-    void dataClassViolationIs503AndNeverSettled() {
+    void dataClassViolationIs503AndCredited() {
         router.failWith(new DataClassViolationException("policy " + KEY_MARKER));
         assertRejected(postPaid(URI, PRICE, BODY), 503);
     }
 
     @Test
-    void requestNotSentIs503AndNeverSettled() {
+    void requestNotSentIs503AndCredited() {
         router.failWith(new RequestNotSentException("no key configured " + KEY_MARKER));
         assertRejected(postPaid(URI, PRICE, BODY), 503);
     }
 
     @Test
-    void anyOtherRouterFailureIs503AndNeverSettled() {
+    void anyOtherRouterFailureIs503AndCredited() {
         router.failWith(new IllegalStateException("redis down " + KEY_MARKER));
         assertRejected(postPaid(URI, PRICE, BODY), 503);
     }
@@ -287,7 +287,7 @@ class DisclosureQuestionEndpointTests extends RagTestBase {
                 "{\"answer\":{\"a\":1},\"citedChunkIds\":[]}",
                 "[\"answer\"]",
             })
-    void malformedModelOutputIs502AndNeverSettled(String raw) {
+    void malformedModelOutputIs502AndCredited(String raw) {
         router.replyWith(raw);
         assertRejected(postPaid(URI, PRICE, BODY), 502);
     }
@@ -298,15 +298,21 @@ class DisclosureQuestionEndpointTests extends RagTestBase {
         postPaid(URI, PRICE, BODY).expectStatus().isOk();
     }
 
-    /** Non-2xx, never settled, and nothing sensitive echoed back. */
+    /**
+     * Non-2xx after the upfront settlement (ADR-0021): settled once, the buyer learns it from {@code
+     * PAYMENT-RESPONSE}, one credit note, and nothing sensitive echoed back.
+     */
     private void assertRejected(
             org.springframework.test.web.servlet.client.RestTestClient.ResponseSpec response, int status) {
-        String body = response.expectStatus()
+        String body = response.expectHeader()
+                .exists(X402Headers.PAYMENT_RESPONSE)
+                .expectStatus()
                 .isEqualTo(status)
                 .expectBody(String.class)
                 .returnResult()
                 .getResponseBody();
-        assertThat(FACILITATOR.settleCallCount()).as("settle calls").isZero();
+        assertThat(FACILITATOR.settleCallCount()).as("settle calls").isEqualTo(1);
+        assertOneCreditNote(status);
         assertThat(body)
                 .doesNotContain("SECRETQUESTIONMARKER")
                 .doesNotContain("CHUNKTEXTMARKER")

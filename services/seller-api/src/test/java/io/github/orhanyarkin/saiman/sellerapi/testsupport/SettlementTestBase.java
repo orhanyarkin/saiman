@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.sellerapi.testsupport;
 
 import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
 import io.github.orhanyarkin.saiman.testsupport.RedisContainerConfiguration;
+import io.github.orhanyarkin.x402.core.PaymentFlow;
 import io.github.orhanyarkin.x402.core.PaymentPayload;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
@@ -62,6 +63,7 @@ public abstract class SettlementTestBase {
         FACILITATOR.resetCallCounts();
         jdbc.sql("DELETE FROM event_publication").update();
         jdbc.sql("DELETE FROM settlement").update();
+        jdbc.sql("DELETE FROM credit_note").update();
     }
 
     protected final PaymentRequirements offer() {
@@ -72,7 +74,13 @@ public abstract class SettlementTestBase {
                 TestnetAssets.USDC_ADDRESS,
                 PAY_TO,
                 60,
-                Map.of("name", TestnetAssets.USDC_NAME, "version", TestnetAssets.USDC_VERSION));
+                Map.of(
+                        "name",
+                        TestnetAssets.USDC_NAME,
+                        "version",
+                        TestnetAssets.USDC_VERSION,
+                        PaymentFlow.EXTRA_KEY,
+                        PaymentFlow.UPFRONT.wireValue()));
     }
 
     protected final PaymentPayload newPayload() {
@@ -84,6 +92,10 @@ public abstract class SettlementTestBase {
                 .uri("/v1/disclosures/THYAO/summary")
                 .header(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, payload))
                 .exchange();
+    }
+
+    protected final long creditNoteRows() {
+        return jdbc.sql("SELECT count(*) FROM credit_note").query(Long.class).single();
     }
 
     protected final long settlementRows() {
