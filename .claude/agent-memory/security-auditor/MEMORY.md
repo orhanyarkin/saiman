@@ -4,3 +4,4 @@
 - [M2 close audit](m2-close-audit.md) — router OpenAiChatOptions passthrough (no merge in Spring AI 2.0.1), MKK URL unpinned, guard after retrieval (2026-09-30)
 - [M3 T3 spend-control audit](m3-t3-spend-control-audit.md) — /api guard bypass via ;/%61 (confirmed, also ingest), ".." in SellerEndpoint, trigger/role gaps (2026-09-30)
 - [M3 T4 agents audit](m3-t4-agents-audit.md) — no Crit/High; T3 guard + ".." closed; Unicode invisibles, link-scrub gaps, orphan approvals, test gaps (2026-10-01)
+- [M3 close audit](m3-close-audit.md) — honest-path HELD triggers: 35s buyer timeout, seller 30/h cap, shared router day key, clock skew (2026-10-01)
