@@ -13,7 +13,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *
  * <p>The URL is validated on construction so a bad value fails startup before any request is made: https only
  * (plain http only for a loopback host, which is how tests reach a local stub), host on the exact allowlist, no
- * user info, no IP literal (loopback excepted). There is deliberately no property that disables these checks.
+ * user info, no query or fragment (a key there would leak into logs and traces), no IP literal (loopback
+ * excepted). There is deliberately no property that disables these checks.
  *
  * @param rpcUrl the JSON-RPC endpoint, e.g. {@code https://sepolia.base.org}
  * @param allowedHosts exact host names the URL may point to
@@ -97,6 +98,9 @@ public record ChainProperties(
         }
         if (uri.getRawUserInfo() != null) {
             throw new IllegalArgumentException("saiman.chain.rpc-url must not carry user info");
+        }
+        if (uri.getRawQuery() != null || uri.getRawFragment() != null) {
+            throw new IllegalArgumentException("saiman.chain.rpc-url must not carry a query or fragment");
         }
         String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
         if (host.isEmpty()) {
