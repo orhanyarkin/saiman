@@ -106,6 +106,43 @@ class RunCostTracingTests extends AgentRunTestSupport {
         });
     }
 
+    @Test
+    void aFailedRunsRootSpanCarriesItsFailureCodeAndTheDatabaseCostTotals() {
+        // the researcher's answer reports 130000 output tokens: over the 150000 micro-USD scope
+        model.then(
+                Reply.text(PLAN),
+                Reply.toolCall(SUMMARY, summaryArgs("THYAO")),
+                Reply.text("notes kap:1001:0001").withUsage(1_000, 130_000),
+                Reply.text(RISKS),
+                Reply.text(synthesis("kap:1001:0001")));
+        Map<String, Object> started = startRun("What did THYAO disclose about fuel costs?", null);
+        UUID runId = runId(started);
+        List<RunEvent> events = awaitTerminal(runId);
+
+        RunSummary summary = summary(runId);
+        assertThat(summary.failureCode()).isEqualTo("LLM_BUDGET_EXHAUSTED");
+        RunCost cost = ((RunEventData.RunFailed) events.getLast().data()).costSoFar();
+        assertThat(cost).isEqualTo(summary.cost());
+        assertThat(cost.paymentsUsdc()).isEqualTo(Money.usdc(PRICE));
+        assertThat(cost.llmUsd().atomicUnits()).isPositive();
+
+        String traceId = (String) started.get("traceId");
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            SpanData root = SPANS.getFinishedSpanItems().stream()
+                    .filter(s -> s.getTraceId().equals(traceId))
+                    .filter(s -> runId.toString().equals(s.getAttributes().get(key("saiman.run.id"))))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("no saiman.run span"));
+            assertThat(root.getAttributes().get(key("saiman.run.failure_code"))).isEqualTo("LLM_BUDGET_EXHAUSTED");
+            assertThat(root.getAttributes().get(key("saiman.run.cost.payments_usdc_atomic")))
+                    .isEqualTo(Long.toString(cost.paymentsUsdc().atomicUnits()));
+            assertThat(root.getAttributes().get(key("saiman.run.cost.llm_usd_micros")))
+                    .isEqualTo(Long.toString(cost.llmUsd().atomicUnits()));
+            assertThat(root.getAttributes().get(key("saiman.run.cost.total_usd_micros")))
+                    .isEqualTo(Long.toString(cost.totalUsd().atomicUnits()));
+        });
+    }
+
     private static List<String> ancestors(SpanData span, Map<String, SpanData> byId) {
         List<String> chain = new java.util.ArrayList<>();
         SpanData current = span;

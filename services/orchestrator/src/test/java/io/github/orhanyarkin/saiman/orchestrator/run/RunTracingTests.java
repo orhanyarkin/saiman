@@ -75,4 +75,26 @@ class RunTracingTests extends RunTestSupport {
                     .allSatisfy(p -> assertThat(p.getParentSpanId()).isEqualTo(root.getSpanId()));
         });
     }
+
+    @Test
+    void aThrowingPipelineMarksTheRootSpanAsAnErrorWithoutTheMessage() {
+        pipeline.script(ctx -> {
+            throw new IllegalArgumentException("SECRET model text");
+        });
+        Map<String, Object> started = startRun("What did THYAO disclose?", null);
+        UUID runId = runId(started);
+        awaitTerminal(runId);
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            SpanData root = SPANS.getFinishedSpanItems().stream()
+                    .filter(s -> runId.toString().equals(s.getAttributes().get(key("saiman.run.id"))))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("no saiman.run span"));
+            assertThat(root.getStatus().getStatusCode()).isEqualTo(io.opentelemetry.api.trace.StatusCode.ERROR);
+            assertThat(root.getAttributes().get(key("saiman.run.failure_code"))).isEqualTo("INTERNAL_ERROR");
+            assertThat(root.getAttributes().get(key("saiman.run.cost.total_usd_micros")))
+                    .isEqualTo("0");
+            assertThat(root.toString()).doesNotContain("SECRET");
+        });
+    }
 }
