@@ -33,7 +33,7 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <ul>
  *   <li><b>Outbox:</b> {@link EntryPosted} is externalized by Spring Modulith to {@code ledger.entry-posted.v1}
- *       and {@link ReconciliationMismatch} to {@code ledger.reconciliation-mismatch.v1}, key = payment id. The record lives in {@code libs/shared}, which does not depend on Modulith, so the
+ *       and {@link ReconciliationMismatch} to {@code ledger.reconciliation-mismatch.v1}, key = payment id. The records live in {@code libs/shared}, which does not depend on Modulith, so the
  *       routing is configured here instead of with {@code @Externalized} on the type.
  *   <li><b>Converter:</b> a String JSON converter replaces Modulith's default byte-array one, so the template keeps
  *       String serializers (shared with the dead-letter publisher), and it writes no {@code __TypeId__} header.
