@@ -82,6 +82,27 @@ class PaymentContractTests {
     }
 
     @Test
+    void aCreditNoteIsTheSellersWithATransactionAStatusAndABoundedReason() {
+        String tx = "0x" + "a".repeat(64);
+        assertThat(creditNote(Book.SELLER, tx, 503, "handler_server_error").httpStatus())
+                .isEqualTo(503);
+        assertThatThrownBy(() -> creditNote(Book.BUYER, tx, 503, "handler_server_error"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> creditNote(Book.SELLER, "0x1234", 503, "handler_server_error"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> creditNote(Book.SELLER, tx, 200, "handler_server_error"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> creditNote(Book.SELLER, tx, 600, "handler_server_error"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> creditNote(Book.SELLER, tx, 503, "Handler said: <b>no</b>"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private static CreditNoteIssued creditNote(Book book, String txHash, int status, String reason) {
+        return new CreditNoteIssued(META, auth(), Money.usdc(20_000), PAYER, "r", book, txHash, status, reason);
+    }
+
+    @Test
     void amountsMustBePositiveUsdc() {
         assertThatThrownBy(() -> new PaymentAuthorized(
                         META, auth(), Money.usdMicros(10), PAYER, "r", UUID.randomUUID(), UUID.randomUUID()))

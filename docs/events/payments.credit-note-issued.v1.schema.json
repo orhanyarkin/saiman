@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "payments.credit-note-issued.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "meta",
+    "authorization",
+    "amount",
+    "payTo",
+    "resource",
+    "book",
+    "txHash",
+    "httpStatus",
+    "reasonCode"
+  ],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": [
+        "eventId",
+        "occurredAt",
+        "producer",
+        "correlationId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]{1,64}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "producer": {
+          "type": "string",
+          "pattern": "^[a-z][a-z-]{1,31}$"
+        },
+        "correlationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9:_-]{0,64}$"
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "required": [
+        "network",
+        "asset",
+        "payer",
+        "nonce",
+        "validBefore"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "network": {
+          "const": "eip155:84532"
+        },
+        "asset": {
+          "const": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+        },
+        "payer": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{64}$"
+        },
+        "validBefore": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4102444799
+        }
+      }
+    },
+    "amount": {
+      "type": "object",
+      "required": [
+        "atomicUnits",
+        "asset",
+        "decimals"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "atomicUnits": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "asset": {
+          "const": "USDC"
+        },
+        "decimals": {
+          "const": 6
+        }
+      }
+    },
+    "payTo": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    },
+    "resource": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "book": {
+      "const": "SELLER"
+    },
+    "txHash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "httpStatus": {
+      "type": "integer",
+      "minimum": 300,
+      "maximum": 599
+    },
+    "reasonCode": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]{1,64}$"
+    }
+  }
+}

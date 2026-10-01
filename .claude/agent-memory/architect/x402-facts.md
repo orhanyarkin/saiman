@@ -13,3 +13,9 @@ Verified during the M1 design pass (2026-09-28):
 - Mogami x402-spring-boot-starter: Apache-2.0, v1+v2, Spring Boot 3.5, tied to Mogami libs; not adopted.
 - web3j `org.web3j:crypto` 6.0.0 is on Jackson 3. Resilience4j 2.4.0 core modules.
 - Circle faucet: 20 USDC / 2 h, no account; buyer needs no ETH (EIP-3009 is gasless for the payer).
+
+Verified during the M4b design pass (2026-10-01):
+- Spec v2 §6.1 defines three payment flows: `authorization` (default, verify→resource→settle), `upfront` (settle→resource) and `escrow` (settle→resource→settle). A non-default flow MUST appear as `accepts[].extra.paymentFlow`; clients MUST NOT pay for an unknown flow and SHOULD prefer `authorization`. The spec says nothing about refunds. The `exact` EVM scheme doc does not mention flows.
+- x402.org `/verify` ignores `extra.paymentFlow`: absent, `"upfront"` and `"bogus"` all reached the on-chain balance simulation (probe with an unfunded throwaway key, 2026-10-01).
+- Prior art: geekinasuit/obolus PR #82 normalises `extra.paymentFlow="upfront"`.
+- M4b decisions (human): upfront on both seller RAG endpoints; full credit note for any non-2xx after settlement; new ADR-0021 with pointers in 0008/0015/0017; CREDITED seller state, CREDIT_NOTE = Dr revenue:credit-notes / Cr liability:customer-credits; new topic payments.credit-note-issued.v1.

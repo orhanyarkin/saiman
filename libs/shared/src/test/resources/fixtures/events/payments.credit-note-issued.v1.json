@@ -1,0 +1,26 @@
+{
+  "meta": {
+    "eventId": "3e7a9c41-5b2d-4f8e-a1c6-9d0e2f4b6a83",
+    "occurredAt": "2026-10-01T10:00:05Z",
+    "producer": "seller-api",
+    "correlationId": "eip155:84532:0x036cbd53842c5426634e7929541ec2318f3dcf7e"
+  },
+  "authorization": {
+    "network": "eip155:84532",
+    "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "payer": "0xdD542d774e0c0E546d76721396C69e113A644795",
+    "nonce": "0x5f1c8a2b9d3e4f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8",
+    "validBefore": 1790000060
+  },
+  "amount": {
+    "atomicUnits": 20000,
+    "asset": "USDC",
+    "decimals": 6
+  },
+  "payTo": "0x1111111111111111111111111111111111111111",
+  "resource": "http://seller-api:8081/v1/disclosures/ASELS/questions",
+  "book": "SELLER",
+  "txHash": "0x68592d03c4a7b1e9f2d6c8a0b3e5f7091a2c4e6b8d0f1a3c5e7b9d1f3a5c7e9b",
+  "httpStatus": 503,
+  "reasonCode": "handler_server_error"
+}

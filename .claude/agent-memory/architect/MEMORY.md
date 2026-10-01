@@ -1,5 +1,5 @@
 - [Toolchain gotchas](toolchain-gotchas.md) — palantir>=2.71 on JDK25, TS 5.9 pin, jqwik excluded, no Spring AI starters early
 - [Boot 4 observability](boot4-observability.md) — OTLP property names, @AutoConfigureTracing, datasource-micrometer for JDBC spans
 - [Build conventions](build-conventions.md) — build-logic included build, platform() BOM, bootBuildImage, native arm64 runners
-- [x402 facts](x402-facts.md) — SDK is v1-only SNAPSHOT, v2 headers, x402.org facilitator, Base Sepolia USDC domain, Mogami
+- [x402 facts](x402-facts.md) — SDK v1-only, v2 headers, facilitator, USDC domain, Mogami; §6.1 payment flows + facilitator ignores paymentFlow; M4b decisions
 - [M4 chain and eventing facts](m4-chain-eventing-facts.md) — RPC limits, safe/finalized lag, EIP-3009 cancel, Modulith scope/ordering, PBT landscape

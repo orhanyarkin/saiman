@@ -6,6 +6,7 @@ public final class PaymentTopics {
     public static final String AUTHORIZED = "payments.authorized.v1";
     public static final String SETTLED = "payments.settled.v1";
     public static final String FAILED = "payments.failed.v1";
+    public static final String CREDIT_NOTE_ISSUED = "payments.credit-note-issued.v1";
 
     private PaymentTopics() {}
 }
