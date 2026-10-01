@@ -14,3 +14,8 @@ Status: Accepted (2026-10-01). Amends ADR-0013 (HELD transitions).
 + HELD reservations stop blocking budgets once the chain answers; the M3 known gap closes.
 + Two independent paths (buyer resolver, ledger audit) must agree, which is what makes a corrupted record visible.
 − Depends on a public, rate-limited testnet RPC without an SLA; CI stays hermetic (stubbed RPC), live checks are tagged `testnet`.
+
+## Amendment (2026-10-01, M4 audits)
+- HELD intents without a nonce are released locally (`resolved_by = LOCAL`), no chain read and no event.
+- The ledger dead-letters only deterministic failures (malformed or conflicting facts); transient errors are retried indefinitely. A conflicting fact also writes a `CONFLICTING_FACT` mismatch row (database and report only; it is not published, because `ledger.reconciliation-mismatch.v1` requires a reconciliation run id).
+- Forged-input hardening (Redpanda is unauthenticated until M6): bounded validBefore/amount/asset, unique (payer, nonce), fair due batching, receipts judged one by one (a bogus hash cannot freeze a payment), BOOKS_OPEN when the chain is final but the books are open, Transfer/AuthorizationUsed paired by log index.

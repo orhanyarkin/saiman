@@ -16,4 +16,5 @@ Common rules (ADR-0016):
 - Money is `{"atomicUnits": <JSON integer ≤ 2^53-1>, "asset", "decimals"}`; no floats, no decimal strings.
 - Events never carry a signature, an idempotency key or free text from a facilitator (failure reasons are `[a-z0-9_]{1,64}` codes). `payments.*` carry the payer and nonce (public on chain once used); `ledger.*` do not carry the nonce.
 - Delivery order is not guaranteed (Spring Modulith externalization); consumers are order-independent.
+- `CONFLICTING_FACT` mismatches are recorded in the ledger database and report only; `ledger.reconciliation-mismatch.v1` carries mismatches found by a reconciliation run.
 - Breaking changes create a new `.vN` topic.
