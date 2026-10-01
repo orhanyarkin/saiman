@@ -24,6 +24,7 @@ import java.util.SplittableRandom;
 import java.util.UUID;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -213,6 +214,75 @@ class PaymentEventsKafkaTests {
         assertThat(kinds(payment.key())).containsExactly("ENCUMBER");
     }
 
+    /**
+     * A non-deterministic failure (here: the inbox insert raises, as a dead or failing database would) is retried
+     * with back-off, never dead-lettered; once the database recovers, the same record is booked.
+     */
+    @Test
+    void transientDatabaseFailureIsRetriedNotDeadLetteredAndBooksAfterRecovery() throws Exception {
+        TestPayment payment = TestPayment.random(new SplittableRandom(), 20_000);
+        PaymentAuthorized authorized = payment.authorized();
+        String value = json.writeValueAsString(authorized);
+        String suffix = UUID.randomUUID().toString().replace("-", "");
+        jdbc.sql("""
+                        CREATE FUNCTION outage_%1$s() RETURNS trigger LANGUAGE plpgsql AS $$
+                        BEGIN
+                            IF NEW.event_id = '%2$s' THEN
+                                RAISE EXCEPTION 'simulated outage' USING ERRCODE = '08006';
+                            END IF;
+                            RETURN NEW;
+                        END $$
+                        """.formatted(suffix, authorized.meta().eventId())).update();
+        jdbc.sql("CREATE TRIGGER outage_%1$s BEFORE INSERT ON inbox FOR EACH ROW EXECUTE FUNCTION outage_%1$s()"
+                        .formatted(suffix))
+                .update();
+        try {
+            send(PaymentTopics.AUTHORIZED, payment.key(), value);
+            await().pollDelay(Duration.ofSeconds(4))
+                    .atMost(TIMEOUT)
+                    .untilAsserted(() -> assertThat(kinds(payment.key())).isEmpty());
+        } finally {
+            jdbc.sql("DROP TRIGGER outage_%1$s ON inbox".formatted(suffix)).update();
+            jdbc.sql("DROP FUNCTION outage_%1$s()".formatted(suffix)).update();
+        }
+
+        await().atMost(TIMEOUT)
+                .untilAsserted(() -> assertThat(kinds(payment.key())).containsExactly("ENCUMBER"));
+        assertThat(valuesOn(PaymentTopics.AUTHORIZED + LedgerMessagingConfiguration.DLT_SUFFIX, Duration.ofSeconds(3)))
+                .doesNotContain(value);
+    }
+
+    /**
+     * A huge junk record with junk headers is quarantined with bounded headers (no source headers, no stack trace)
+     * and the consumer moves on to the next record.
+     */
+    @Test
+    void oversizedJunkRecordIsQuarantinedWithBoundedHeadersAndTheConsumerAdvances() throws Exception {
+        String junk = "{\"junk\":\"" + UUID.randomUUID() + "x".repeat(600_000) + "\"}";
+        var record = new ProducerRecord<String, String>(PaymentTopics.AUTHORIZED, "junk", junk);
+        for (int i = 0; i < 64; i++) {
+            record.headers().add("junk-" + i, new byte[4096]);
+        }
+        kafka.send(record).get();
+        TestPayment next = TestPayment.random(new SplittableRandom(), 20_000);
+        send(PaymentTopics.AUTHORIZED, next.key(), json.writeValueAsString(next.authorized()));
+
+        await().atMost(TIMEOUT)
+                .untilAsserted(() -> assertThat(kinds(next.key())).containsExactly("ENCUMBER"));
+        ConsumerRecord<String, String> quarantined =
+                drainRecord(PaymentTopics.AUTHORIZED + LedgerMessagingConfiguration.DLT_SUFFIX, junk);
+        List<String> headerNames = new ArrayList<>();
+        quarantined.headers().forEach(h -> headerNames.add(h.key()));
+        assertThat(headerNames)
+                .isNotEmpty()
+                .hasSizeLessThanOrEqualTo(16)
+                // traceparent: added by the observed template when it sends the DLT record (ours, bounded).
+                .allMatch(name -> name.startsWith("kafka_dlt-") || name.equals("traceparent"))
+                .noneMatch(name -> name.startsWith("junk-"))
+                .contains("kafka_dlt-exception-fqcn", "kafka_dlt-original-topic")
+                .doesNotContain("kafka_dlt-exception-stacktrace", "kafka_dlt-exception-message");
+    }
+
     private void send(String topic, String key, String value) throws Exception {
         kafka.send(topic, key, value).get();
     }
@@ -247,6 +317,35 @@ class PaymentEventsKafkaTests {
             });
         }
         return found;
+    }
+
+    private ConsumerRecord<String, String> drainRecord(String topic, String value) {
+        List<ConsumerRecord<String, String>> found = new ArrayList<>();
+        try (Consumer<String, String> consumer = consumers.createConsumer("test-" + UUID.randomUUID(), "test")) {
+            consumer.subscribe(List.of(topic));
+            await().atMost(TIMEOUT).until(() -> {
+                consumer.poll(Duration.ofMillis(500)).forEach(r -> {
+                    if (value.equals(r.value())) {
+                        found.add(r);
+                    }
+                });
+                return !found.isEmpty();
+            });
+        }
+        return found.getFirst();
+    }
+
+    /** Every value on {@code topic} from the beginning, read for {@code window}. */
+    private List<String> valuesOn(String topic, Duration window) {
+        List<String> values = new ArrayList<>();
+        try (Consumer<String, String> consumer = consumers.createConsumer("test-" + UUID.randomUUID(), "test")) {
+            consumer.subscribe(List.of(topic));
+            long until = System.nanoTime() + window.toNanos();
+            while (System.nanoTime() < until) {
+                consumer.poll(Duration.ofMillis(500)).forEach(r -> values.add(r.value()));
+            }
+        }
+        return values;
     }
 
     private List<String> drainValues(String topic, String value) {
