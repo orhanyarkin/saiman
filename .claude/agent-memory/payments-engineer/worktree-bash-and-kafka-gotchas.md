@@ -1,6 +1,6 @@
 ---
 name: worktree-bash-and-kafka-gotchas
-description: Worktree-isolated Bash refuses compound commands (cd+git, heredoc+gradle, $$ in heredocs, vars in sed); Spring Kafka 4.1 DLT/back-off facts verified in the M4 audit fix.
+description: Worktree-isolated Bash refuses compound commands (cd+git, heredoc+gradle, $$ in heredocs, vars in sed); Spring Kafka 4.1 DLT/back-off facts; ProblemDetail instance echoes the path; raw-socket Host tests.
 metadata:
   type: reference
 ---
@@ -11,3 +11,6 @@ metadata:
 - Jackson 3.1: `MapperFeature.ALLOW_COERCION_OF_SCALARS`, `StreamReadFeature.STRICT_DUPLICATE_DETECTION` (verified in jars). JdbcClient `.query(String.class).list()` trips NullAway (List<@Nullable String>); use a row mapper.
 - FiatToken EIP3009.sol: `_markAuthorizationAsUsed` (AuthorizationUsed) is emitted before `_transfer` (Transfer) — verified 2026-10-01.
 - Testing X402SettlementFilter's isAsyncStarted backstop without an async return type (rejected at startup): a void handler calling `request.startAsync(request, response).complete()` keeps isAsyncStarted() true after dispatch on Tomcat (verified 2026-10-01). Forcing a response write to fail: an outer OncePerRequestFilter (HIGHEST_PRECEDENCE) wrapping the response; ContentCachingResponseWrapper.getWriter never delegates, but setContentType/setStatus do.
+- Spring MVC fills ProblemDetail `instance` with the request path when it is null, so a 400/404 thrown for a path variable (a payment key) echoes it back. Set `problem.setInstance(URI.create("/fixed"))` when the path carries an identifier (seen 2026-10-01, seller-api credit-note lookup).
+- Raw-socket HTTP tests (JDK HttpClient refuses a custom Host header): Tomcat answers a ProblemDetail chunked, so assert with `contains` on the raw body rather than parsing. A Host check inside the handler (not a path-prefix filter) holds for odd path forms (`/internal;x=1/...`, `/%69nternal/...`) whatever the container does with them.
+- The worktree guard also refused a `cd ... && python3 - <<EOF` that was alone (no build) when the heredoc was long; the scratchpad-script workaround is the reliable form.

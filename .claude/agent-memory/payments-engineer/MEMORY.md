@@ -9,6 +9,6 @@
 - [Boot 4 MVC wiring gotchas](boot4-mvc-wiring-gotchas.md) — WebMvcConfigurer circular deps (use ObjectProvider), ContentCachingResponseWrapper's real buffering behaviour, no Redis ConnectionDetailsFactory, ObservationRegistry auto-config ordering, micrometer-core absent from the starter's classpath.
 - [Modulith/evm-rpc notes](modulith-evmrpc-notes.md) — Modulith 2.1.1 property formats, Kafka JSON auto-config trap (ByteArray serde, __TypeId__), commit-time trigger errors, ON CONFLICT target pitfall.
 - [Spring 7 scheduling and sandbox quirks](spring7-scheduling-and-sandbox-quirks.md) — FixedDelayTask, SchedulingConfigurer gating, NullAway JdbcClient lists, advisory-lock runner, Bash sandbox limits.
-- [Worktree Bash + Spring Kafka DLT gotchas](worktree-bash-and-kafka-gotchas.md) — guard-refused shell forms, DLPR header copying, back-off/recoverer loops, Jackson 3 strict features, EIP-3009 log order.
+- [Worktree Bash + Spring Kafka DLT gotchas](worktree-bash-and-kafka-gotchas.md) — guard-refused shell forms, DLPR headers, back-off loops, Jackson 3 strict, ProblemDetail instance leak, raw Host tests.
 - [Spring DAO exception classification](spring-dao-exception-classification.md) — DataAccessResourceFailure is NonTransient (08xxx), spring-kafka 4.1 setBackOffFunction, TestPayment fresh eventId per call.
 - [M4b audit Lows findings](m4b-audit-lows-findings.md) — PaymentBook not redelivery-idempotent for F/C conflicts; 1 s epoch cushion in window tests; settleMargin() single source.
