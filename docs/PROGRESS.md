@@ -3,11 +3,16 @@
 ## Current milestone
 M3 — Orchestrator, spend control, router scopes: **in progress** on branch `m3-orchestrator` (not pushed). Architect pass done 2026-09-30; human decisions: MCP tools -> Stretch, provider fallback inside OpenAI only (Gemini/DeepSeek adapters and the LLM cache -> M6, ADR-0011 amendment), settle-before-serve = ADR-0015 now, implementation in M4. Standing rules from the human: tool and provider interfaces stay abstract, the known 429 limit is documented (THREAT_MODEL, README), the plaintext allowlist is exact-host and closed on mainnet, the $0.70 daily LLM cap is pinned in code (`HARD_CEILING_USD_MICROS`).
 Contract: `docs/design/m3-orchestrator.md`; ADR-0013/0014/0015.
-Status (2026-10-01): T0-T6 done on `m3-orchestrator` (not pushed). Live acceptance met on Base Sepolia (see the T6 log entry). Left: T7 milestone audit (opus), `make test && make lint`, arm64 image check in CI, PR.
+Status (2026-10-01): T0-T7 done on `m3-orchestrator` (not pushed); milestone audit findings fixed. Next: push and PR (needs the human's go), then M4.
 M2 (ingest + RAG) is done and merged (PR #12).
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
+
+### 2026-10-01 — M3 T7: milestone-end security audit
+- **Audit (opus):** no Critical/High. Mediums fixed: the paying client's read timeout (35 s) was shorter than the seller's worst case (handler deadline + facilitator connect/read before the buffered answer is sent), so a settled payment could look HELD: now 65 s with a startup floor; the orchestrator did not know the seller's per-payer hourly limit (30), so a busy session would turn honest calls into HELD reservations: new `max-paid-calls-per-hour` (25) denies with `HOURLY_PAID_CALLS` before signing (V5 migration, cross-run count under an advisory lock). Lows: a seller 429 no longer trips the circuit breaker; the facilitator's settle reason is a bounded code in the failure event as well as the log; stale "empty key" wording fixed.
+- **Documented, not fixed:** HELD from honest paths (429, 503, clock skew, read timeout, 422/502 after work) until M4 reconciliation; one shared $0.70/day LLM key for seller-api, ingest and orchestrator (M6 per-service sub-caps); multi-host deployments need NTP.
+- Verified: orchestrator 372 tests, starter check, compose policy test; `make test && make lint` before the PR.
 
 ### 2026-10-01 — M3 T6: live research runs on Base Sepolia
 - **Acceptance (live):** run `6ad4354c-8e79-4b49-b5d9-d45eb9689b41` (trace `c2924695478e7bdbf75e82fd95187688`) SUCCEEDED with 3 settled payments: `0x1f37bf66…48fb` (0.01), `0x5b4dce4b…0e78` (0.01), `0x68592d03…b090` (0.02, approved by a human through `make research-approve`); a fourth call was denied `RUN_BUDGET` before signing (40000 + 20000 > 50000); report with 10 citations rebuilt from evidence; root span `saiman.run.cost.*` = 40000 / 6923 / 46923, equal to `RUN_COMPLETED.cost`. LLM cost of the run $0.0069.

@@ -89,5 +89,8 @@ Approval threshold: the shipped value is 10000 (strictly above), so the 0.01 USD
 ## Runtime limits added after the T4 audit
 A run has a wall-clock deadline (`saiman.orchestrator.runs.deadline`, default 15 min; checked at step start, tool-call start and approval waits, failing with `RUN_DEADLINE`); `/api` request bodies above 16 KB (or of unknown length) get 413; SSE allows 4 streams per run (a new one evicts the run's oldest) and 64 overall; a finished run is replayed from the database (204 when nothing is left after `Last-Event-ID`); every free-text field leaving the process goes through `UntrustedText.forDisplay`.
 
+## Limits added by the milestone-end audit
+`saiman.orchestrator.seller.read-timeout` defaults to and may not go below 65 s (the seller buffers its answer until `/settle` returns, and `validBefore` is at most 60 s ahead); `saiman.orchestrator.spend.max-paid-calls-per-hour` (default 25) denies with `HOURLY_PAID_CALLS` before signing, below the seller's per-payer limit (`saiman.orchestrator.seller.max-paid-calls-per-hour-at-seller`, default 30, startup WARN if exceeded); a seller 429 on the paid retry is HELD but does not count against the circuit breaker.
+
 ## Deferred
 MCP tools -> Stretch. Non-OpenAI adapters and the LLM response cache -> M6. Settle-before-serve implementation, on-chain reconciliation of held reservations, Kafka `agent.run-step.v1` via the outbox -> M4. Per-IP `/verify` limits, separate verify/settle breakers, Valkey ACLs, ingest shared secret, orchestrator auth -> M6 hardening. `GET /internal/v1/corpus-version`, cache/422 metrics -> M6. Web run view -> M5.
