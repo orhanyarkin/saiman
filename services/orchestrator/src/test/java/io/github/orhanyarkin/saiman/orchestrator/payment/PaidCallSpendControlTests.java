@@ -12,6 +12,7 @@ import io.github.orhanyarkin.x402.client.PaymentIntent;
 import io.github.orhanyarkin.x402.client.SpendDeniedException;
 import io.github.orhanyarkin.x402.core.PaymentRequirements;
 import io.github.orhanyarkin.x402.core.TestnetAssets;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -139,6 +140,41 @@ class PaidCallSpendControlTests extends SpendTestSupport {
         assertThat(signer.calls()).isEqualTo(2);
         assertThat(run(run)).isEqualTo(new RunCounters(20_000, 10_000, 10_000));
         assertThat(today()).isEqualTo(new RunCounters(0, 10_000, 10_000));
+    }
+
+    @Test
+    void aRateLimitedPaidRetryIsHeldButDoesNotCountAgainstTheSeller() {
+        UUID run = createRun(100_000);
+        seller.paidMode(FakeSeller.PaidMode.RATE_LIMITED_429);
+        CircuitBreaker breaker = PaymentTestAccess.circuitBreaker(client);
+
+        // More than the breaker's minimum number of calls: a counted failure each would open it.
+        for (int i = 0; i < 6; i++) {
+            PaymentIntentHandle handle = newIntent(run);
+            assertThatThrownBy(() -> client.send(handle, null)).isInstanceOf(PaymentOutcomeUnknownException.class);
+            // The signature left the process: the reservation is held, never released.
+            assertThat(intents.find(handle.id()).orElseThrow().status()).isEqualTo(PaymentIntentStatus.HELD);
+        }
+
+        assertThat(seller.paidRequests()).isEqualTo(6);
+        assertThat(run(run)).isEqualTo(new RunCounters(100_000, 60_000, 0));
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
+        assertThat(breaker.getMetrics().getNumberOfFailedCalls()).isZero();
+
+        seller.paidMode(FakeSeller.PaidMode.SETTLE);
+        assertThat(client.send(newIntent(run), null).paid()).isTrue();
+    }
+
+    @Test
+    void sellerServerErrorsOnThePaidRetryOpenTheCircuitBreaker() {
+        UUID run = createRun(100_000);
+        seller.paidMode(FakeSeller.PaidMode.FAIL_500);
+        for (int i = 0; i < 5; i++) {
+            PaymentIntentHandle handle = newIntent(run);
+            assertThatThrownBy(() -> client.send(handle, null)).isInstanceOf(PaymentOutcomeUnknownException.class);
+        }
+
+        assertThat(PaymentTestAccess.circuitBreaker(client).getState()).isEqualTo(CircuitBreaker.State.OPEN);
     }
 
     @Test

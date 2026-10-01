@@ -47,6 +47,8 @@ public final class FakeSeller {
     public enum PaidMode {
         SETTLE,
         FAIL_500,
+        /** The seller's per-payer hourly limit: 429 on the signed retry, nothing settled. */
+        RATE_LIMITED_429,
         REDIRECT
     }
 
@@ -285,6 +287,7 @@ public final class FakeSeller {
         }
         switch (paidMode) {
             case FAIL_500 -> write(exchange, 500, "{}");
+            case RATE_LIMITED_429 -> write(exchange, 429, "{}");
             case REDIRECT -> redirect(exchange);
             case SETTLE -> {
                 paidRequestLines.add(exchange.getRequestMethod() + " "
