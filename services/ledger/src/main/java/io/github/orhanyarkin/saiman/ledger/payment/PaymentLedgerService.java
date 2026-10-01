@@ -8,6 +8,7 @@ import io.github.orhanyarkin.saiman.shared.events.EventMetadata;
 import io.github.orhanyarkin.saiman.shared.ledger.EntryPosted;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import org.springframework.context.ApplicationEventPublisher;
@@ -67,7 +68,7 @@ public class PaymentLedgerService {
         }
         for (JournalEntry entry : outcome.entries()) {
             journal.post(entry);
-            events.publishEvent(entryPosted(entry, fact.meta()));
+            events.publishEvent(entryPosted(entry, fact.meta().correlationId(), clock.instant()));
             meters.counter("saiman.ledger.entries", "kind", entry.kind().name()).increment();
             // Payment-path cost metric: atomic USDC moved per entry kind (one side of the entry).
             meters.counter("saiman.ledger.posted.atomic", "kind", entry.kind().name(), "asset", "USDC")
@@ -78,9 +79,10 @@ public class PaymentLedgerService {
         return outcome.entries();
     }
 
-    private EntryPosted entryPosted(JournalEntry entry, EventMetadata cause) {
+    /** The {@code ledger.entry-posted.v1} event of a payment entry (event id = entry id, producer {@code ledger}). */
+    public static EntryPosted entryPosted(JournalEntry entry, String correlationId, Instant at) {
         return new EntryPosted(
-                new EventMetadata(entry.id().toString(), clock.instant(), CONSUMER, cause.correlationId()),
+                new EventMetadata(entry.id().toString(), at, CONSUMER, correlationId),
                 entry.id(),
                 Objects.requireNonNull(entry.paymentId(), "payment entries have a payment id"),
                 entry.kind().name(),

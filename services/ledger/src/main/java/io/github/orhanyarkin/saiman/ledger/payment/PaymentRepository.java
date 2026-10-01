@@ -93,6 +93,15 @@ public class PaymentRepository {
                 .update();
     }
 
+    /** Locks and returns an existing row (reconciliation; the row is never created there). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<PaymentProjection> lock(String paymentKey) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM payment WHERE payment_key = :key FOR UPDATE")
+                .param("key", paymentKey)
+                .query(PaymentRepository::map)
+                .optional();
+    }
+
     @Transactional(readOnly = true)
     public Optional<PaymentProjection> findByKey(String paymentKey) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM payment WHERE payment_key = :key")

@@ -51,6 +51,17 @@ spring:
         # (LedgerMessagingConfiguration), which also keeps type headers off the wire.
         enable-json: false
 
+saiman:
+  # Read-only Base Sepolia client (libs/evm-rpc, ADR-0018): the public RPC, no key. Startup checks chain id 84532.
+  chain:
+    rpc-url: ${SAIMAN_CHAIN_RPC_URL:https://sepolia.base.org}
+  ledger:
+    reconciliation:
+      interval: 5m
+      grace-after-valid-before: 30m
+      receipt-grace: 10m
+      batch-size: 50
+
 server:
   port: 8082
 
