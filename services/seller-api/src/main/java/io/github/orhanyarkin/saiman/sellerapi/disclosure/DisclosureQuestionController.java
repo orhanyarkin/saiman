@@ -21,8 +21,9 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>The x402 {@code upfront} flow (ADR-0021): the starter verifies <em>and settles</em> the payment
  * before this method runs, so no model run is ever unpaid. The endpoint still asks for a long
- * authorization window ({@link LlmRunProperties#MIN_AUTHORIZATION_WINDOW_SECONDS}); once settled,
- * the handler gets the full configured deadline ({@link RequestDeadlines}).
+ * authorization window ({@link LlmRunProperties#MIN_AUTHORIZATION_WINDOW_SECONDS}); the handler's
+ * deadline is still bounded by what is left of it ({@link RequestDeadlines}), so the answer reaches the
+ * buyer before its read timeout.
  *
  * <p>Every non-2xx outcome (400 bad ticker or question, 404 unknown ticker, 422 too few
  * citations, 429 per-payer limit, 502/503 model or retrieval trouble) is produced after the
