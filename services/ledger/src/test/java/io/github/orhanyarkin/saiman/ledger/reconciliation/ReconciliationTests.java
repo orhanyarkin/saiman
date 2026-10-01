@@ -208,12 +208,12 @@ class ReconciliationTests {
         long now = Instant.now().getEpochSecond();
         TestPayment parties = TestPayment.random(random, 1);
         TestPayment payment =
-                TestPayment.of(random, parties.authorization().payer(), parties.payTo(), 20_000, now + 30);
+                TestPayment.of(random, parties.authorization().payer(), parties.payTo(), 20_000, now + 50);
         record(payment);
         chain.mine(receipt(payment, payment.txHash(), payment.payTo(), 20_000, false));
         double skippedBefore = skippedSafeInFuture();
         // Past validBefore by the RPC's clock, not by ours; within the tolerated 60 s.
-        chain.overrideSafe(new ChainBlock(FakeChain.SAFE.number(), now + 55));
+        chain.overrideSafe(new ChainBlock(FakeChain.SAFE.number(), now + 59));
         ReconciliationReport report;
         try {
             report = runNow();
