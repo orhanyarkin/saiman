@@ -9,3 +9,4 @@
 - [Boot 4 MVC wiring gotchas](boot4-mvc-wiring-gotchas.md) — WebMvcConfigurer circular deps (use ObjectProvider), ContentCachingResponseWrapper's real buffering behaviour, no Redis ConnectionDetailsFactory, ObservationRegistry auto-config ordering, micrometer-core absent from the starter's classpath.
 - [Modulith/evm-rpc notes](modulith-evmrpc-notes.md) — Modulith 2.1.1 property formats, Kafka JSON auto-config trap (ByteArray serde, __TypeId__), commit-time trigger errors, ON CONFLICT target pitfall.
 - [Spring 7 scheduling and sandbox quirks](spring7-scheduling-and-sandbox-quirks.md) — FixedDelayTask, SchedulingConfigurer gating, NullAway JdbcClient lists, advisory-lock runner, Bash sandbox limits.
+- [Worktree Bash + Spring Kafka DLT gotchas](worktree-bash-and-kafka-gotchas.md) — guard-refused shell forms, DLPR header copying, back-off/recoverer loops, Jackson 3 strict features, EIP-3009 log order.
