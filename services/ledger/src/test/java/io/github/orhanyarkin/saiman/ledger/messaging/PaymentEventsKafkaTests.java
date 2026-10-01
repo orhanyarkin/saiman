@@ -192,6 +192,27 @@ class PaymentEventsKafkaTests {
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    @Test
+    void conflictingFactIsDeadLetteredAndLeavesAConflictingFactMismatch() throws Exception {
+        TestPayment payment = TestPayment.random(new SplittableRandom(), 20_000);
+        send(PaymentTopics.AUTHORIZED, payment.key(), json.writeValueAsString(payment.authorized()));
+        await().atMost(TIMEOUT)
+                .untilAsserted(() -> assertThat(kinds(payment.key())).containsExactly("ENCUMBER"));
+
+        String conflicting = json.writeValueAsString(payment.buyerSettled())
+                .replace("\"atomicUnits\":20000", "\"atomicUnits\":20001");
+        send(PaymentTopics.SETTLED, payment.key(), conflicting);
+
+        assertThat(drainValues(PaymentTopics.SETTLED + LedgerMessagingConfiguration.DLT_SUFFIX, conflicting))
+                .containsExactly(conflicting);
+        assertThat(jdbc.sql("SELECT kind FROM reconciliation_mismatch WHERE payment_id = :id AND run_id IS NULL")
+                        .param("id", PaymentProjection.paymentId(payment.key()))
+                        .query(String.class)
+                        .list())
+                .containsExactly("CONFLICTING_FACT");
+        assertThat(kinds(payment.key())).containsExactly("ENCUMBER");
+    }
+
     private void send(String topic, String key, String value) throws Exception {
         kafka.send(topic, key, value).get();
     }

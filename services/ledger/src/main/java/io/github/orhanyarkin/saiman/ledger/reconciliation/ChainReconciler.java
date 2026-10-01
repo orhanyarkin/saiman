@@ -69,6 +69,10 @@ import org.jspecify.annotations.Nullable;
  * (PARTY/AMOUNT), else: chain UNUSED → {@code SETTLED_BUT_UNUSED}; chain USED while the book says released or
  * failed → {@code UNUSED_BUT_SETTLED}; otherwise {@code AMOUNT_MISMATCH}. Naming is {@code <books>_BUT_<chain>}.
  *
+ * <p>Once the chain is final ({@code UNUSED}, or {@code USED} with or without a known tx) past
+ * {@code validBefore + graceAfterValidBefore} while neither book is terminal, the item is a {@code BOOKS_OPEN}
+ * mismatch (nothing posted) instead of MATCHED or TX_UNKNOWN.
+ *
  * <p>Independently of the chain, a terminal buyer book whose encumbered account still carries a balance for the
  * payment is an {@code ENCUMBRANCE_NOT_CLEARED} (an internal check; nothing is posted).
  */
@@ -251,6 +255,7 @@ public final class ChainReconciler {
                 if (found != null && isCanonical(found, p, safe)) {
                     canonical = found;
                 } else {
+                    booksOpen(p, safe, settings).ifPresent(findings::add);
                     PaymentProjection next = p.withChain(ChainState.USED, p.chainTxHash(), now);
                     return new Outcome(
                             findings.isEmpty() ? ItemStatus.TX_UNKNOWN : ItemStatus.MISMATCH,
@@ -295,6 +300,8 @@ public final class ChainReconciler {
         } else {
             chainState = ChainState.UNUSED;
         }
+
+        booksOpen(p, safe, settings).ifPresent(findings::add);
 
         // Suspense rule: compare each known wallet's net with the chain; post the differences.
         List<Posting> legs = new ArrayList<>();
@@ -354,6 +361,22 @@ public final class ChainReconciler {
         PaymentProjection next = p.withChain(chainState, chainTx != null ? chainTx : p.chainTxHash(), now);
         return new Outcome(
                 findings.isEmpty() ? ItemStatus.MATCHED : ItemStatus.MISMATCH, next, chainBlock, findings, adjustment);
+    }
+
+    /**
+     * The chain is final for this authorization (the safe block is past {@code validBefore + grace}) but neither
+     * book reached a terminal state: the buyer never settled or released, the seller never reported. Not MATCHED;
+     * nothing to post (no known wallet to compare).
+     */
+    private static Optional<Finding> booksOpen(PaymentProjection p, ChainBlock safe, Settings settings) {
+        boolean buyerTerminal = p.buyerState() == BuyerState.SETTLED || p.buyerState() == BuyerState.RELEASED;
+        boolean chainFinal = safe.timestamp()
+                > Math.addExact(
+                        p.validBefore(), settings.graceAfterValidBefore().toSeconds());
+        if (buyerTerminal || p.sellerState() != SellerState.NONE || !chainFinal) {
+            return Optional.empty();
+        }
+        return Optional.of(new Finding(MismatchKind.BOOKS_OPEN, null, null, null, null, false));
     }
 
     private static Outcome pending(PaymentProjection p, List<Finding> findings, Instant now) {
