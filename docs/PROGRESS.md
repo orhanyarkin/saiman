@@ -8,6 +8,12 @@ M3 (orchestrator, spend control) is done and merged (PR #13).
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-10-01 — Known flaky: Testcontainers Postgres "connection refused" under parallel module runs
+- **Seen once:** `ReconciliationTests` (ledger) failed to load its context: Flyway could not connect to its freshly started Testcontainers Postgres (`Connection to localhost:<port> refused`). That run was `:services:ledger:test :services:orchestrator:test :services:seller-api:test` in parallel (`org.gradle.parallel=true`) while the full compose stack was also up.
+- **Investigation:** ledger tests alone passed twice in a row (67 s, 64 s). The same three modules in parallel passed once more (2 min) while recording `docker events`: no `oom` events in either session; the mid-run `kill`/`exit 137` entries are normal context or test teardown. The parallel run started **30 Postgres containers**, 5 Redpanda and 3 Valkey in about 2 minutes on a 15 GB WSL2 host (about 9-10 GB in use), because every test configuration declares its containers as `@ServiceConnection` beans and each distinct cached Spring context starts its own pair.
+- **Conclusion:** no root cause proven (not reproducible in 3 attempts). The most likely trigger is startup contention from many simultaneous containers (Docker port forwarding or the database not yet listening when Flyway connects), not a test-order or shared-state bug: ledger contexts do not share containers across contexts and no test uses `@DirtiesContext`.
+- **If it recurs:** rerun the module (it passes alone). **Follow-up (M5 or M6 test hygiene):** share one Postgres and one Redpanda per test JVM (a static singleton container with `@ServiceConnection` instead of per-context beans) to cut the parallel run from 30 containers to 3; optionally cap concurrent Testcontainers-heavy test tasks in Gradle.
+
 ### 2026-10-01 — M4 T7: live verification on Base Sepolia
 - `make up` with M4 images on the populated M3 database: orchestrator V6/V7, ledger V1-V3 and seller V1 applied; the backfill published M3 history (9 ENCUMBER, 7 SETTLE) and the outbox drained (0 incomplete publications).
 - **HELD resolution (first budget released by a chain read):** the two M3 HELD intents (10000 and 20000; seller refusals after signing) were read UNUSED at the safe block past validBefore and moved HELD → RELEASED (`resolved_by=CHAIN`); run and day reservations went to 0; the ledger booked two RELEASE entries.
