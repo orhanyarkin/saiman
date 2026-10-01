@@ -10,7 +10,7 @@ A user (or a scheduled job) asks a research question about a BIST company or a c
 |---|---|---|
 | `seller-api` | Spring Boot 4.1 | Paid endpoints (disclosure summary, news sentiment, order-book snapshot from TickForge), protected by the x402 starter; same capabilities as MCP tools (`@McpTool`) |
 | `orchestrator` | Spring Boot 4.1 + Spring AI 2.0 | Agents on `ChatClient`, model router, spend-control plane, x402 client, SSE run stream |
-| `ledger` | Spring Boot 4.1 | Double-entry ledger, inbox/outbox, reconciliation with Base Sepolia (web3j) |
+| `ledger` | Spring Boot 4.1 | Double-entry ledger, inbox + Spring Modulith outbox, reconciliation with Base Sepolia (JSON-RPC via `libs/evm-rpc`; ADR-0016..0018) |
 | `ingest` | Spring Boot 4.1 + Spring AI 2.0 | Owns the corpus (ADR-0012): MKK KAP API → normalise → chunk → embed → `PgVectorStore`; serves internal hybrid retrieval (vector + Turkish full-text, RRF). No events until M4 |
 | `evals` | Spring Boot CLI | Golden-set evals, LLM-as-judge (batch), cost/quality reports |
 | `web` | React 19 + Vite | Static SPA on Cloudflare Pages |
@@ -23,7 +23,7 @@ A user (or a scheduled job) asks a research question about a BIST company or a c
 - **Kafka API via Redpanda** (single node locally and as an ECS Fargate task in `demo-lite`; MSK in the `enterprise` Terraform profile).
 - **Valkey** — nonce claims, the router's daily and per-run LLM cost counters, per-payer run limits, idempotency keys, LLM response cache (M6). Payment budgets and approvals live in **Postgres** (ADR-0013).
 
-Topics (schemas in `docs/events/`): `payments.challenge-issued.v1`, `payments.authorized.v1`, `payments.settled.v1`, `payments.failed.v1`, `ledger.entry-posted.v1`, `ledger.reconciliation-mismatch.v1`, `ingest.document-indexed.v1`, `agent.run-step.v1`.
+Topics (schemas in `docs/events/`; `payments.challenge-issued.v1` is reserved and not produced, no money moves at a challenge): `payments.authorized.v1`, `payments.settled.v1`, `payments.failed.v1`, `ledger.entry-posted.v1`, `ledger.reconciliation-mismatch.v1`, `ingest.document-indexed.v1`, `agent.run-step.v1`.
 
 ## Paid call flow
 

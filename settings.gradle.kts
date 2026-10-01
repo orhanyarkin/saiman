@@ -19,6 +19,8 @@ include(
     ":libs:shared",
     ":libs:model-router",
     ":libs:x402-spring-boot-starter",
+    ":libs:eventing",
+    ":libs:evm-rpc",
     ":services:seller-api",
     ":services:orchestrator",
     ":services:ledger",

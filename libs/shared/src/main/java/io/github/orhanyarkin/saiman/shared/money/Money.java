@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.shared.money;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.regex.Pattern;
 
 /**
@@ -15,6 +16,7 @@ import java.util.regex.Pattern;
  * @param asset asset code, upper-case letters and digits (e.g. {@code USDC}, {@code USD})
  * @param decimals decimal places of one whole unit of the asset ({@code 0..18})
  */
+@JsonIgnoreProperties({"zero"})
 public record Money(long atomicUnits, String asset, int decimals) implements Comparable<Money> {
 
     /** Decimals used for USDC and for USD micro-dollar cost tracking. */

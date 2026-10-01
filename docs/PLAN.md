@@ -38,6 +38,13 @@ Each milestone ends with something demo-able and a short write-up in `docs/PROGR
 
 **Accept:** balanced-postings property test passes; duplicate and out-of-order events handled; a deliberately corrupted record shows up as a mismatch in the report.
 
+- Design contract: `docs/design/m4-ledger.md`; ADRs 0016 (outbox with Spring Modulith), 0017 (ledger model), 0018 (reconciliation + HELD resolution), 0019 (property testing).
+
+## M4b — Settle-before-serve (one task, before M5)
+- ADR-0015's opt-in settle-first mode in the starter per `@RequiresPayment` handler, with ledger CREDIT_NOTE postings for paid-but-failed requests (accounts reserved in M4). Opus implementation, opus audit.
+
+**Accept:** a settle-first handler that fails after settlement produces a credit note that balances in the ledger; the default verify -> serve -> settle path is unchanged.
+
 ## M5 — Dashboard (1 week)
 - Run view, spend control + approvals, ledger/reconciliation, seller revenue, landing page.
 
