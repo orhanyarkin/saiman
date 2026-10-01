@@ -52,7 +52,7 @@ import tools.jackson.databind.json.JsonMapper;
  *       <topic>.ledger-dlt} (bounded headers, no stack trace; counter {@code saiman.ledger.dlt}); if even that send
  *       fails the record is counted and skipped, so poison never blocks the partition. Connection, timeout and lock
  *       errors are retried with exponential back-off (1 s doubling to 30 s, jittered) until they succeed: an outage
- *       never dead-letters a valid fact. Anything unclassified (a bug) is retried the same way for at most
+ *       never dead-letters a valid fact. Anything unclassified (a bug, schema or permission drift) is retried the same way for at most
  *       {@link #UNKNOWN_RETRY_LIMIT}, then quarantined with {@code outcome=exhausted}.
  *   <li><b>Topics:</b> single-partition topics for local and compose use; creating one that exists is a no-op.
  * </ul>
