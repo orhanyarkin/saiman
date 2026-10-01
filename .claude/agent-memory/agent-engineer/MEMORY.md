@@ -8,3 +8,4 @@
 - [Spring 7 interceptor re-execution](spring7-interceptor-reexecution.md) — inner interceptors see the x402 paid retry; use them, not exception messages
 - [x402 client integration quirks](x402-client-integration-quirks.md) — final SpendDeniedException, offer filtering before reserve, RestClient attributes, test signer bean
 - [Spring AI tool-loop quirks](spring-ai-tool-loop-quirks.md) — ChatModel.getOptions() must be tool-capable or tools vanish; advisor params survive loop; openai-java error types
+- [Spring Modulith 2.1 outbox quirks](modulith-2-outbox-quirks.md) — completion advisor wraps AFTER_COMMIT listeners (pool starvation), static externalization bean, String JSON w/o __TypeId__
