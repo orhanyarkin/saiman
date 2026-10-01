@@ -24,5 +24,7 @@ public enum FailureCode {
     /** A model answer failed validation. */
     INVALID_MODEL_OUTPUT,
     /** No tool call produced usable evidence. */
-    NO_EVIDENCE
+    NO_EVIDENCE,
+    /** The final answer cited no chunk the run actually retrieved. */
+    NO_VALID_CITATIONS
 }

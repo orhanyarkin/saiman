@@ -42,6 +42,16 @@ saiman:
     runs:
       max-concurrent: 2 # the seller allows 2 in-flight runs per payer; the orchestrator is one wallet
       llm-budget-usd-micros: 150000
+    agents:
+      # TIER2 per ADR-0014; set tier1 while the tier2 model id is unverified (T6 live runs).
+      synthesis-tier: tier2
+  # Model router (ADR-0011): every orchestrator LLM call must name its run as the cost scope, and no
+  # scope may be given more than $0.15. The daily cap and the scopes live in Valkey (spring.data.redis).
+  router:
+    require-cost-scope: true
+    max-scope-budget-usd-micros: 150000
+    openai:
+      max-retries: 0 # a retried call is billed twice; the router's fallback route covers outages
 
 x402:
   client:

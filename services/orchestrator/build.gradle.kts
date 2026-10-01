@@ -5,6 +5,9 @@ plugins {
 dependencies {
     implementation(project(":libs:shared"))
     implementation(project(":libs:x402-spring-boot-starter")) // SpendGuard SPI + the paying RestClient interceptor
+    implementation(platform(libs.spring.ai.bom)) // Spring AI's ChatClient is part of the model router's API
+    implementation(project(":libs:model-router")) // all LLM calls go through the router (CLAUDE.md rule 6)
+    implementation(libs.spring.boot.starter.data.redis) // the router's shared daily cap and per-run scopes (Valkey)
     implementation(libs.spring.boot.starter.webmvc)
     implementation(libs.spring.boot.starter.restclient) // RestClient.Builder for the paying seller client
     implementation(libs.spring.boot.starter.jdbc)
@@ -21,4 +24,6 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.opentelemetry.sdk.testing)
     testImplementation(testFixtures(project(":libs:x402-spring-boot-starter"))) // TestWallets
+    testImplementation(platform(libs.spring.ai.bom))
+    testImplementation(testFixtures(project(":libs:model-router"))) // FakeChatModel etc. (no key, no network)
 }

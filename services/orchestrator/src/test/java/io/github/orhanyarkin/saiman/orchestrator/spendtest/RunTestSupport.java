@@ -24,6 +24,7 @@ import org.springframework.boot.micrometer.tracing.test.autoconfigure.AutoConfig
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
@@ -133,6 +134,7 @@ public abstract class RunTestSupport extends SpendTestSupport {
     static class RunTestConfiguration {
 
         @Bean
+        @Primary // wins over the real AgentPipeline: these tests script the run's outcome directly
         ScriptedPipeline scriptedPipeline() {
             return new ScriptedPipeline();
         }
