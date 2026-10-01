@@ -2,3 +2,4 @@
 - [Boot 4 observability](boot4-observability.md) — OTLP property names, @AutoConfigureTracing, datasource-micrometer for JDBC spans
 - [Build conventions](build-conventions.md) — build-logic included build, platform() BOM, bootBuildImage, native arm64 runners
 - [x402 facts](x402-facts.md) — SDK is v1-only SNAPSHOT, v2 headers, x402.org facilitator, Base Sepolia USDC domain, Mogami
+- [M4 chain and eventing facts](m4-chain-eventing-facts.md) — RPC limits, safe/finalized lag, EIP-3009 cancel, Modulith scope/ordering, PBT landscape
