@@ -21,6 +21,9 @@ public record TestPayment(AuthorizationRef authorization, Money amount, String p
 
     public static final String USDC_ADDRESS = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
     private static final String RESOURCE = "http://seller-api:8081/v1/disclosures/ASELS/summary";
+    /** An hour before {@code FakeChain.SAFE}: past every grace. */
+    public static final long VALID_BEFORE = 1_790_000_060L;
+
     private static final Instant T0 = Instant.parse("2026-10-01T10:00:00Z");
 
     public static TestPayment random(SplittableRandom random, long amountAtomic) {
@@ -28,9 +31,13 @@ public record TestPayment(AuthorizationRef authorization, Money amount, String p
     }
 
     public static TestPayment of(SplittableRandom random, String payer, String payTo, long amountAtomic) {
+        return of(random, payer, payTo, amountAtomic, VALID_BEFORE);
+    }
+
+    public static TestPayment of(
+            SplittableRandom random, String payer, String payTo, long amountAtomic, long validBefore) {
         return new TestPayment(
-                new AuthorizationRef(
-                        AuthorizationRef.BASE_SEPOLIA, USDC_ADDRESS, payer, hex(random, 64), 1_790_000_060L),
+                new AuthorizationRef(AuthorizationRef.BASE_SEPOLIA, USDC_ADDRESS, payer, hex(random, 64), validBefore),
                 Money.usdc(amountAtomic),
                 payTo,
                 new UUID(random.nextLong(), random.nextLong()),

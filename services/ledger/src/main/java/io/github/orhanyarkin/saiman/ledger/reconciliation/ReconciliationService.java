@@ -359,13 +359,13 @@ public class ReconciliationService {
 
     /** Blocks {@code [from, to]} ending a little after the estimated block of {@code validBefore}. */
     private long[] searchRange(PaymentProjection p, ChainBlock safe) {
-        long behind = Math.max(0, safe.timestamp() - p.validBefore()) / SECONDS_PER_BLOCK;
+        long behind = Math.max(0, Math.subtractExact(safe.timestamp(), p.validBefore())) / SECONDS_PER_BLOCK;
         long estimate = Math.max(0, safe.number() - behind);
-        long to = Math.min(safe.number(), estimate + 150);
+        long to = Math.min(safe.number(), Math.addExact(estimate, 150));
         ChainProperties chainConfig = chainProperties.getIfAvailable();
         long cap = chainConfig == null ? properties.logSearchBlocks() : chainConfig.maxLogRangeBlocks();
         long window = Math.min(properties.logSearchBlocks(), cap);
-        return new long[] {Math.max(0, to - window + 1), to};
+        return new long[] {Math.max(0, Math.addExact(Math.subtractExact(to, window), 1)), to};
     }
 
     private static @Nullable String reportedTx(PaymentProjection p) {

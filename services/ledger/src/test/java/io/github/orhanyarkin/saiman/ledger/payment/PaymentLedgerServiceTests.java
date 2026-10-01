@@ -8,6 +8,7 @@ import io.github.orhanyarkin.saiman.ledger.journal.JournalRepository;
 import io.github.orhanyarkin.saiman.ledger.journal.TrialBalanceRow;
 import io.github.orhanyarkin.saiman.ledger.pbt.Pbt;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -136,17 +137,20 @@ class PaymentLedgerServiceTests {
 
         List<TrialBalanceRow> rows = journal.trialBalance();
 
-        Map<String, Long> perAsset = rows.stream()
+        Map<String, BigInteger> perAsset = rows.stream()
                 .collect(Collectors.groupingBy(
-                        TrialBalanceRow::asset, Collectors.summingLong(TrialBalanceRow::balance)));
-        assertThat(perAsset.values()).containsOnly(0L);
-        assertThat(rows).allSatisfy(row -> assertThat(row.balance()).isEqualTo(row.debit() - row.credit()));
+                        TrialBalanceRow::asset,
+                        Collectors.reducing(BigInteger.ZERO, TrialBalanceRow::balance, BigInteger::add)));
+        assertThat(perAsset.values()).containsOnly(BigInteger.ZERO);
+        assertThat(rows)
+                .allSatisfy(
+                        row -> assertThat(row.balance()).isEqualTo(row.debit().subtract(row.credit())));
         String payer = payment.authorization().payer().toLowerCase(java.util.Locale.ROOT);
         assertThat(rows)
                 .filteredOn(row -> row.account().equals("buyer:" + payer + ":expense:data"))
                 .singleElement()
                 .satisfies(row -> {
-                    assertThat(row.balance()).isEqualTo(33_000L);
+                    assertThat(row.balance()).isEqualTo(BigInteger.valueOf(33_000));
                     assertThat(row.type()).isEqualTo("EXPENSE");
                     assertThat(row.book()).isEqualTo("BUYER");
                 });

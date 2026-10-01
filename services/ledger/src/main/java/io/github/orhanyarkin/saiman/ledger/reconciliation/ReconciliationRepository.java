@@ -115,7 +115,7 @@ public class ReconciliationRepository {
         return jdbc.sql("""
                         SELECT payment_key FROM payment
                          WHERE buyer_tx_hash IS NOT NULL OR seller_tx_hash IS NOT NULL
-                            OR valid_before + :grace < :safeTs
+                            OR valid_before < :safeTs - :grace
                          ORDER BY last_checked_at NULLS FIRST, created_at DESC, payment_key
                          LIMIT :limit
                         """)
@@ -245,14 +245,17 @@ public class ReconciliationRepository {
                 .update();
     }
 
-    /** {@code debit - credit} of {@code platform:suspense:usdc}. */
+    /**
+     * {@code debit - credit} of {@code platform:suspense:usdc}, summed as {@code numeric} and clamped to
+     * {@code ±Long.MAX_VALUE}: a flood of forged mismatches must not turn the report into a 500.
+     */
     @Transactional(readOnly = true)
     public long suspenseBalance(Money of) {
         return jdbc.sql("SELECT coalesce(sum(%s), 0) FROM posting p WHERE p.account_code = :code AND p.asset = :asset"
                         .formatted(SIGNED))
                 .param("code", ChartOfAccounts.suspense(of).code())
                 .param("asset", of.asset())
-                .query((rs, row) -> exact(rs, 1))
+                .query((rs, row) -> saturated(rs.getBigDecimal(1)))
                 .single();
     }
 
@@ -335,8 +338,11 @@ public class ReconciliationRepository {
         return value == null ? 0 : value.longValueExact();
     }
 
-    private static long exact(ResultSet rs, int column) throws SQLException {
-        BigDecimal value = rs.getBigDecimal(column);
-        return value == null ? 0 : value.longValueExact();
+    private static long saturated(@Nullable BigDecimal value) {
+        if (value == null) {
+            return 0;
+        }
+        BigDecimal max = BigDecimal.valueOf(Long.MAX_VALUE);
+        return value.max(max.negate()).min(max).longValueExact();
     }
 }

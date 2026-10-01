@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.ledger.journal;
 
+import java.math.BigInteger;
 import java.sql.Timestamp;
 import java.util.Comparator;
 import java.util.List;
@@ -74,8 +75,9 @@ public class JournalRepository {
                          ORDER BY a.book, a.code, a.asset
                         """)
                 .query((rs, row) -> {
-                    long debit = rs.getBigDecimal("debit").longValueExact();
-                    long credit = rs.getBigDecimal("credit").longValueExact();
+                    // sum(bigint) is numeric in Postgres, so the database never overflows; neither does BigInteger.
+                    BigInteger debit = rs.getBigDecimal("debit").toBigIntegerExact();
+                    BigInteger credit = rs.getBigDecimal("credit").toBigIntegerExact();
                     return new TrialBalanceRow(
                             rs.getString("code"),
                             rs.getString("book"),
@@ -84,7 +86,7 @@ public class JournalRepository {
                             rs.getInt("decimals"),
                             debit,
                             credit,
-                            Math.subtractExact(debit, credit));
+                            debit.subtract(credit));
                 })
                 .list();
     }

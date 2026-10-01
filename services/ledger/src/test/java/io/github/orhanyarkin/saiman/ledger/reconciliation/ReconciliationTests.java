@@ -15,6 +15,7 @@ import io.github.orhanyarkin.saiman.ledger.payment.PaymentRepository;
 import io.github.orhanyarkin.saiman.ledger.payment.TestPayment;
 import io.github.orhanyarkin.saiman.shared.ledger.LedgerTopics;
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.github.orhanyarkin.saiman.shared.payments.AuthorizationRef;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -229,6 +230,23 @@ class ReconciliationTests {
         assertThat(entryCount(payment)).isEqualTo(entries);
         assertThat(mismatchKinds(payment)).containsExactly("AMOUNT_MISMATCH");
         assertThat(signedSuspense(rerun)).isEqualTo(signedSuspense(report));
+    }
+
+    @Test
+    void nearMaxValidBeforeDoesNotFailARun() {
+        TestPayment payment = TestPayment.of(
+                random,
+                TestPayment.address(random),
+                TestPayment.address(random),
+                20_000,
+                AuthorizationRef.MAX_VALID_BEFORE - 1);
+        ledger.record(PaymentFact.of(payment.authorized()), PaymentTopics.AUTHORIZED);
+        ledger.record(PaymentFact.of(payment.buyerSettled()), PaymentTopics.SETTLED);
+
+        ReconciliationReport report = runNow();
+
+        assertThat(report.status()).isNotEqualTo("FAILED");
+        assertThat(item(report, payment).status()).isEqualTo("PENDING");
     }
 
     @Test
