@@ -187,13 +187,13 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
                 // the container render an error page without it, and never rethrow.
                 log.warn("a paid upfront @RequiresPayment handler failed: {}", rootClassName(dispatchFailure));
                 discardHandlerOutput(wrappedResponse, headerSnapshot);
-                writeProblem(wrappedResponse, HttpStatus.INTERNAL_SERVER_ERROR.value());
                 reportPaidNotServed(
                         request,
                         wrappedResponse,
                         attempt,
                         HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                        X402PaidRequestFailedEvent.HANDLER_EXCEPTION);
+                        X402PaidRequestFailedEvent.HANDLER_EXCEPTION,
+                        true);
                 return;
             }
             if (attempt.settleAttempted() && attempt.settled()) {
@@ -240,9 +240,10 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
     }
 
     private void handleUnexpectedAsync(HttpServletRequest request, X402PaymentAttempt attempt) {
-        log.error("a @RequiresPayment handler started asynchronous processing; this is not supported and should"
-                + " have been rejected at startup -- the payment will not be settled");
         if (attempt.settleAttempted() && attempt.settled()) {
+            log.error("an upfront @RequiresPayment handler started asynchronous processing; this is not supported"
+                    + " and should have been rejected at startup -- the payment was already settled and is"
+                    + " reported as paid but not served");
             // Upfront: the money already moved. Keep the claim (no second run on the same
             // authorization) and report the paid failure; the response is out of this filter's hands.
             attempt.outcome(PAID_NOT_SERVED);
@@ -253,6 +254,8 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
                     X402PaidRequestFailedEvent.ASYNC_NOT_SUPPORTED);
             return;
         }
+        log.error("a @RequiresPayment handler started asynchronous processing; this is not supported and should"
+                + " have been rejected at startup -- the payment will not be settled");
         attempt.outcome("async_not_supported");
         if (attempt.verified() && !attempt.settleAttempted()) {
             nonceStore.release(attempt.nonceKey(), attempt.claimToken());
@@ -323,36 +326,55 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
         if (status < 300 || status > 599) {
             // 1xx or a non-standard status: not a meaningful answer to a paid request. Replace it.
             discardHandlerOutput(wrappedResponse, attempt.headerSnapshot());
-            writeProblem(wrappedResponse, HttpStatus.INTERNAL_SERVER_ERROR.value());
             reportPaidNotServed(
                     request,
                     wrappedResponse,
                     attempt,
                     HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                    X402PaidRequestFailedEvent.HANDLER_SERVER_ERROR);
+                    X402PaidRequestFailedEvent.HANDLER_SERVER_ERROR,
+                    true);
             return;
         }
-        if (status >= 400
+        // sendError without a body (the container would have rendered an error page): give the
+        // buyer a Problem Details body that echoes nothing of the request.
+        boolean bareSendError = status >= 400
                 && upfrontResponse != null
                 && upfrontResponse.errorSent()
-                && wrappedResponse.getContentSize() == 0) {
-            // sendError without a body (the container would have rendered an error page): give the
-            // buyer a Problem Details body that echoes nothing of the request.
-            writeProblem(wrappedResponse, status);
-        }
+                && wrappedResponse.getContentSize() == 0;
         reportPaidNotServed(
-                request, wrappedResponse, attempt, status, X402PaidRequestFailedEvent.reasonForStatus(status));
+                request,
+                wrappedResponse,
+                attempt,
+                status,
+                X402PaidRequestFailedEvent.reasonForStatus(status),
+                bareSendError);
     }
 
+    /**
+     * Reports a paid-but-not-served request, then answers it. The report comes first and never
+     * depends on the answer: the buyer has paid, so the {@link X402PaidRequestFailedEvent} (the
+     * seller's record of what it owes) is published even if the response cannot be written.
+     * Adding {@code PAYMENT-RESPONSE} and, if asked, a Problem Details body is best effort.
+     */
     private void reportPaidNotServed(
             HttpServletRequest request,
             HttpServletResponse response,
             X402PaymentAttempt attempt,
             int status,
-            String reasonCode) {
-        setPaymentResponse(response, attempt);
+            String reasonCode,
+            boolean writeProblemBody) {
         attempt.outcome(PAID_NOT_SERVED);
         publishPaidRequestFailed(request, attempt, status, reasonCode);
+        try {
+            setPaymentResponse(response, attempt);
+            if (writeProblemBody) {
+                writeProblem(response, status);
+            }
+        } catch (IOException | RuntimeException unwritable) {
+            log.warn(
+                    "could not write the answer to a paid but not served request: {}",
+                    unwritable.getClass().getSimpleName());
+        }
     }
 
     private void publishPaidRequestFailed(

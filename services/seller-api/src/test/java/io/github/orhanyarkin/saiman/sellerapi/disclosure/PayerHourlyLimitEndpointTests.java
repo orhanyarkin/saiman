@@ -31,10 +31,19 @@ class PayerHourlyLimitEndpointTests extends RagTestBase {
         postPaid("/v1/disclosures/THYAO/questions", "20000", body)
                 .expectStatus()
                 .isOk();
-        postPaid("/v1/disclosures/THYAO/questions", "20000", body)
+        String refusal = postPaid("/v1/disclosures/THYAO/questions", "20000", body)
                 .expectStatus()
-                .isEqualTo(429);
+                .isEqualTo(429)
+                .expectBody(String.class)
+                .returnResult()
+                .getResponseBody();
 
+        // The refusal is a fixed Problem Detail: nothing of the question or the retrieved chunks.
+        assertThat(refusal)
+                .contains("Too many answers requested right now")
+                .doesNotContain("board")
+                .doesNotContain("decide")
+                .doesNotContain("kap:5:");
         assertThat(router.modelCalls()).isEqualTo(2);
         assertThat(FACILITATOR.settleCallCount()).isEqualTo(3);
         assertOneCreditNote(429);

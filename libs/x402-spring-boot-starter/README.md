@@ -71,6 +71,16 @@ Check that a facilitator accepts an upfront offer (read-only `/verify`, never `/
 
 Observation `x402.server.payment` with low-cardinality keys `x402.network`, `x402.scheme`,
 `x402.asset`, `x402.payment_flow` and `x402.outcome` (e.g. `settled`, `replayed`,
-`settlement_failed`, `paid_not_served`). Metrics: `x402.payments{network,outcome}`,
-`x402.payment.amount` (settled amounts) and `x402.payment.paid_not_served.amount` (amounts settled
-up front for requests that were then not served).
+`settlement_failed`, `paid_not_served`). Metrics: `x402.payments{network,outcome}` with outcome
+`settled` or `failed` (each payment counted once, so outcomes can be summed), `x402.payment.amount`
+(settled amounts), `x402.payments.paid_not_served{network}` (upfront payments that were settled,
+already counted as `settled`, and then not served) and `x402.payment.paid_not_served.amount`
+(their amounts, in atomic units).
+
+## Upgrade notes (pre-1.0)
+
+The public API may still change before 1.0. Source-incompatible changes so far:
+
+- `RequiresPaymentInterceptor`'s public constructor gained an `ApplicationEventPublisher`
+  parameter (the upfront flow publishes settlement events from the interceptor). Only code that
+  constructs the interceptor itself instead of using the auto-configured bean is affected.
