@@ -2,3 +2,5 @@
 - [Model router T1 audit](model-router-t1-audit.md) — OPENAI_BASE_URL key exfil, OPENAI_LOG body dump, cancelled stream uncounted, soft-cap overshoot (2026-09-30)
 - [M2 T4 seller RAG audit](m2-t4-seller-rag-audit.md) — LLM-before-settle: non-2xx releases nonce (free runs to cap), 20s-window free compute, ordering facts (2026-09-30)
 - [M2 close audit](m2-close-audit.md) — router OpenAiChatOptions passthrough (no merge in Spring AI 2.0.1), MKK URL unpinned, guard after retrieval (2026-09-30)
+- [M3 T3 spend-control audit](m3-t3-spend-control-audit.md) — /api guard bypass via ;/%61 (confirmed, also ingest), ".." in SellerEndpoint, trigger/role gaps (2026-09-30)
+- [M3 T4 agents audit](m3-t4-agents-audit.md) — no Crit/High; T3 guard + ".." closed; Unicode invisibles, link-scrub gaps, orphan approvals, test gaps (2026-10-01)
