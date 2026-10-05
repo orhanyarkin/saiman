@@ -9,6 +9,10 @@ management:
     map-environment-variables: false
 
 saiman:
+  test:
+    db:
+      # The pool runs as ingest_app (DML only) and Flyway as ingest_owner, as in production (ADR-0024).
+      runtime-role: app
   ingest:
     mkk:
       # base-url is set per test run by IngestIntegrationTests (fake MKK server)

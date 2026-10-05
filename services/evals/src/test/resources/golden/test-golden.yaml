@@ -1,0 +1,41 @@
+# Hermetic fixture for EvalRunnerTests: not a real corpus (all indexes are made up).
+version: 1
+corpus:
+  watermark: 2023-12-29T20:46:52Z
+  corpusVersion: "v-golden"
+items:
+  - id: R-A
+    kind: RETRIEVAL
+    ticker: THYAO
+    question: "alfa sorusu"
+    expected:
+      relevant:
+        - {index: 100, grade: 3}
+        - {index: 200, grade: 2}
+  - id: R-FLAKY
+    kind: RETRIEVAL
+    ticker: ASELS
+    question: "beta sorusu"
+    expected:
+      relevant:
+        - {index: 300, grade: 3}
+  - id: F-B
+    kind: FRESHNESS
+    ticker: ASELS
+    question: "ASELS son açıklamaları"
+    expected:
+      latest: [11, 12, 13, 14, 15]
+  - id: A-1
+    kind: ANSWER
+    ticker: THYAO
+    question: "Ne zaman?"
+    expected:
+      sources: [100]
+      requiredFacts:
+        - anyOf: ["18.10.2023"]
+  - id: U-1
+    kind: UNANSWERABLE
+    ticker: AKBNK
+    question: "Net kar?"
+    expected:
+      reason: NOT_IN_CORPUS

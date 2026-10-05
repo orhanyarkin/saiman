@@ -39,8 +39,10 @@ public abstract class IngestIntegrationTests {
 
     @BeforeEach
     void resetState() {
-        jdbc.sql("TRUNCATE chunk, dead_letter, source_cursor, source_document CASCADE")
-                .update();
+        // The runtime role has no TRUNCATE (ADR-0024); chunks go with their document (ON DELETE CASCADE).
+        jdbc.sql("DELETE FROM source_document").update();
+        jdbc.sql("DELETE FROM dead_letter").update();
+        jdbc.sql("DELETE FROM source_cursor").update();
         mkkClient.resetCircuit();
         MKK.reset();
         SyntheticKap.load(MKK);
