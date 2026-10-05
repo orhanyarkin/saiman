@@ -16,6 +16,11 @@ spring:
         request.timeout.ms: 1000
         delivery.timeout.ms: 2000
 saiman:
+  test:
+    db:
+      # As in production (ADR-0024): the pool runs as seller_api_app (DML only), Flyway as seller_api_owner. Tests
+      # that clean up or tamper on purpose use PostgresContainerConfiguration.SuperuserDatabase.
+      runtime-role: app
   # The service-token digests of libs/api-security's TestTokens (SERVICE_LEDGER_SHA256, SERVICE_EVALS_SHA256):
   # test-only tokens, never used by a deployment. The READER/OPERATOR digests are not needed by seller-api; they are
   # configured here only so the tests can prove a valid human token is still refused on /internal/**.
