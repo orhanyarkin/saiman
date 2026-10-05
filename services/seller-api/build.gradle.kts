@@ -6,6 +6,7 @@ dependencies {
     implementation(platform(libs.spring.ai.bom)) // Spring AI's ChatClient is part of the model router's API
     implementation(project(":libs:x402-spring-boot-starter"))
     implementation(project(":libs:shared"))
+    implementation(project(":libs:api-security")) // service tokens on /internal/** only (ADR-0023)
     implementation(project(":libs:model-router")) // all LLM calls go through the router (CLAUDE.md rule 6)
     implementation(libs.resilience4j.retry)
     implementation(libs.resilience4j.circuitbreaker)
@@ -28,4 +29,5 @@ dependencies {
     testImplementation(testFixtures(project(":libs:model-router")))
     testImplementation(testFixtures(project(":libs:x402-spring-boot-starter")))
     testImplementation(project(":libs:test-support")) // one Postgres, Kafka and Redis per test JVM (ADR-0020)
+    testImplementation(testFixtures(project(":libs:api-security"))) // TestTokens: known tokens and digests
 }

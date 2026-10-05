@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.sellerapi.testsupport;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
+import io.github.orhanyarkin.saiman.testsupport.PostgresContainerConfiguration.SuperuserDatabase;
 import io.github.orhanyarkin.saiman.testsupport.RedisContainerConfiguration;
 import io.github.orhanyarkin.x402.core.Eip3009Authorization;
 import io.github.orhanyarkin.x402.core.PaymentFlow;
@@ -81,6 +82,9 @@ public abstract class RagTestBase {
     @Autowired
     protected JdbcClient jdbc;
 
+    @Autowired
+    protected SuperuserDatabase superuserDatabase;
+
     @BeforeEach
     void resetFakes() {
         // Summary cache, single-flight locks, negative cache and run-guard counters: per-test state.
@@ -93,9 +97,8 @@ public abstract class RagTestBase {
         INGEST.reset();
         router.replyWith("{}");
         // Settlement records, credit notes and outbox publications: per-test state as well.
-        jdbc.sql("DELETE FROM event_publication").update();
-        jdbc.sql("DELETE FROM settlement").update();
-        jdbc.sql("DELETE FROM credit_note").update();
+        // As the superuser: the runtime role may not delete settlement or credit-note rows (ADR-0024).
+        SuperuserJdbc.reset(SuperuserJdbc.of(superuserDatabase));
     }
 
     protected final PaymentRequirements offer(String price) {

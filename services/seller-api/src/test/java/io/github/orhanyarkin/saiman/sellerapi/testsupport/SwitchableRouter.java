@@ -50,6 +50,14 @@ public final class SwitchableRouter implements ModelRouter {
         return model == null ? 0 : model.maxConcurrentCalls();
     }
 
+    /** Every router request goes to {@code router} (e.g. the real DefaultModelRouter over a fake model). */
+    public void use(ModelRouter router) {
+        chat.set(null);
+        slow.set(null);
+        delegate.set(router);
+        requests.set(0);
+    }
+
     /** Every router request fails with {@code failure}. */
     public void failWith(RuntimeException failure) {
         chat.set(null);
