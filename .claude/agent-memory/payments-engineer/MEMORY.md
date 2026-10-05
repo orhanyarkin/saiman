@@ -15,3 +15,4 @@
 - [Spring 7 Problem Details echo](spring7-problem-details-echo.md) — null bodies in ResponseEntityExceptionHandler, instance = URI, resource 404 bypasses advice, RestTestClient % re-encoding.
 - [Standalone MockMvc probes](standalone-mockmvc-probe-controllers.md) — inner @Controller probes for error-path tests; chain_tx_hash means canonical receipt, not party/amount match.
 - [M4b audit Lows findings](m4b-audit-lows-findings.md) — PaymentBook not redelivery-idempotent for F/C conflicts; 1 s epoch cushion in window tests; settleMargin() single source.
+- [Spring Security 7 resource server notes](spring-security7-resource-server-notes.md) — env vars cannot bind a Map under a dashed segment, two 401 paths, DEBUG logs query strings.
