@@ -28,7 +28,7 @@ Micrometer observations (span plus timer), one per facilitator call, from `Requi
 - low-cardinality key `reason`: closed set `FacilitatorReason` (known x402 exact-EVM codes, `settlement_pending`, `insufficient_funds`, `none`, `other`). A code in the safe shape `[a-z0-9_]{1,64}` that is not in the set is tagged `other`; the WARN keeps the raw code.
 - `x402.payments{outcome="failed"}` has the same `reason` tag (every `x402.payments` series has a `reason` tag; `none` when settled).
 
-Meaning of the outcomes: `rejected` is a definite "no" from the facilitator (`success:false`, or an HTTP 4xx); `ambiguous` is `settlement_pending`; `malformed` is an undecodable answer or `success:true` without a well-formed transaction hash; `transport_error` is a timeout, network error or 5xx; `circuit_open` means nothing was sent.
+Meaning of the outcomes: `rejected` is a definite "no" from the facilitator (`success:false`, or an HTTP 4xx); `ambiguous` is `settlement_pending`; `malformed` is a 2xx answer that is undecodable, decodes to JSON `null` or a non-object, exceeds the 64 KiB bound, or says `success:true` without a well-formed transaction hash (the status is the real 2xx); `transport_error` is a timeout, network error or 5xx; `circuit_open` means nothing was sent.
 
 One WARN per settle failure, logger `io.github.orhanyarkin.x402.server.PaymentSettler`:
 
@@ -42,6 +42,12 @@ x402 settlement failed: reason=<code> attemptId=<uuid> payer=<0x..> nonceRef=<8 
 - `secondsLeft` is `validBefore` minus the instant the `/settle` call started, on our clock (not the time of the log line) (negative means already expired). `verifyToSettleGapMs` is the time between a successful `/verify` and the `/settle` call (large in the default flow, since it includes the handler).
 - `facilitatorStatus` is `200` for any decoded answer, the real status for a 4xx/5xx, `0` when no response arrived.
 - Never logged or tagged: the signature, the payload, the facilitator's `errorMessage`, the raw nonce.
+
+### What each outcome means for the money and the claim
+
+- Settle `transport_error` (for example a read timeout) or `malformed` is **ambiguous**: the facilitator may have broadcast before the answer was lost or garbled, so money may have moved. The nonce claim is kept, the client gets a 402, and the chain resolver decides (USED or UNUSED). `facilitatorStatus=0` only means no response arrived; it does not mean nothing was sent.
+- Settle `circuit_open` means nothing was sent (the local breaker refused), but the claim is still kept, because the upfront flow treats every settle attempt the same way.
+- Verify `transport_error`, `circuit_open` or `malformed` (including a JSON `null` body): the facilitator never ruled on the authorization and this server will not settle it under that claim, so the **nonce claim is released** and the client may retry the same authorization. A verify `rejected` (a definite "invalid") keeps the claim.
 
 ## Data to collect per failure
 

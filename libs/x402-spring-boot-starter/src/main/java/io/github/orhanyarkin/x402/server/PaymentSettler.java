@@ -5,6 +5,7 @@ import io.github.orhanyarkin.x402.core.SettlementResponse;
 import io.github.orhanyarkin.x402.core.X402Codec;
 import io.github.orhanyarkin.x402.core.X402Headers;
 import io.github.orhanyarkin.x402.facilitator.FacilitatorClient;
+import io.github.orhanyarkin.x402.facilitator.FacilitatorReason;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
 import jakarta.servlet.http.HttpServletRequest;
@@ -100,17 +101,15 @@ final class PaymentSettler {
                     request, response, attempt, null, trace(attempt, startedAt, startedAtEpochSecond, result, null));
             return false;
         }
-        FacilitatorTelemetry.Result settleResult = FacilitatorTelemetry.ofSettle(settlement);
-        FacilitatorTelemetry.finish(observation, settleResult);
-        SettleTrace settleTrace =
-                trace(attempt, startedAt, startedAtEpochSecond, settleResult, settlement.transaction());
-        // Anything unexpected from here on (a null/malformed transaction hash -- the field isn't
-        // @Nullable on SettlementResponse, but the tolerant facilitator-response mapper leaves it
-        // null when a hostile or buggy facilitator omits it; or any other failure while finishing
-        // the response) must never let a caller deliver the handler's response as paid. Route every
-        // such case through failSettlement (reset, keep the nonce claim, ask again) instead of
-        // letting an exception escape -- this is the money-safe default, not merely an error handler.
+        // Classification, telemetry and the trace all sit inside the fail-safe try below: ANY
+        // exception (even a null answer a buggy client let through) ends in failSettlement with the
+        // observation stopped exactly once.
+        FacilitatorTelemetry.Result settleResult = null;
+        SettleTrace settleTrace = null;
         try {
+            settleResult = FacilitatorTelemetry.ofSettle(settlement);
+            FacilitatorTelemetry.finish(observation, settleResult);
+            settleTrace = trace(attempt, startedAt, startedAtEpochSecond, settleResult, settlement.transaction());
             String transaction = settlement.transaction();
             if (!settlement.success()
                     || transaction == null
@@ -150,6 +149,15 @@ final class PaymentSettler {
                     request.getRequestURI(),
                     unexpected.getClass().getSimpleName(),
                     unexpected);
+            if (settleResult == null) {
+                // Failed before the observation was stopped: close it once, as malformed.
+                settleResult = new FacilitatorTelemetry.Result(
+                        FacilitatorTelemetry.Outcome.MALFORMED, FacilitatorReason.NONE, 200);
+                FacilitatorTelemetry.finish(observation, settleResult);
+            }
+            if (settleTrace == null) {
+                settleTrace = trace(attempt, startedAt, startedAtEpochSecond, settleResult, null);
+            }
             failSettlement(request, response, attempt, "internal_error", settleTrace);
             return false;
         }
