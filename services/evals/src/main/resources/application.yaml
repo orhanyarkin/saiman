@@ -1,6 +1,10 @@
 spring:
   application:
     name: evals
+  config:
+    # Docker/compose secrets (ADR-0009): one file per secret; the file name is the property name,
+    # e.g. /run/secrets/saiman.evals.seller.service-token (used by the answer tier).
+    import: "optional:configtree:${saiman.secrets-dir:/run/secrets/}"
   main:
     web-application-type: none
   threads:
@@ -11,6 +15,8 @@ saiman:
   evals:
     # src/test/resources/config/application.yaml turns this off for every test.
     run-on-startup: true
+    # The environment variable GIT_SHA (set by `make eval`) names the commit under test in the report.
+    git-sha: ${GIT_SHA:unknown}
 
 management:
   otlp:
