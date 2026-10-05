@@ -63,7 +63,8 @@
         "CONFLICTING_TX",
         "ENCUMBRANCE_NOT_CLEARED",
         "BOOKS_OPEN",
-        "CONFLICTING_FACT"
+        "CONFLICTING_FACT",
+        "CREDIT_NOTE_UNCORROBORATED"
       ]
     },
     "ledgerAmount": {

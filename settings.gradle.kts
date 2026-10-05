@@ -21,6 +21,7 @@ include(
     ":libs:x402-spring-boot-starter",
     ":libs:eventing",
     ":libs:evm-rpc",
+    ":libs:api-security",
     ":libs:test-support",
     ":services:seller-api",
     ":services:orchestrator",

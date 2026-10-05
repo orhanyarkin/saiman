@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.kafka.KafkaContainer;
@@ -45,6 +46,14 @@ public final class SharedContainers {
 
     private static final AtomicInteger DATABASES = new AtomicInteger();
 
+    /** Schemas (= service names) that get an owner and an app role (ADR-0024). */
+    public static final List<String> SERVICE_SCHEMAS = List.of("orchestrator", "ledger", "seller_api", "ingest");
+
+    /** Fixed password of every test role; the containers are throw-away and bound to localhost. */
+    public static final String ROLE_PASSWORD = "test-role-password";
+
+    private static boolean rolesCreated;
+
     private SharedContainers() {}
 
     /** Connection settings of one database on the shared Postgres. */
@@ -61,6 +70,7 @@ public final class SharedContainers {
      */
     public static Database newPostgresDatabase() {
         PostgreSQLContainer postgres = postgres();
+        createRolesOnce(postgres);
         String name = "test_" + DATABASES.incrementAndGet();
         try (Connection connection = DriverManager.getConnection(
                         postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
@@ -69,8 +79,62 @@ public final class SharedContainers {
         } catch (SQLException e) {
             throw new IllegalStateException("could not create test database " + name, e);
         }
+        prepareDatabase(postgres, name);
         String url = postgres.getJdbcUrl().replaceFirst("/" + postgres.getDatabaseName() + "(?=\\?|$)", "/" + name);
         return new Database(url, postgres.getUsername(), postgres.getPassword());
+    }
+
+    /** {@code <schema>_owner}: owns the schema, runs Flyway. */
+    public static String ownerRole(String schema) {
+        return schema + "_owner";
+    }
+
+    /** {@code <schema>_app}: DML only, the runtime role. */
+    public static String appRole(String schema) {
+        return schema + "_app";
+    }
+
+    /**
+     * The eight service roles (ADR-0024), cluster-wide so created once per JVM: no superuser, no createdb, no
+     * createrole, no bypassrls.
+     */
+    private static synchronized void createRolesOnce(PostgreSQLContainer postgres) {
+        if (rolesCreated) {
+            return;
+        }
+        try (Connection connection = DriverManager.getConnection(
+                        postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+                Statement statement = connection.createStatement()) {
+            for (String schema : SERVICE_SCHEMAS) {
+                for (String role : List.of(ownerRole(schema), appRole(schema))) {
+                    statement.execute("CREATE ROLE " + role + " LOGIN PASSWORD '" + ROLE_PASSWORD
+                            + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS");
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("could not create the test roles", e);
+        }
+        rolesCreated = true;
+    }
+
+    /**
+     * Per database: the pgvector extension (superuser-owned, as in production), CONNECT for the roles and each
+     * service schema owned by its owner role, so Flyway's {@code create-schemas} finds it and the app role gets its
+     * grants from the service's own migration.
+     */
+    private static void prepareDatabase(PostgreSQLContainer postgres, String database) {
+        String url = postgres.getJdbcUrl().replaceFirst("/" + postgres.getDatabaseName() + "(?=\\?|$)", "/" + database);
+        try (Connection connection = DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword());
+                Statement statement = connection.createStatement()) {
+            statement.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public");
+            for (String schema : SERVICE_SCHEMAS) {
+                statement.execute(
+                        "GRANT CONNECT ON DATABASE " + database + " TO " + ownerRole(schema) + ", " + appRole(schema));
+                statement.execute("CREATE SCHEMA IF NOT EXISTS " + schema + " AUTHORIZATION " + ownerRole(schema));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("could not prepare test database " + database, e);
+        }
     }
 
     /** The JVM's single-node KRaft Kafka broker, started if needed. */

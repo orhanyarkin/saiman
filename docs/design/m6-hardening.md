@@ -9,6 +9,10 @@ ADRs: 0023 (auth), 0024 (DB roles), 0025 (evals), 0026 (replay + cap fallback). 
 4. Kafka/Redis authentication and ingest `/internal` auth stay deferred (THREAT_MODEL revisit targets moved; ingest auth is cheap later with `libs/api-security`).
 5. The settle rule "never retry /settle" (ADR-0008) stays; the failure investigation is data-first.
 
+## Human refinements (2026-10-05)
+- The eval endpoint `/internal/v1/eval/**` is **never routed by nginx** (compose policy/`check-nginx-conf.sh` fails if any `/internal` location exists; add a test) and **writes nothing to the ledger**: no payment row, no outbox/Kafka event, no credit note. The seller-api test asserts the payment/outbox tables and topics are unchanged after a call.
+- All other assumptions above approved.
+
 ## B1. Auth contract (`libs/api-security`, package `io.github.orhanyarkin.saiman.apisecurity`)
 - `SaimanRole {READER, OPERATOR, SERVICE}` (authority `ROLE_<name>`), `SaimanAuthorities.service(caller)` = `SERVICE_<caller>`; `RoleHierarchy` `ROLE_OPERATOR > ROLE_READER`.
 - `StaticTokenIntrospector implements OpaqueTokenIntrospector` (regex `^[A-Za-z0-9_-]{32,128}$` first; SHA-256; `MessageDigest.isEqual` against every digest; principal name `<role>:<8 hex of digest>`, attribute `roles`).

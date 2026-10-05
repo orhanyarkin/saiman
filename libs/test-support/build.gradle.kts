@@ -12,4 +12,6 @@ dependencies {
     implementation(libs.spring.boot.starter.test)
     // JdbcConnectionDetails; every module that uses Postgres brings JDBC and the driver itself.
     compileOnly(libs.spring.boot.starter.jdbc)
+    // FlywayConnectionDetails (owner role runs migrations); only touched when Flyway is on the classpath.
+    compileOnly(libs.spring.boot.starter.flyway)
 }

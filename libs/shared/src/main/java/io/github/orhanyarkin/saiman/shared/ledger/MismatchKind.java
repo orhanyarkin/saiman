@@ -14,5 +14,10 @@ public enum MismatchKind {
     /** The chain is final past validBefore + grace but the books never reached a terminal state. */
     BOOKS_OPEN,
     /** A fact contradicted an earlier fact for the same authorization (amount, payTo or validBefore). */
-    CONFLICTING_FACT
+    CONFLICTING_FACT,
+    /**
+     * A credited payment the seller's own books don't confirm (ADR-0021). The chain said nothing, so the chain
+     * fields of the event are null and nothing is posted.
+     */
+    CREDIT_NOTE_UNCORROBORATED
 }
