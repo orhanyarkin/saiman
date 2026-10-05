@@ -20,7 +20,8 @@ multi-ecosystem-groups:
 # block the safe updates batched with it. Review majors by hand, for example once a quarter. Docker
 # images matter most here: a major bump of the Postgres/pgvector, Kafka or Redis image changes the
 # on-disk format of volumes that `make up` keeps (ADR-0001, ADR-0020). GitHub Actions are pinned by
-# SHA and have no data to migrate, so their majors stay enabled, with a longer wait.
+# SHA and have no data to migrate, so their majors stay enabled. (The semver-*-days cooldown keys are not
+# supported for github-actions, so the wait is the same 3 days for every bump size.)
 updates:
   - package-ecosystem: github-actions
     directory: /
@@ -28,7 +29,6 @@ updates:
     multi-ecosystem-group: weekly
     cooldown:
       default-days: 3
-      semver-major-days: 7
 
   - package-ecosystem: gradle
     directory: /
