@@ -95,6 +95,11 @@ final class StubSeller implements AutoCloseable {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         calls.incrementAndGet();
         requests.add(body);
+        // Like seller-api's body-size filter: a body of unknown length (chunked) is refused with 413.
+        if (exchange.getRequestHeaders().getFirst("Content-Length") == null) {
+            respond(exchange, 413, "{\"title\":\"Content Too Large\"}", "");
+            return;
+        }
         String auth = exchange.getRequestHeaders().getFirst("Authorization");
         if (!("Bearer " + expectedToken.get()).equals(auth)) {
             respond(exchange, 401, "{\"title\":\"Unauthorized\"}", "");

@@ -13,10 +13,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Calls seller-api's {@code POST /internal/v1/eval/questions} with the evals service token. Sequential use only
@@ -33,6 +35,7 @@ import org.springframework.web.client.RestClient;
 public class SellerClient {
 
     private static final Logger log = LoggerFactory.getLogger(SellerClient.class);
+    private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final RestClient client;
     private final Retry retry;
@@ -51,7 +54,10 @@ public class SellerClient {
     public EvalAnswerResponse answer(EvalAnswerRequest request) {
         Supplier<EvalAnswerResponse> call = () -> client.post()
                 .uri("/internal/v1/eval/questions")
-                .body(request)
+                // Serialised up front: a byte[] body is sent with a Content-Length, which seller-api's body-size
+                // filter requires (it answers 413 to a chunked body of unknown length).
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(JSON.writeValueAsBytes(request))
                 .retrieve()
                 .onStatus(HttpStatusCode::is3xxRedirection, (req, res) -> {
                     throw new SellerCallException(res.getStatusCode().value(), "redirect refused");
