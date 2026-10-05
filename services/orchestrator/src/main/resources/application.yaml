@@ -46,6 +46,12 @@ spring:
 server:
   port: 8080
 
+# The OpenAPI contract (ADR-0022) is generated only by OpenApiContractTests; a running service serves no
+# /v3/api-docs and no UI. springdoc has no UI module on the classpath either.
+springdoc:
+  api-docs:
+    enabled: false
+
 saiman:
   orchestrator:
     seller:

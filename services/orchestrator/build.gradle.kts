@@ -22,6 +22,7 @@ dependencies {
     implementation(libs.spring.modulith.starter.jdbc) // transactional outbox: JDBC event publication registry
     implementation(libs.spring.modulith.events.kafka) // externalizes payments.*.v1 and agent.run-step.v1
     implementation(libs.spring.boot.starter.kafka)
+    implementation(libs.springdoc.openapi.webmvc.api) // the dashboard contract (ADR-0022); off at runtime, on in OpenApiContractTests
     runtimeOnly(libs.postgresql)
 
     testImplementation(libs.spring.boot.starter.webmvc.test)

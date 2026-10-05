@@ -1,6 +1,14 @@
 package io.github.orhanyarkin.saiman.orchestrator.events;
 
+import io.github.orhanyarkin.saiman.orchestrator.openapi.ProblemDetailSchema;
 import io.github.orhanyarkin.saiman.shared.run.RunEvent;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
@@ -61,6 +69,7 @@ class RunEventController {
         this.properties = properties;
     }
 
+    @Operation(hidden = true) // documented once, on export(): one path and verb, two media types
     @GetMapping(path = "/api/v1/runs/{runId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     ResponseEntity<SseEmitter> stream(
             @PathVariable UUID runId, @RequestHeader(name = "Last-Event-ID", required = false) @Nullable String lastId)
@@ -129,6 +138,45 @@ class RunEventController {
         return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body(emitter);
     }
 
+    @Operation(
+            operationId = "getRunEvents",
+            summary = "A run's events: the complete JSON list, or a live SSE stream",
+            description = "Content negotiation: Accept application/json returns the complete ordered event list;"
+                    + " Accept text/event-stream streams the same envelopes (id = seq, event = type, resumes after"
+                    + " Last-Event-ID, ends after the terminal event). The envelope and payload shapes are documented"
+                    + " in docs/events/agent.run-step.v1.schema.json (and the fixtures next to it).")
+    @Parameter(
+            in = ParameterIn.HEADER,
+            name = "Last-Event-ID",
+            description = "SSE only: resume after this event seq",
+            schema = @Schema(type = "string"))
+    @ApiResponse(
+            responseCode = "200",
+            description = "The events",
+            content = {
+                @Content(
+                        mediaType = MediaType.APPLICATION_JSON_VALUE,
+                        array = @ArraySchema(schema = @Schema(type = "object"))),
+                @Content(mediaType = MediaType.TEXT_EVENT_STREAM_VALUE, schema = @Schema(type = "string"))
+            })
+    @ApiResponse(
+            responseCode = "204",
+            description = "SSE of a finished run: nothing left after Last-Event-ID",
+            content = @Content)
+    @ApiResponse(
+            responseCode = "404",
+            description = "Unknown run",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
+    @ApiResponse(
+            responseCode = "429",
+            description = "Too many event streams",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
     @GetMapping(path = "/api/v1/runs/{runId}/events", produces = MediaType.APPLICATION_JSON_VALUE)
     ResponseEntity<String> export(@PathVariable UUID runId) {
         requireRun(runId);

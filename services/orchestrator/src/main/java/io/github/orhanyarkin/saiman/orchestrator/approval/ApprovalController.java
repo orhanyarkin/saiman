@@ -1,5 +1,11 @@
 package io.github.orhanyarkin.saiman.orchestrator.approval;
 
+import io.github.orhanyarkin.saiman.orchestrator.openapi.ProblemDetailSchema;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.util.List;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
@@ -33,6 +39,32 @@ class ApprovalController {
         this.approvals = approvals;
     }
 
+    @Operation(operationId = "decideApproval", summary = "Approve or reject one payment above the approval threshold")
+    @ApiResponse(
+            responseCode = "400",
+            description = "decision is missing or invalid",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "No such approval in this run",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
+    @ApiResponse(
+            responseCode = "409",
+            description = "Already decided, expired, or the run has ended",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
+    @ApiResponse(
+            responseCode = "200",
+            description = "The approval after the decision",
+            content = @Content(schema = @Schema(implementation = ApprovalResponse.class)))
     @PostMapping(
             path = "/api/v1/runs/{runId}/approvals/{approvalId}",
             consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -59,6 +91,18 @@ class ApprovalController {
      * first, at most {@value #MAX_LIST} rows. The status is read as text so a bad value gets a fixed
      * message.
      */
+    @Operation(operationId = "listApprovals", summary = "Approvals in one status (default PENDING), newest first")
+    @ApiResponse(
+            responseCode = "400",
+            description = "status is invalid",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
+    @ApiResponse(
+            responseCode = "200",
+            description = "The approvals",
+            content = @Content(array = @ArraySchema(schema = @Schema(implementation = ApprovalView.class))))
     @GetMapping(path = "/api/v1/approvals", produces = MediaType.APPLICATION_JSON_VALUE)
     List<ApprovalView> list(@RequestParam(required = false) @Nullable String status) {
         ApprovalStatus wanted = ApprovalStatus.PENDING;

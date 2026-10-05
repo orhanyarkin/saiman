@@ -1,5 +1,11 @@
 package io.github.orhanyarkin.saiman.orchestrator.run;
 
+import io.github.orhanyarkin.saiman.orchestrator.openapi.ProblemDetailSchema;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.net.URI;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
@@ -33,6 +39,32 @@ class RunController {
         this.runs = runs;
     }
 
+    @Operation(operationId = "startRun", summary = "Start a research run")
+    @ApiResponse(
+            responseCode = "202",
+            description = "Run admitted; follow it at eventsUrl",
+            content = @Content(schema = @Schema(implementation = StartRunResponse.class)))
+    @ApiResponse(
+            responseCode = "400",
+            description = "Invalid question or budget",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
+    @ApiResponse(
+            responseCode = "429",
+            description = "Too many runs in flight; Retry-After says when to try again",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
+    @ApiResponse(
+            responseCode = "503",
+            description = "The service is not ready; Retry-After says when to try again",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
     @PostMapping(
             path = "/api/v1/runs",
             consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -44,6 +76,18 @@ class RunController {
                 .body(new StartRunResponse(started.runId(), started.eventsUrl(), started.traceId()));
     }
 
+    @Operation(operationId = "getRun", summary = "One run: status, budget, spend and report")
+    @ApiResponse(
+            responseCode = "404",
+            description = "Unknown run",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
+    @ApiResponse(
+            responseCode = "200",
+            description = "The run",
+            content = @Content(schema = @Schema(implementation = RunSummary.class)))
     @GetMapping(path = "/api/v1/runs/{runId}", produces = MediaType.APPLICATION_JSON_VALUE)
     RunSummary summary(@PathVariable UUID runId) {
         return runs.summary(runId).orElseThrow(() -> problem(HttpStatus.NOT_FOUND, "run not found"));
@@ -53,6 +97,20 @@ class RunController {
      * Newest-first keyset page. Parameters are read as text and validated here, so a bad value gets a
      * fixed message instead of Spring's type-mismatch detail (which would echo the input).
      */
+    @Operation(operationId = "listRuns", summary = "Runs, newest first (keyset pagination)")
+    @Parameter(name = "limit", description = "Page size, 1 to 100 (default 20)")
+    @Parameter(name = "before", description = "Opaque cursor: the next field of the previous page")
+    @ApiResponse(
+            responseCode = "400",
+            description = "limit or before is invalid",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
+    @ApiResponse(
+            responseCode = "200",
+            description = "A page of runs, newest first",
+            content = @Content(schema = @Schema(implementation = RunPage.class)))
     @GetMapping(path = "/api/v1/runs", produces = MediaType.APPLICATION_JSON_VALUE)
     RunPage list(
             @RequestParam(required = false) @Nullable String limit,

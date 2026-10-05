@@ -1,7 +1,12 @@
 package io.github.orhanyarkin.saiman.orchestrator.budget;
 
+import io.github.orhanyarkin.saiman.orchestrator.openapi.ProblemDetailSchema;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.x402.client.X402ClientProperties;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -43,6 +48,18 @@ class SpendController {
         this.clock = Clock.systemUTC();
     }
 
+    @Operation(operationId = "getSpend", summary = "Configured spend limits and one UTC day of spend")
+    @ApiResponse(
+            responseCode = "400",
+            description = "day is not a valid YYYY-MM-DD date",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetailSchema.class)))
+    @ApiResponse(
+            responseCode = "200",
+            description = "The limits and the day",
+            content = @Content(schema = @Schema(implementation = SpendOverview.class)))
     @GetMapping(path = "/api/v1/spend", produces = MediaType.APPLICATION_JSON_VALUE)
     SpendOverview spend(@RequestParam(required = false) @Nullable String day) {
         LocalDate date = parse(day);
