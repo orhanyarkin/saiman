@@ -46,12 +46,26 @@ hardcoded `/\/otlp\//` — so a differently-pathed exporter endpoint in a future
 still excluded correctly. See [[web-stack-pins]] for the jsdom/PerformanceObserver testing gotcha
 this produced.
 
-**API calls**: hand-written response types with a `TODO(M3/M5)` comment pointing at
-openapi-typescript generation once real OpenAPI specs exist (`src/lib/api/ping.ts` is the
-template). One `fetchX()` async function per endpoint, thrown `Error` on non-2xx, consumed via
-TanStack Query `useQuery`. Components handle `isPending` (loading, `role="status"`), `isError`
-(`role="alert"`), and the success branch — no separate "empty" state was needed for a
-single-object response.
+**API calls (M5 T3a)**: every read goes through `apiGet`, mutations through `apiPost` (always
+`Content-Type: application/json` + `X-Saiman-Csrf: 1`, disabled when `VITE_DEMO_MODE=replay`), live
+runs through `subscribeRunEvents` (native `EventSource`) — all in `src/lib/api/source.ts`. Non-2xx
+becomes a typed `ApiError` (`kind`: conflict/rate-limited/not-ready/...; `detail` = fixed Problem
+Details text, `retryAfterSeconds`). `queries.ts` holds `queryOptions` factories + `queryKeys`;
+`types.ts` is the ONE place response types live (hand-written until T3b/T3c swap in generated
+openapi-typescript types). `run-events.ts` = hand-written 14-event union + `parseRunEvent` guard,
+tested against the shared golden fixtures. Money only via `lib/money.ts` (BigInt/string, no floats).
+Pure reducers for the run page live in `lib/run-view-model.ts` (no React). Components handle
+loading (`role="status"`), error (`ErrorNotice`, `role="alert"`) and empty states.
+
+**Accessibility conventions**: skip link + `<main id="main" tabIndex={-1}>` in `__root.tsx`; one h1
+per route; approval card = labelled `region` + one static sr-only `role="alert"` line (buttons stay
+outside the alert), countdown `aria-hidden`; step changes via a throttled polite `role="status"`;
+status always glyph + text, never colour only; `--ring`/`--muted-foreground` darkened for AA.
+
+**e2e**: `pnpm e2e` runs `e2e/fixture-server.ts` (port 4010) + Vite in fixture mode
+(`SAIMAN_API_TARGET`, port 5174) — `reuseExistingServer: false`. The fixture server is also
+unit-tested in `pnpm test` (`e2e/fixture-server.test.ts`; vitest excludes only `e2e/**/*.spec.ts`).
+Proxy table is `web/proxy.ts` (ledger regex key BEFORE catch-all `/api`, pinned by `proxy.test.ts`).
 
 **Testing**: `src/test/setup.ts` imports `@testing-library/jest-dom/vitest` (not the bare
 `"@testing-library/jest-dom"` import — that resolves to the default export path whose bundled

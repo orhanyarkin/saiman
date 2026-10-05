@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@12.6.0",
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.19"
   },
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,8 @@
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:fixture": "node e2e/fixture-server.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "1.9.1",
@@ -33,6 +34,7 @@
     "tailwind-merge": "3.7.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",

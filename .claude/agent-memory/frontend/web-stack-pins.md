@@ -50,3 +50,12 @@ after the stub, and `vi.resetModules()` in afterEach). jsdom also lacks
 guards those with `if (!performance.getEntriesByType) return;`, so no extra polyfill needed there.
 
 See [[ui-conventions]] for how this plays out in the actual test files.
+
+**M5 T3a gotchas** (2026-10-05): `@axe-core/playwright` 4.13.0 added (exact pin). `FormEvent` is
+flagged by `@typescript-eslint/no-deprecated` with `@types/react` 19.3: use `SyntheticEvent`.
+Under vitest's jsdom env `import.meta.url` is not a `file:` URL: resolve repo fixtures from
+`process.cwd()` (tests run with `web/` as cwd) or use `// @vitest-environment node`.
+`tsconfig.node.json` lists root-level `proxy.ts`/`proxy.test.ts` explicitly and enabled
+`noUncheckedIndexedAccess`; Vite config imports `./proxy.ts` with the extension (native config
+loader warning otherwise). `@testing-library/user-event` is NOT installed: use `fireEvent`. Node
+>= 22.19 runs `.ts` files directly (`node e2e/fixture-server.ts`): no enums/param properties.

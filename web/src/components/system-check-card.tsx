@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { fetchPing } from "@/lib/api/ping";
+import { pingQuery } from "@/lib/api/queries";
 
 /** Local Jaeger UI (ADR-0006); the trace query API lives behind the same host. */
 const JAEGER_TRACE_BASE_URL = "http://localhost:16686/trace";
@@ -19,10 +19,7 @@ const JAEGER_TRACE_BASE_URL = "http://localhost:16686/trace";
  * orchestrator and that the request produced one distributed trace through Postgres.
  */
 export function SystemCheckCard() {
-  const { data, error, isPending, isError, isFetching, refetch } = useQuery({
-    queryKey: ["ping"],
-    queryFn: fetchPing,
-  });
+  const { data, error, isPending, isError, isFetching, refetch } = useQuery(pingQuery());
 
   return (
     <Card className="w-full max-w-md">
@@ -38,9 +35,16 @@ export function SystemCheckCard() {
         {isPending ? (
           <p role="status">Checking orchestrator…</p>
         ) : isError ? (
-          <p role="alert" className="text-destructive">
-            {error instanceof Error ? error.message : "Could not reach the orchestrator."}
-          </p>
+          <div role="alert" className="space-y-1 text-sm">
+            <p className="text-destructive font-medium">
+              <span aria-hidden="true">{"\u26A0 "}</span>
+              {error instanceof Error ? error.message : "Could not reach the orchestrator."}
+            </p>
+            <p>
+              How to fix: start the local stack with <code>make up</code> (or run the orchestrator
+              on port 8080), wait until it is healthy, then press Check again.
+            </p>
+          </div>
         ) : (
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
             <dt className="text-muted-foreground font-medium">Service</dt>
