@@ -1,33 +1,28 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { ErrorNotice } from "@/components/error-notice";
 import { ApprovalCard } from "@/components/run/approval-card";
 import { BudgetMeter } from "@/components/run/budget-meter";
+import { PaymentIntentsPanel } from "@/components/run/payment-intents-panel";
 import { PaymentsPanel } from "@/components/run/payments-panel";
+import { StatusBadge } from "@/components/run/status-badge";
 import { ReportPanel } from "@/components/run/report-panel";
 import { Stepper } from "@/components/run/stepper";
 import { Timeline } from "@/components/run/timeline";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { queryKeys } from "@/lib/api/queries";
+import { queryKeys, runPaymentsQuery } from "@/lib/api/queries";
 import { ApiError } from "@/lib/api/source";
-import { isTerminalStatus, type RunStatus } from "@/lib/api/types";
+import { isTerminalStatus } from "@/lib/api/types";
 import { useDocumentTitle, useRunEvents, useThrottledValue } from "@/lib/hooks";
 import { formatMoney, moneyTitle } from "@/lib/money";
+import { STATUS_TEXT } from "@/lib/run-status";
 import { deriveRunView, stepLabel } from "@/lib/run-view-model";
 
 export const Route = createFileRoute("/runs/$runId")({
   component: RunPage,
 });
-
-const STATUS_TEXT: Record<RunStatus, string> = {
-  QUEUED: "Queued",
-  RUNNING: "Running",
-  AWAITING_APPROVAL: "Waiting for your approval",
-  SUCCEEDED: "Completed",
-  FAILED: "Failed",
-};
 
 function RunPage() {
   const { runId } = Route.useParams();
@@ -37,7 +32,8 @@ function RunPage() {
 
 function RunView({ runId }: { runId: string }) {
   const queryClient = useQueryClient();
-  const { events, summary, stream } = useRunEvents(runId);
+  const { events, summary, stream, terminal } = useRunEvents(runId);
+  const payments = useQuery(runPaymentsQuery(runId, terminal));
   const view = deriveRunView(events);
   const status = summary.data?.status;
 
@@ -89,9 +85,8 @@ function RunView({ runId }: { runId: string }) {
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold">Research run</h1>
         <p>
-          <span className="rounded border px-2 py-0.5 text-sm font-medium">
-            Status: {STATUS_TEXT[run.status]}
-          </span>
+          <span className="sr-only">Status: </span>
+          <StatusBadge status={run.status} />
           {stream === "reconnecting" ? (
             <span className="text-muted-foreground ml-2 text-sm">
               Reconnecting to the live stream…
@@ -160,7 +155,15 @@ function RunView({ runId }: { runId: string }) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <PaymentsPanel payments={view.payments} />
+          {payments.data ? (
+            <PaymentIntentsPanel items={payments.data.items} />
+          ) : (
+            <>
+              {/* Until the API answers (or if it fails) the events still tell the story. */}
+              {payments.isError ? <ErrorNotice error={payments.error} /> : null}
+              <PaymentsPanel payments={view.payments} />
+            </>
+          )}
         </CardContent>
       </Card>
 

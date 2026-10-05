@@ -1,6 +1,7 @@
 import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
 
 import { isReplayMode } from "@/lib/api/source";
+import { usePendingApprovalCount } from "@/lib/hooks";
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -10,6 +11,7 @@ const navLink =
   "rounded-md px-2 py-1 text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2";
 
 function RootComponent() {
+  const pending = usePendingApprovalCount();
   return (
     <div className="bg-background min-h-screen">
       <a
@@ -30,8 +32,28 @@ function RootComponent() {
           <Link to="/" className="font-semibold">
             Saiman
           </Link>
+          <Link
+            to="/runs"
+            activeOptions={{ exact: true }}
+            className={navLink}
+            activeProps={{ "aria-current": "page" }}
+          >
+            Runs
+          </Link>
           <Link to="/runs/new" className={navLink} activeProps={{ "aria-current": "page" }}>
             New run
+          </Link>
+          <Link to="/approvals" className={navLink} activeProps={{ "aria-current": "page" }}>
+            Approvals
+            {pending !== null && pending > 0 ? (
+              <span className="ml-1 rounded-full border border-amber-600 bg-amber-100 px-2 text-xs font-semibold text-amber-950">
+                {pending}
+                <span className="sr-only"> pending</span>
+              </span>
+            ) : null}
+          </Link>
+          <Link to="/spend" className={navLink} activeProps={{ "aria-current": "page" }}>
+            Spend
           </Link>
         </nav>
       </header>

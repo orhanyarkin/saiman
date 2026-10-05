@@ -1,5 +1,3 @@
-import { useMutation } from "@tanstack/react-query";
-
 import { ErrorNotice } from "@/components/error-notice";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,10 +8,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { decideApproval } from "@/lib/api/queries";
-import { ApiError, isReplayMode } from "@/lib/api/source";
+import { isReplayMode } from "@/lib/api/source";
 import { useNow } from "@/lib/hooks";
 import { formatMoney, moneyTitle } from "@/lib/money";
+import { useApprovalDecision } from "@/lib/use-approval-decision";
 import type { ApprovalRequest } from "@/lib/run-view-model";
 
 function countdown(msLeft: number): string {
@@ -41,15 +39,7 @@ export function ApprovalCard({ runId, approval, onSettled }: Props) {
   const expiresAt = Date.parse(approval.expiresAt);
   const expired = now >= expiresAt;
 
-  const decision = useMutation({
-    mutationFn: (choice: "APPROVE" | "REJECT") =>
-      decideApproval(runId, approval.approvalId, choice),
-    onSettled: () => {
-      onSettled();
-    },
-  });
-
-  const conflict = decision.error instanceof ApiError && decision.error.kind === "conflict";
+  const { decision, conflict } = useApprovalDecision(runId, approval.approvalId, onSettled);
   const locked = expired || decision.isPending || decision.isSuccess || conflict;
   const expiresText = new Date(expiresAt).toLocaleTimeString();
 

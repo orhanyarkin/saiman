@@ -1,20 +1,20 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, type SyntheticEvent } from "react";
 
 import { ErrorNotice } from "@/components/error-notice";
 import { Button } from "@/components/ui/button";
-import { startRun } from "@/lib/api/queries";
+import { spendQuery, startRun } from "@/lib/api/queries";
 import { isReplayMode } from "@/lib/api/source";
 import { useDocumentTitle } from "@/lib/hooks";
-import { EXAMPLE_QUESTION, limits, QUESTION_MAX, QUESTION_MIN } from "@/lib/limits";
+import { todayUtc } from "@/lib/day";
+import { EXAMPLE_QUESTION, QUESTION_MAX, QUESTION_MIN } from "@/lib/limits";
 import { formatMoney, parseUsdcInput, usdcInputValue } from "@/lib/money";
 
 export const Route = createFileRoute("/runs/new")({
   component: NewRun,
 });
 
-const usdc = (atomicUnits: number) => ({ atomicUnits, asset: "USDC", decimals: 6 });
 const inputClass =
   "border-input bg-background w-full rounded-md border px-3 py-2 text-sm aria-invalid:border-destructive";
 
@@ -22,7 +22,12 @@ function NewRun() {
   useDocumentTitle("New run");
   const navigate = useNavigate();
   const [question, setQuestion] = useState("");
-  const [budget, setBudget] = useState(usdcInputValue(limits.defaultRunBudgetAtomic));
+  // Limits come from the server (display hints; the server enforces them). Until the user types,
+  // the budget field shows the server's default run budget.
+  const spend = useQuery(spendQuery(todayUtc()));
+  const limits = spend.data?.limits;
+  const [typedBudget, setTypedBudget] = useState<string | null>(null);
+  const budget = typedBudget ?? (limits ? usdcInputValue(limits.defaultRunBudget.atomicUnits) : "");
   const [submitted, setSubmitted] = useState(false);
 
   const trimmed = question.trim();
@@ -31,11 +36,14 @@ function NewRun() {
       ? `Enter between ${String(QUESTION_MIN)} and ${String(QUESTION_MAX)} characters.`
       : null;
   const budgetAtomic = parseUsdcInput(budget);
-  const budgetError =
-    budgetAtomic === null || budgetAtomic <= 0
+  // Without loaded limits an empty budget means "use the server default".
+  const budgetOptional = limits === undefined && budget.trim() === "";
+  const budgetError = budgetOptional
+    ? null
+    : budgetAtomic === null || budgetAtomic <= 0
       ? "Enter an amount in USDC, for example 0.05."
-      : budgetAtomic > limits.maxRunBudgetAtomic
-        ? `The maximum budget is ${formatMoney(usdc(limits.maxRunBudgetAtomic))}.`
+      : limits && budgetAtomic > limits.maxRunBudget.atomicUnits
+        ? `The maximum budget is ${formatMoney(limits.maxRunBudget)}.`
         : null;
 
   const start = useMutation({
@@ -48,10 +56,10 @@ function NewRun() {
   function onSubmit(event: SyntheticEvent) {
     event.preventDefault();
     setSubmitted(true);
-    if (questionError !== null || budgetError !== null || budgetAtomic === null) {
+    if (questionError !== null || budgetError !== null) {
       return;
     }
-    start.mutate({ question: trimmed, budgetAtomic });
+    start.mutate({ question: trimmed, ...(budgetAtomic === null ? {} : { budgetAtomic }) });
   }
 
   return (
@@ -105,13 +113,24 @@ function NewRun() {
             aria-invalid={submitted && budgetError !== null}
             aria-describedby="budget-help budget-error"
             onChange={(event) => {
-              setBudget(event.target.value);
+              setTypedBudget(event.target.value);
             }}
           />
           <p id="budget-help" className="text-muted-foreground text-sm">
-            Payments above {formatMoney(usdc(limits.approvalThresholdAtomic))} ask for your approval
-            first. Approving a payment never raises this budget.
+            {limits
+              ? `Payments above ${formatMoney(limits.approvalThreshold)} ask for your approval first. `
+              : "Large payments ask for your approval first. "}
+            Approving a payment never raises this budget.
           </p>
+          {spend.isError ? (
+            <>
+              <ErrorNotice error={spend.error} />
+              <p className="text-muted-foreground text-sm">
+                The limits could not be loaded. You can still start a run: leave the budget empty to
+                use the default, and the server enforces every limit.
+              </p>
+            </>
+          ) : null}
           <p id="budget-error" role="alert" className="text-destructive text-sm font-medium">
             {submitted && budgetError !== null ? budgetError : ""}
           </p>

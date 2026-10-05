@@ -10,7 +10,13 @@ export default tseslint.config([
     // `pnpm dev` or `pnpm build` run. It must still be committed: `pnpm build` runs `tsc -b`
     // before `vite build`, so a fresh clone would fail to typecheck without it already present.
     // Never hand-edited or linted (it also self-excludes via its own generated header).
-    ignores: ["dist", "src/routeTree.gen.ts", "playwright-report", "test-results"],
+    ignores: [
+      "dist",
+      "src/routeTree.gen.ts",
+      "src/lib/api/generated",
+      "playwright-report",
+      "test-results",
+    ],
   },
   {
     files: ["**/*.{ts,tsx}"],

@@ -28,6 +28,7 @@ export default defineConfig({
       url: `http://127.0.0.1:${String(FIXTURE_PORT)}/api/v1/ping`,
       env: { SAIMAN_FIXTURE_PORT: String(FIXTURE_PORT), SAIMAN_STEP_MS: "100" },
       reuseExistingServer: false,
+      gracefulShutdown: { signal: "SIGTERM", timeout: 2000 },
     },
     {
       command: `pnpm exec vite --port ${String(APP_PORT)} --strictPort`,
@@ -37,6 +38,7 @@ export default defineConfig({
         VITE_OTEL_ENABLED: "false",
       },
       reuseExistingServer: false,
+      gracefulShutdown: { signal: "SIGTERM", timeout: 2000 },
     },
   ],
   projects: [

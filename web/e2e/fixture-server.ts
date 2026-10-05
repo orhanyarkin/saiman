@@ -10,6 +10,8 @@
  * - `responses`: served verbatim for any matching GET (path including query string).
  * - `runEvents`: captured runs; `GET /api/v1/runs/{id}` is derived from the events and the events
  *   endpoint serves them as SSE or as the JSON export.
+ * - `GET /api/v1/runs/{id}/payments` and `GET /api/v1/approvals` are derived from the stateful runs
+ *   (a captured response for the same path wins; captured approvals are listed before live ones).
  * - Stateful on top: `POST /api/v1/runs` starts a scripted run built from the shared golden
  *   fixtures; the script pauses at PAYMENT_APPROVAL_REQUIRED until the approval POST arrives.
  *
@@ -206,6 +208,9 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
     if (next.waitForApproval) {
       // The golden fixture's expiry is in the past; a live approval always gets five minutes.
       next.data.expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+      // Unique ids per run: the golden fixture's would collide across runs in the approvals list.
+      next.data.approvalId = randomUUID();
+      next.data.paymentIntentId = randomUUID();
     }
     emit(run, next.type, next.data);
     if (next.waitForApproval) {
@@ -253,6 +258,12 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
     });
     // Continue with the script that matches the decision.
     run.queue = tail(fixtures, decision === "APPROVE");
+    const required = run.events.findLast((e) => e.type === "PAYMENT_APPROVAL_REQUIRED");
+    for (const step of run.queue) {
+      if (step.type === "PAYMENT_SETTLED" && required) {
+        step.data.paymentIntentId = required.data.paymentIntentId;
+      }
+    }
     run.waiting = false;
   }
 
@@ -286,6 +297,74 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
       finishedAt: done?.occurredAt ?? failed?.occurredAt ?? null,
       report: done?.data.report ?? null,
     };
+  }
+
+  /** Payment intents derived from a run's events (what `GET /runs/{id}/payments` returns). */
+  function paymentItems(run: Run) {
+    const items = new Map<string, Json>();
+    const byApproval = new Map<string, string>();
+    let tool = "unknown";
+    for (const event of run.events) {
+      const d = event.data;
+      if (event.type === "TOOL_CALL_REQUESTED") {
+        tool = String(d.tool);
+      } else if (event.type === "PAYMENT_APPROVAL_REQUIRED") {
+        const intentId = String(d.paymentIntentId);
+        byApproval.set(String(d.approvalId), intentId);
+        items.set(intentId, {
+          paymentIntentId: intentId,
+          tool,
+          resource: d.resource,
+          payTo: d.payTo,
+          amount: d.amount,
+          status: "AWAITING_APPROVAL",
+          txHash: null,
+          createdAt: event.occurredAt,
+          updatedAt: event.occurredAt,
+        });
+      } else if (event.type === "PAYMENT_APPROVAL_DECIDED") {
+        const item = items.get(byApproval.get(String(d.approvalId)) ?? "");
+        if (item) {
+          item.status = d.decision;
+          item.updatedAt = event.occurredAt;
+        }
+      } else if (event.type === "PAYMENT_SETTLED") {
+        const item = items.get(String(d.paymentIntentId));
+        if (item) {
+          item.status = "SETTLED";
+          item.txHash = d.txHash;
+          item.updatedAt = event.occurredAt;
+        }
+      }
+    }
+    return [...items.values()];
+  }
+
+  /** Pending approvals of the stateful runs (`GET /approvals?status=PENDING`). */
+  function pendingApprovals() {
+    const out: Json[] = [];
+    for (const run of runs.values()) {
+      if (run.approval?.status !== "PENDING") {
+        continue;
+      }
+      const event = run.events.findLast((e) => e.type === "PAYMENT_APPROVAL_REQUIRED");
+      if (!event) {
+        continue;
+      }
+      out.push({
+        id: run.approval.approvalId,
+        runId: run.id,
+        paymentIntentId: event.data.paymentIntentId,
+        amountAtomic: (event.data.amount as { atomicUnits: number }).atomicUnits,
+        payTo: event.data.payTo,
+        resource: event.data.resource,
+        status: "PENDING",
+        requestedAt: event.occurredAt,
+        expiresAt: event.data.expiresAt,
+        decidedAt: null,
+      });
+    }
+    return out;
   }
 
   function streamEvents(req: IncomingMessage, res: ServerResponse, run: Run) {
@@ -424,6 +503,28 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
       } else {
         json(res, 200, run.events);
       }
+      return;
+    }
+
+    const paymentsMatch = /^\/api\/v1\/runs\/([^/]+)\/payments$/.exec(path);
+    if (method === "GET" && paymentsMatch) {
+      const captured = capture.responses?.[path];
+      const run = runs.get(paymentsMatch[1] ?? "");
+      if (captured !== undefined) {
+        json(res, 200, captured);
+      } else if (run) {
+        json(res, 200, { items: paymentItems(run) });
+      } else {
+        problem(res, 404, "run not found");
+      }
+      return;
+    }
+
+    if (method === "GET" && path === "/api/v1/approvals") {
+      // Captured pending approvals first, then those of the runs started against this server.
+      const captured = capture.responses?.[path + url.search] ?? capture.responses?.[path];
+      const live = pendingApprovals();
+      json(res, 200, Array.isArray(captured) ? [...(captured as Json[]), ...live] : live);
       return;
     }
 

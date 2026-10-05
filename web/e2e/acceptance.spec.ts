@@ -38,7 +38,7 @@ test("first run: landing, start, approve, completed report", async ({ page }) =>
   await card.getByRole("button", { name: /Approve/ }).click();
 
   await expect(page.getByRole("heading", { name: "Report" })).toBeVisible();
-  await expect(page.getByText("Status: Completed")).toBeVisible();
+  await expect(page.locator("main header")).toContainText("Completed");
   await expect(page.getByRole("link", { name: /Özel Durum/ })).toHaveAttribute(
     "href",
     /^https:\/\/www\.kap\.org\.tr\//,
@@ -58,7 +58,7 @@ test("rejecting the payment ends the run as failed", async ({ page }) => {
   const card = page.getByRole("region", { name: /Approval needed/ });
   await expect(card).toBeVisible();
   await card.getByRole("button", { name: "Reject" }).click();
-  await expect(page.getByText("Status: Failed")).toBeVisible();
+  await expect(page.locator("main header")).toContainText("Failed");
 });
 
 test("the form validates the question before sending", async ({ page }) => {
@@ -70,6 +70,7 @@ test("the form validates the question before sending", async ({ page }) => {
 
 test("keyboard: the skip link is the first tab stop", async ({ page }) => {
   await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible(); // the app has mounted
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
 });
