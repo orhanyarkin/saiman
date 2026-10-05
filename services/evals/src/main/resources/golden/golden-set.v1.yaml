@@ -168,46 +168,51 @@ items:
     question: "SISE güncel bildirimleri"
     expected:
       latest: [1229869, 1229343, 1229108, 1226220, 1220175]
-  - id: A-ARCLK-1126828
+  - id: A2-ARCLK-1125721-1178832
     kind: ANSWER
     ticker: ARCLK
-    question: "ARCLK yönetim kurulu komiteleri bildirimi hangi tarihte yayımlandı?"
+    question: "ARCLK kar payı dağıtım işlemlerine ilişkin bildirimi ile finansal duran varlık satışı bildirimi hangi tarihlerde yayımlandı?"
     expected:
-      sources: [1126828]
+      sources: [1125721, 1178832]
       requiredFacts:
-        - anyOf: ["21.03.2023", "21 Mart 2023", "2023-03-21"]
-  - id: A-THYAO-1207592
+        - anyOf: ["16.03.2023", "16 Mart 2023", "2023-03-16"]
+        - anyOf: ["01.08.2023", "1 Ağustos 2023", "2023-08-01"]
+  - id: A2-THYAO-1207592-1152405
     kind: ANSWER
     ticker: THYAO
-    question: "THYAO payların geri alınmasına ilişkin bildirimini hangi tarihte yayımladı?"
+    question: "THYAO payların geri alınmasına ilişkin bildirimi ile finansal duran varlık satışı bildirimi hangi tarihlerde yayımlandı?"
     expected:
-      sources: [1207592]
+      sources: [1207592, 1152405]
       requiredFacts:
         - anyOf: ["18.10.2023", "18 Ekim 2023", "2023-10-18"]
-  - id: A-KCHOL-1172777
+        - anyOf: ["18.05.2023", "18 Mayıs 2023", "2023-05-18"]
+  - id: A2-KCHOL-1172777-1103107
     kind: ANSWER
     ticker: KCHOL
-    question: "KCHOL birleşme işlemlerine ilişkin bildirimini hangi tarihte yayımladı?"
+    question: "KCHOL birleşme işlemlerine ilişkin bildirimi ile finansal duran varlık edinimi bildirimi hangi tarihlerde yayımlandı?"
     expected:
-      sources: [1172777]
+      sources: [1172777, 1103107]
       requiredFacts:
         - anyOf: ["17.07.2023", "17 Temmuz 2023", "2023-07-17"]
-  - id: A-SAHOL-1129966
+        - anyOf: ["19.01.2023", "19 Ocak 2023", "2023-01-19"]
+  - id: A2-SAHOL-1219722-1129966
     kind: ANSWER
     ticker: SAHOL
-    question: "SAHOL kar payı dağıtım işlemlerine ilişkin bildirimi hangi tarihte yayımlandı?"
+    question: "SAHOL birleşme işlemlerine ilişkin bildirimi ile kar payı dağıtım işlemlerine ilişkin bildirimi hangi tarihlerde yayımlandı?"
     expected:
-      sources: [1129966]
+      sources: [1219722, 1129966]
       requiredFacts:
+        - anyOf: ["23.11.2023", "23 Kasım 2023", "2023-11-23"]
         - anyOf: ["30.03.2023", "30 Mart 2023", "2023-03-30"]
-  - id: A-EREGL-1153942
+  - id: A2-EREGL-1153942-1210600
     kind: ANSWER
     ticker: EREGL
-    question: "EREGL pay geri alım bildirimi hangi tarihte yayımlandı?"
+    question: "EREGL payların geri alınmasına ilişkin bildirimi ile kredi derecelendirmesi bildirimi hangi tarihlerde yayımlandı?"
     expected:
-      sources: [1153942]
+      sources: [1153942, 1210600]
       requiredFacts:
         - anyOf: ["25.05.2023", "25 Mayıs 2023", "2023-05-25"]
+        - anyOf: ["26.10.2023", "26 Ekim 2023", "2023-10-26"]
   - id: U-AKBNK
     kind: UNANSWERABLE
     ticker: AKBNK

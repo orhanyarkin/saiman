@@ -66,7 +66,7 @@ Cost of a Tier R run: one short embedding per query, 19 queries, about $0.00002.
 corpus: {watermark: 2023-12-29T20:46:52Z, corpusVersion: "24303757d747de77"}
 ```
 
-When ingest reports another `corpusVersion`, the run logs a warning and the report carries a "relabel" banner (the scores may be meaningless). 26 items: 16 RETRIEVAL (one per ticker with indexed disclosures; AKBNK, GARAN, ISCTR and YKBNK have none in the free MKK feed, so there is nothing to label), 3 FRESHNESS (including "THYAO son özel durum açıklamaları"), 5 ANSWER, 2 UNANSWERABLE.
+When ingest reports another `corpusVersion`, the run logs a warning and the report carries a "relabel" banner (the scores may be meaningless). 26 items: 16 RETRIEVAL (one per ticker with indexed disclosures; AKBNK, GARAN, ISCTR and YKBNK have none in the free MKK feed, so there is nothing to label), 3 FRESHNESS (including "THYAO son özel durum açıklamaları"), 5 ANSWER (each needs two disclosures), 2 UNANSWERABLE.
 
 ### How labels are made
 
@@ -104,7 +104,15 @@ WHERE status = 'INDEXED' AND ticker = :'ticker'
 ORDER BY published_at DESC, id LIMIT 5;
 ```
 
-**ANSWER.** `expected.sources` is the disclosure the question is about; `requiredFacts[].anyOf` lists the spellings of the publication date (`to_char(published_at AT TIME ZONE 'Europe/Istanbul', 'DD.MM.YYYY')`, long form with the Turkish month name, ISO).
+**ANSWER (two sources).** The paid-endpoint rule (and so the eval endpoint) answers only with at least two valid citations, so a single-disclosure question can only end as NO_VALID_CITATIONS (the first live run: taskSuccess 0.000 with fact and citation recall 1.000). Each ANSWER item therefore asks one question that needs two different disclosures of the same ticker (different types and dates, each title unique for that ticker so the question identifies it), `expected.sources` lists both, and there is one `requiredFacts` entry per disclosure. Candidates come from the "candidate" query above restricted to `n = 1` titles; the dates are checked with:
+
+```sql
+SELECT external_id, title, to_char(published_at AT TIME ZONE 'Europe/Istanbul', 'YYYY-MM-DD') AS day
+FROM ingest.source_document
+WHERE status = 'INDEXED' AND external_id IN ('1125721', '1178832');
+```
+
+`requiredFacts[].anyOf` lists the spellings of the publication date (`to_char(published_at AT TIME ZONE 'Europe/Istanbul', 'DD.MM.YYYY')`, long form with the Turkish month name, ISO).
 
 **UNANSWERABLE.** `NOT_IN_CORPUS` for a ticker without indexed disclosures (`SELECT count(*) FROM ingest.source_document WHERE ticker = 'AKBNK'` is 0), `AFTER_CORPUS_WATERMARK` for a period after the corpus watermark.
 

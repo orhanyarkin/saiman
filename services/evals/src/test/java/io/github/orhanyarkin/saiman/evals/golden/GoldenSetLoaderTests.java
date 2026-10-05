@@ -56,6 +56,14 @@ class GoldenSetLoaderTests {
         assertThat(set.items(Kind.FRESHNESS)).hasSize(3);
         assertThat(set.items(Kind.ANSWER)).hasSize(5);
         assertThat(set.items(Kind.UNANSWERABLE)).hasSize(2);
+        // the answer service needs >= 2 valid citations, so a single-source question can only fail
+        assertThat(set.items(Kind.ANSWER)).allSatisfy(item -> {
+            assertThat(item.expected().sources()).hasSize(2).doesNotHaveDuplicates();
+            assertThat(item.expected().requiredFacts()).hasSize(2);
+        });
+        assertThat(set.items(Kind.ANSWER))
+                .extracting(GoldenSet.GoldenItem::ticker)
+                .doesNotHaveDuplicates();
         assertThat(set.items(Kind.FRESHNESS))
                 .extracting(GoldenSet.GoldenItem::question)
                 .contains("THYAO son özel durum açıklamaları");
