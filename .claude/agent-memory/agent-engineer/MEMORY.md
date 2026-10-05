@@ -9,3 +9,4 @@
 - [x402 client integration quirks](x402-client-integration-quirks.md) — final SpendDeniedException, offer filtering before reserve, RestClient attributes, test signer bean
 - [Spring AI tool-loop quirks](spring-ai-tool-loop-quirks.md) — ChatModel.getOptions() must be tool-capable or tools vanish; advisor params survive loop; openai-java error types
 - [Spring Modulith 2.1 outbox quirks](modulith-2-outbox-quirks.md) — completion advisor wraps AFTER_COMMIT listeners (pool starvation), static externalization bean, String JSON w/o __TypeId__
+- [springdoc + JSpecify + OpenAPI 3.1](springdoc-jspecify-openapi31.md) — ModelConverter for @Nullable, explicit 200s, ProblemDetail schema, uuid sort order
