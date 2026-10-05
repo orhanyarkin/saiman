@@ -255,6 +255,28 @@ for case in "short:abc123" "lowdiversity:$(printf 'ab%.0s' {1..30})" "badchars:$
     failures=$((failures + 1))
   fi
 done
+
+# --- with-auth-digests.sh never puts a token in argv (stub wrappers log every argv) ---
+stub_bin="${work_dir}/stubbin"
+argv_log="${work_dir}/argv.log"
+mkdir -p "${stub_bin}"
+: >"${argv_log}"
+for tool in grep fold sort tr cut sha256sum wc mktemp; do
+  real="$(command -v "${tool}")"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$0 $*" >>"%s"\nexec "%s" "$@"\n' "${argv_log}" "${real}" >"${stub_bin}/${tool}"
+  chmod +x "${stub_bin}/${tool}"
+done
+PATH="${stub_bin}:${PATH}" SECRETS_DIR="${gen_dir}" scripts/with-auth-digests.sh --print >/dev/null
+leaked=0
+for f in api_reader_token api_operator_token seller_service_token_ledger seller_service_token_evals; do
+  grep -qF "$(cat "${gen_dir}/${f}")" "${argv_log}" && leaked=1
+done
+if [[ -s "${argv_log}" && "${leaked}" -eq 0 ]]; then
+  echo "PASS: with-auth-digests: no token in the argv of any helper process (${argv_log##*/} had $(wc -l <"${argv_log}") calls)"
+else
+  echo "FAIL: with-auth-digests: a token appeared in argv (or the stubs saw nothing)" >&2
+  failures=$((failures + 1))
+fi
 expect_exit "curl-auth: refuses -v" 2 scripts/curl-auth.sh reader -v http://localhost:1/
 expect_exit "curl-auth: refuses a -sSv cluster" 2 scripts/curl-auth.sh reader -sSv http://localhost:1/
 expect_exit "curl-auth: refuses -D-" 2 scripts/curl-auth.sh operator -D- http://localhost:1/
