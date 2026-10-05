@@ -132,8 +132,8 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
       | ($root.secrets // {})[$src] as $def
       | select(($def.file // "") != ($secrets_dir + "/" + $src))
       | "\($svc): secret \"\($src)\" must be file-sourced from the repo secrets/\($src) (not environment or another path)" ),
-    ( ($s.environment // {}) | keys[] | select(. as $k | (forbidden_env | index($k)) != null or ($k | test("^(SPRING_AI_OPENAI_|SAIMAN_INGEST_MKK_)")))
-      | "\($svc): environment defines \(.) (the OpenAI key must arrive only as a secret file; OPENAI_BASE_URL / SPRING_AI_OPENAI_* would redirect the key, OPENAI_LOG=debug dumps prompts, SPRING_APPLICATION_JSON / SPRING_CONFIG_* / *JAVA_OPTIONS can inject any property or load arbitrary config; SAIMAN_INGEST_MKK_* would redirect the MKK Basic credential)" ),
+    ( ($s.environment // {}) | keys[] | select(. as $k | (forbidden_env | index($k)) != null or ($k | test("^(SPRING_AI_OPENAI_|SAIMAN_INGEST_MKK_|SPRINGDOC_)")))
+      | "\($svc): environment defines \(.) (the OpenAI key must arrive only as a secret file; OPENAI_BASE_URL / SPRING_AI_OPENAI_* would redirect the key, OPENAI_LOG=debug dumps prompts, SPRING_APPLICATION_JSON / SPRING_CONFIG_* / *JAVA_OPTIONS can inject any property or load arbitrary config; SAIMAN_INGEST_MKK_* would redirect the MKK Basic credential; SPRINGDOC_* could turn the OpenAPI endpoint back on, ADR-0022)" ),
     ( ($s.environment // {}) | to_entries[] | select(.key == "X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS")
       | select($svc != "orchestrator" or (.value // "") != "seller-api")
       | "\($svc): X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS must be exactly \"seller-api\" and only on orchestrator (plaintext x402 payments are allowed to the compose-internal seller alone; no wildcard)" ),

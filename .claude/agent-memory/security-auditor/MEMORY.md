@@ -11,3 +11,4 @@
 - [M4 close-fix re-review](m4-close-fix-reaudit.md) — RPC failures keep HELD, min(safe,now) sound; residual ts-number binding, unmapped SQLSTATE quarantine (2026-10-01)
 - [Redis/Kafka swap audit](infra-redis-kafka-swap-audit.md) — no Crit/High/Med; Kafka admin-API suppression undocumented, JMX local connector, Redis 8 modules (2026-10-01)
 - [M4b fix re-audit](m4b-fix-reaudit.md) — corroboration sound vs Kafka-only attacker; shared superuser role residual; claim release safe
+- [M5 T1/T2 dashboard reads audit](m5-t1-t2-dashboard-reads-audit.md) — type-mismatch echo in 400s, revenue not chain-qualified, payer in accountCode, no orch indexes (2026-10-05)
