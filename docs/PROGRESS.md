@@ -1,7 +1,7 @@
 # Progress
 
 ## Current milestone
-M6 — Hardening, evals, replay: **design done** on branch `m6-hardening` (not pushed). Human decisions (2026-10-05): static role tokens with Spring Security (JWT/OIDC as documented upgrade path, token only in memory/sessionStorage), SPA replay + server-side daily-cap fallback. Contract `docs/design/m6-hardening.md`; ADRs 0023-0026. Next: T0 contracts, then wave 2 (T1, T7, T4, T5a, T6a). Terraform/Infracost/Cloudflare/AWS capture remain human-only and are not in this plan.
+M6 — Hardening, evals, replay: **built and live-verified** on branch `m6-hardening` (not pushed). Per-task audits done (T1+T4, T7+T5a, T2, T3 ledger, T3b seller-api; all Critical/High/Medium fixed except the documented owner-credential residual); milestone audit next, then push/PR (needs the human's go). Out of this plan (human-only): Terraform demo-lite + Infracost, AWS capture session, Cloudflare deploy, blog, video; cross-provider route comparison and LLM judge (needs new provider keys). Design `docs/design/m6-hardening.md`; ADRs 0023-0026.
 M5 (dashboard), M4b, the Redis/Kafka swap and M4 are done and merged.
 
 ## Log

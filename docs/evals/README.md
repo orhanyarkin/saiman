@@ -59,3 +59,18 @@ make eval EVAL_ANSWERS=1
 This calls the seller's internal eval endpoint once per ANSWER/UNANSWERABLE item (7 in golden set v1, sequentially, at most 30), spends model money through the router (about $0.06 per 30 questions, bounded by the $0.70 day cap), and adds a "Tier A: answers" section to `latest.md`/`latest.json`: outcome counts, per-kind task success / fact recall / citation recall / citation validity / refusal correctness, per-item rows, total and per-question USD, p95 latency. Scoring is deterministic (no LLM judge); definitions are in `services/evals/README.md`.
 
 Reading the numbers: *task success* needs the right fact, every expected source cited and every citation valid, so one missed source fails the item; fact recall and citation recall show which half failed. *Citation validity* below 1.0 means the model cited a disclosure that retrieval does not return for that question. The ANSWER items are publication-date questions and the model receives each excerpt's publication timestamp from document metadata, so a high fact recall shows the metadata is used, not that dates are read from the disclosure text. If `stoppedOnCap` is set, the day cap ended the run: rerun after the cap resets.
+
+## Live run, M6 integration (2026-10-05, ingest with the recency leg, weight 3.0)
+
+`make eval` and `make eval EVAL_ANSWERS=1` against the local stack (corpus `24303757d747de77`). The committed `latest.md`/`latest.json` are the Tier A run.
+
+| Kind | Metric | Baseline (old ingest) | After (recency leg) |
+|---|---|---:|---:|
+| RETRIEVAL (n=16) | Recall@10 / MRR@10 / nDCG@10 | 0.927 / 0.911 / 0.870 | 0.927 / 0.911 / 0.870 (unchanged, as constructed) |
+| FRESHNESS (n=3) | recency@5 | 0.067 | **0.533** |
+| FRESHNESS | latestHit@5 | 0.333 | 0.667 |
+| FRESHNESS | nDCG@10 | 0.181 | 0.720 |
+
+The SQL replay had estimated recency@5 0.733 at weight 3; the live number is lower (0.533), and "THYAO son özel durum açıklamaları" still misses the newest disclosure (latestHit 0, recency@5 0.4). The leg is a clear improvement, not a fix; `saiman.ingest.retrieval.recency-weight` can be tuned without a rebuild.
+
+Tier A (7 questions, $0.0055 total, p95 4.9 s): fact recall 1.000, citation recall 1.000, citation validity 1.000, refusal correct 2/2, **task success 0.000**. Cause: the answer service answers only with at least two valid citations (paid-endpoint rule), and every ANSWER item is a single-disclosure question, so the outcome is `NO_VALID_CITATIONS` even though the answer text contains the facts and cites the right source. Follow-up: relabel the ANSWER items as two-source questions (or add a single-source golden kind) before treating task success as a quality number. The first live Tier A run also found that the eval POST must carry a Content-Length (seller-api answers 413 to a chunked body); fixed.
