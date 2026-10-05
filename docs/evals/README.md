@@ -74,3 +74,19 @@ Reading the numbers: *task success* needs the right fact, every expected source 
 The SQL replay had estimated recency@5 0.733 at weight 3; the live number is lower (0.533), and "THYAO son özel durum açıklamaları" still misses the newest disclosure (latestHit 0, recency@5 0.4). The leg is a clear improvement, not a fix; `saiman.ingest.retrieval.recency-weight` can be tuned without a rebuild.
 
 Tier A (7 questions, $0.0055 total, p95 4.9 s): fact recall 1.000, citation recall 1.000, citation validity 1.000, refusal correct 2/2, **task success 0.000**. Cause: the answer service answers only with at least two valid citations (paid-endpoint rule), and every ANSWER item is a single-disclosure question, so the outcome is `NO_VALID_CITATIONS` even though the answer text contains the facts and cites the right source. Follow-up: relabel the ANSWER items as two-source questions (or add a single-source golden kind) before treating task success as a quality number. The first live Tier A run also found that the eval POST must carry a Content-Length (seller-api answers 413 to a chunked body); fixed.
+
+## ANSWER items relabelled as two-source questions (2026-10-05)
+
+Why: the seller answer service answers only with at least two valid citations (the paid questions endpoint returns 422 and a credit note otherwise), so the first Tier A run, whose five ANSWER items were single-disclosure questions, ended as `NO_VALID_CITATIONS` for every item and scored task success 0.000 even though the answers contained the right facts and cited the right source. That measured the labels, not the product. The items are now two-source questions: each uses a distinct ticker and two disclosures of different types and dates, `expected.sources` holds both, `requiredFacts` has one date per disclosure; labels were read from the corpus before the run and were not changed afterwards (`services/evals/README.md` has the SQL).
+
+| ANSWER (n=5) / UNANSWERABLE (n=2) | Before (single-source, run `d072373`) | After (two-source, run `652710d`) |
+|---|---:|---:|
+| taskSuccess | 0.000 | **1.000** |
+| factRecall | 1.000 | 1.000 |
+| citationRecall | 1.000 | 1.000 |
+| citationValidity | 1.000 | 1.000 |
+| refusalCorrect (UNANSWERABLE) | 1.000 | 1.000 |
+| outcomes | 6 NO_VALID_CITATIONS, 1 REFUSED | 5 ANSWERED, 1 NO_VALID_CITATIONS, 1 REFUSED |
+| cost / p95 latency | $0.005495 / 4.9 s | $0.005903 / 3.8 s |
+
+Reading: the jump from 0.000 comes from the labels now matching the service contract, not from a change in the service. n=5 is a smoke test, not a benchmark: every item is saturated, which also means the set cannot discriminate between models or prompts yet. Publication dates are answerable because the service gives the model each excerpt's `published` timestamp. A free-form question can still fail the two-citation rule: a live demo run "ASELS en son açıklamaları neler ve hangi konulara ilişkin?" ended `NO_EVIDENCE` (the paid upfront calls were settled and credited) while the same kind of question for THYAO, SISE and ARCLK succeeded.
