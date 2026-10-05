@@ -441,6 +441,15 @@ public class ReconciliationRepository {
                 .optional();
     }
 
+    /** The most recently started runs, newest first. */
+    @Transactional(readOnly = true)
+    public List<Run> runs(int limit) {
+        return jdbc.sql("SELECT * FROM reconciliation_run ORDER BY started_at DESC, id DESC LIMIT :limit")
+                .param("limit", limit)
+                .query(ReconciliationRepository::mapRun)
+                .list();
+    }
+
     @Transactional(readOnly = true)
     public List<ItemRow> items(UUID runId) {
         return jdbc.sql("""
