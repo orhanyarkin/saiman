@@ -14,7 +14,9 @@ Every service connects as the `saiman` superuser. A bug or injection in any serv
 - **Tests keep one database per context** (ADR-0020). `SharedContainers` creates the eight roles once per JVM; per database it creates the schema owned by the owner role. `PostgresContainerConfiguration` supplies `JdbcConnectionDetails` (app role) and Flyway connection details (owner). Transition flag `saiman.test.db.runtime-role=superuser|owner|app` (default `superuser` = today's behaviour; each service flips to `app` with its grants migration, the default flips in integration). The service is taken from `spring.flyway.default-schema`; tests that tamper on purpose inject `PostgresContainerConfiguration.SuperuserDatabase`.
 
 ## Consequences
-+ A compromised service reaches only its own schema with DML; the ledger can't rewrite postings.
++ SQL injection through a service reaches only that schema with DML; insert-only tables (ledger postings, journal entries, credit notes, findings) can't be rewritten, and the orchestrator's counters are monotonic and can't be deleted.
+− **Residual (audit, M6):** the `<svc>_owner` password is mounted in each running service (Flyway runs at startup), so code execution inside a service can still disable its triggers. A migrate one-shot per database would close it; not done in M6 (see THREAT_MODEL).
+− The superuser password is a generated secret (`secrets/pg_superuser_password`) held by postgres and `db-init`; `db-init` rotates a pre-M6 `saiman/saiman` password once.
 − More secrets and a bootstrap step; mistakes show up as permission errors (tests run as the app role to catch them).
 − Same DB instance: a superuser/host compromise is out of scope.
 

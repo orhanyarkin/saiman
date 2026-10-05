@@ -15,6 +15,11 @@ The orchestrator and ledger APIs have only a Host allowlist and a CSRF header (A
 - **Dashboard token handling.** Held in memory (React context); an opt-in "keep for this tab" uses `sessionStorage`. **Never `localStorage`** (lint rule + test). nginx injects nothing (policy script fails on `proxy_set_header Authorization`). The README documents this.
 - **Audit trail.** Approvals record `decided_by` (principal name, `<role>:<8 hex of digest>`).
 
+## Operational notes (M6 audits)
+- `saiman.auth.enabled=false` fails startup unless `saiman.auth.allow-disabled-insecure=true`; services use `@ConditionalOnSaimanAuth` (not `@ConditionalOnProperty`), never add a permit-all fallback chain, and write service rules as `hasAuthority(SERVICE_<caller>)`.
+- The approvals API exposes only the decider's role; the DB keeps the principal name (`<role>:<8 hex of digest>`).
+- Service-token property path: `saiman.auth.service.tokens.<caller>.sha256` (env `SAIMAN_AUTH_SERVICE_TOKENS_<CALLER>_SHA256`; Boot cannot bind a Map under a dashed segment from env).
+
 ## Upgrade path: OIDC / JWT
 Replace `.opaqueToken(...)` in `SaimanResourceServer.apply` with `.jwt(...)` and a converter mapping a `roles` claim to the same `ROLE_*`/`SERVICE_*` authorities; add `issuer-uri`. Controllers, rules, `RoleHierarchy`, `/me` and the web are unchanged. With JWTs, open SSE streams must be closed at `exp`.
 
