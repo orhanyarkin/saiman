@@ -232,6 +232,18 @@ class EvalQuestionEndpointTests extends RagTestBase {
     }
 
     @Test
+    void theBodyCapOfThePaidApiAppliesToo() throws IOException {
+        router.replyWith(CITING_BOTH);
+        String big = "{\"ticker\":\"THYAO\",\"question\":\"" + "x".repeat(5 * 1024) + "\"}";
+        Map<String, String> auth = Map.of("Authorization", TestTokens.bearer(TestTokens.SERVICE_EVALS));
+
+        assertThat(post(big, TestTokens.SERVICE_EVALS, HOST, null).status()).isEqualTo(413);
+        assertThat(RawHttp.postChunked(port, PATH, HOST, auth, big).status()).isEqualTo(413);
+        assertThat(router.routerRequests()).isZero();
+        assertThat(INGEST.retrieveCalls()).isZero();
+    }
+
+    @Test
     void theDailyEvalLimitIsA429BeforeAnyWork() {
         router.replyWith(CITING_BOTH);
         redis.opsForValue()

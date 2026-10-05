@@ -24,7 +24,8 @@ class HttpLimitsConfiguration {
         FilterRegistrationBean<BodySizeLimitFilter> registration =
                 new FilterRegistrationBean<>(new BodySizeLimitFilter(properties.maxBodyBytes()));
         registration.setName("bodySizeLimitFilter");
-        registration.addUrlPatterns("/v1/*");
+        // The paid API and the internal API (the eval POST): the same body cap for both.
+        registration.addUrlPatterns("/v1/*", "/internal/*");
         registration.setOrder(BODY_LIMIT_FILTER_ORDER);
         return registration;
     }
