@@ -83,7 +83,7 @@ jobs:
       # Generated API clients must match docs/api/*.openapi.json (script added by the frontend task).
       - name: Generated API client is up to date
         run: |
-          if grep -q '"gen:api"' package.json; then pnpm gen:api --check; else echo "no gen:api script yet, skipping"; fi
+          pnpm gen:api --check
       - name: Cache Playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -95,7 +95,7 @@ jobs:
         run: timeout 600 pnpm e2e
       - name: Lighthouse
         run: |
-          if grep -q '"lighthouse"' package.json; then timeout 600 pnpm lighthouse; else echo "no lighthouse script yet, skipping"; fi
+          timeout 600 pnpm lighthouse
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -5,7 +5,8 @@
 #     backends' CSRF protection relies on a cross-site JSON POST having nothing to preflight against;
 #   - pin or rewrite the Host header (only `proxy_set_header Host $http_host;`): the backends'
 #     DNS-rebinding guards must see the Host the browser sent.
-# It must keep a default server that answers 444 and a named server for localhost/127.0.0.1.
+# It must keep a default server that answers 444 and a named server for localhost/127.0.0.1, set
+# server_tokens off at http level and keep regex locations under /api/ nested in `location ^~ /api/`.
 # Override the file with NGINX_CONF=<path> (used by the self-test fixtures).
 set -euo pipefail
 
@@ -53,6 +54,23 @@ if ! grep -qE 'listen[[:space:]]+[^;]*default_server' <<<"${conf}" || ! grep -qE
 fi
 if ! grep -qE 'server_name[[:space:]]+localhost[[:space:]]+127\.0\.0\.1[[:space:]]*;' <<<"${conf}"; then
   fail_check "missing 'server_name localhost 127.0.0.1;'"
+  violations=1
+fi
+
+# Brace depth of every line: 0 = http context, 1 = inside a server, 2 = inside a location of a server.
+depths="$(awk '{ print depth "\t" $0; n = gsub(/\{/, "{"); m = gsub(/\}/, "}"); depth += n - m }' <<<"${conf}")"
+
+# server_tokens must be off at http level (nginx's own error pages, e.g. the default server's 400).
+if ! grep -qE $'^0\tserver_tokens[[:space:]]+off[[:space:]]*;' <<<"${depths}"; then
+  fail_check "'server_tokens off;' must be set at http level (top of the file), not only inside a server"
+  violations=1
+fi
+
+# A top-level regex location for /api/... is shadowed by the '^~ /api/' prefix location (which switches regex
+# matching off), so it never runs: nest it inside that block (found by the M5 audit for the SSE location).
+if grep -qE $'^1\t[[:space:]]*location[[:space:]]+~\*?[[:space:]]+\\^?/api/' <<<"${depths}" \
+  && grep -qE $'^1\t[[:space:]]*location[[:space:]]+\\^~[[:space:]]+/api/' <<<"${depths}"; then
+  fail_check "a top-level 'location ~ ^/api/...' is shadowed by 'location ^~ /api/'; nest it inside that block"
   violations=1
 fi
 

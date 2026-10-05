@@ -130,6 +130,21 @@ describe("subscribeRunEvents", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("drops an event that belongs to another run", () => {
+    const seen: RunEvent[] = [];
+    subscribeRunEvents(RUN, (e) => seen.push(e));
+    const source = FakeEventSource.instances[0];
+    const other = "00000000-0000-4000-8000-000000000000";
+    const foreign = {
+      ...envelope(1, "STEP_STARTED", { step: "PLANNER" }),
+      runId: other,
+      eventId: `${other}:1`,
+    };
+    source?.emit("STEP_STARTED", foreign);
+    source?.emit("STEP_STARTED", envelope(1, "STEP_STARTED", { step: "PLANNER" }));
+    expect(seen.map((e) => e.runId)).toEqual([RUN]);
+  });
+
   it("stops when the browser gives up (CLOSED, e.g. HTTP 204) and keeps waiting while it reconnects", () => {
     const onClose = vi.fn();
     const onReconnecting = vi.fn();

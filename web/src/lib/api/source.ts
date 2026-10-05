@@ -151,7 +151,8 @@ export interface SubscribeOptions {
 /**
  * Follows a run over SSE with the native `EventSource`. The browser resends `Last-Event-ID` (the
  * seq) on its own reconnects, so the server resumes after the last event we saw. Each event is
- * validated by `parseRunEvent`; invalid ones are dropped. The caller merges by `seq`.
+ * validated by `parseRunEvent`; invalid ones, and events whose `runId` is not the one subscribed to, are dropped.
+ * The caller merges by `seq`.
  *
  * The stream ends on a terminal event or when the server answers 204 (nothing left): in both cases
  * the `EventSource` is closed here so the browser does not reconnect forever.
@@ -184,7 +185,8 @@ export function subscribeRunEvents(
       return;
     }
     const event = parseRunEvent(json);
-    if (event === null) {
+    // An event for another run (a proxy or server mix-up) must never reach this run's view.
+    if (event?.runId !== runId) {
       return;
     }
     onEvent(event);
