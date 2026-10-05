@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.ledger.reconciliation;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -18,6 +19,7 @@ public record ReconciliationRunList(List<Run> items) {
      * @param status RUNNING, COMPLETED, PARTIAL or FAILED
      * @param safeBlock the Base Sepolia block the run treated as final, null if it never read one
      */
+    @Schema(name = "ReconciliationRunSummary")
     public record Run(
             UUID runId,
             String status,

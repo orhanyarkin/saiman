@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.ledger.query;
 
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
@@ -26,6 +27,7 @@ public record RevenueReport(List<Seller> items) {
      * @param sales number of SALE entries
      * @param credited number of CREDIT_NOTE entries
      */
+    @Schema(name = "SellerRevenue")
     public record Seller(
             String payTo,
             Money grossSales,
