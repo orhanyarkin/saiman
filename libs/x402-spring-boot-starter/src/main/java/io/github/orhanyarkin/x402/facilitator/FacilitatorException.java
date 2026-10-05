@@ -18,11 +18,48 @@ public class FacilitatorException extends RuntimeException {
 
     private static final long serialVersionUID = 1L;
 
+    /** Why the call failed, coarsely; drives the {@code outcome} tag of the facilitator observations. */
+    public enum Failure {
+        /** Network error, timeout or a non-2xx, non-4xx status. */
+        TRANSPORT,
+        /** The local circuit breaker refused the call; nothing was sent. */
+        CIRCUIT_OPEN,
+        /** A 2xx answer that could not be decoded. */
+        MALFORMED,
+        /** The facilitator answered with a 4xx status. */
+        REJECTED
+    }
+
+    private final Failure failure;
+    private final int httpStatus;
+
     public FacilitatorException(String message) {
-        super(message);
+        this(message, Failure.TRANSPORT, 0);
     }
 
     public FacilitatorException(String message, Throwable cause) {
         super(message, cause);
+        this.failure = Failure.TRANSPORT;
+        this.httpStatus = 0;
+    }
+
+    /**
+     * @param failure the coarse failure class
+     * @param httpStatus the facilitator's HTTP status, or {@code 0} if there was no response
+     */
+    public FacilitatorException(String message, Failure failure, int httpStatus) {
+        super(message);
+        this.failure = failure;
+        this.httpStatus = httpStatus;
+    }
+
+    /** The coarse failure class. */
+    public Failure failure() {
+        return failure;
+    }
+
+    /** The facilitator's HTTP status, or {@code 0} if no response was received. */
+    public int httpStatus() {
+        return httpStatus;
     }
 }

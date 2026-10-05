@@ -14,6 +14,8 @@ import io.github.orhanyarkin.x402.core.X402CodecException;
 import io.github.orhanyarkin.x402.core.X402Headers;
 import io.github.orhanyarkin.x402.evm.Eip3009TypedData;
 import io.github.orhanyarkin.x402.facilitator.FacilitatorClient;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -78,6 +80,7 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
     private final X402ServerProperties properties;
     private final Clock clock;
     private final PaymentSettler settler;
+    private final FacilitatorTelemetry telemetry;
 
     /**
      * @param eventPublisher receives the {@link X402PaymentSettledEvent}/{@link
@@ -92,13 +95,39 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
             X402ServerProperties properties,
             ApplicationEventPublisher eventPublisher,
             Clock clock) {
+        this(
+                registry,
+                codec,
+                facilitatorClient,
+                nonceStore,
+                properties,
+                eventPublisher,
+                clock,
+                ObservationRegistry.NOOP);
+    }
+
+    /**
+     * As above, additionally recording {@code x402.facilitator.verify} and {@code
+     * x402.facilitator.settle} observations on {@code observationRegistry}.
+     */
+    public RequiresPaymentInterceptor(
+            RequiresPaymentRegistry registry,
+            X402Codec codec,
+            FacilitatorClient facilitatorClient,
+            PaymentNonceStore nonceStore,
+            X402ServerProperties properties,
+            ApplicationEventPublisher eventPublisher,
+            Clock clock,
+            ObservationRegistry observationRegistry) {
+        this.telemetry = new FacilitatorTelemetry(observationRegistry);
         this.registry = registry;
         this.codec = codec;
         this.facilitatorClient = facilitatorClient;
         this.nonceStore = nonceStore;
         this.properties = properties;
         this.clock = clock;
-        this.settler = new PaymentSettler(facilitatorClient, codec, properties, eventPublisher, clock);
+        this.settler =
+                new PaymentSettler(facilitatorClient, codec, properties, eventPublisher, clock, observationRegistry);
     }
 
     @Override
@@ -219,9 +248,12 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
                 null);
 
         VerifyResponse verifyResponse;
+        Observation verifyObservation = telemetry.start(FacilitatorTelemetry.VERIFY_OBSERVATION, attempt.observation());
         try {
             verifyResponse = facilitatorClient.verify(serverPayload, entry.offer());
+            FacilitatorTelemetry.finish(verifyObservation, FacilitatorTelemetry.ofVerify(verifyResponse));
         } catch (RuntimeException facilitatorError) {
+            FacilitatorTelemetry.finish(verifyObservation, FacilitatorTelemetry.ofFailure(facilitatorError));
             log.warn(
                     "x402 facilitator /verify call failed: {}",
                     facilitatorError.getClass().getSimpleName());

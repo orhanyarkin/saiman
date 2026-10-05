@@ -16,3 +16,4 @@
 - [Standalone MockMvc probes](standalone-mockmvc-probe-controllers.md) — inner @Controller probes for error-path tests; chain_tx_hash means canonical receipt, not party/amount match.
 - [M4b audit Lows findings](m4b-audit-lows-findings.md) — PaymentBook not redelivery-idempotent for F/C conflicts; 1 s epoch cushion in window tests; settleMargin() single source.
 - [Spring Security 7 resource server notes](spring-security7-resource-server-notes.md) — env vars cannot bind a Map under a dashed segment, two 401 paths, DEBUG logs query strings.
+- [x402 facilitator telemetry notes](x402-facilitator-telemetry-notes.md) — M6-T7: error-code source, TestObservationRegistry access, Prometheus tag-key rule, FacilitatorException.Failure.
