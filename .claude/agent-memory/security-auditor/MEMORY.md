@@ -13,3 +13,5 @@
 - [M4b fix re-audit](m4b-fix-reaudit.md) — corroboration sound vs Kafka-only attacker; shared superuser role residual; claim release safe
 - [M5 T1/T2 dashboard reads audit](m5-t1-t2-dashboard-reads-audit.md) — type-mismatch echo in 400s, revenue not chain-qualified, payer in accountCode, no orch indexes (2026-10-05)
 - [M5 dashboard fix re-review](m5-dashboard-fix-reaudit.md) — echo closed; chainVerified forgeable via TX_UNKNOWN (USED, null tx, no finding); ledger reads no timeout (2026-10-05)
+- [M6 T1+T4 auth/infra audit](m6-t1-t4-auth-infra-audit.md) — superuser literal pw, owner pw in app, auth.enabled hatch, evals symlink->docs, scrub argv (2026-10-05)
+- [M6 T7+T5a audit](m6-t7-t5a-audit.md) — settle null body escapes PaymentSettler (no failed event), verify null releases claim, SSE buffer unbounded (2026-10-05)
