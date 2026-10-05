@@ -373,7 +373,17 @@ class ReconciliationTests {
                 lock.setLong(1, ReconciliationService.LOCK_KEY);
                 lock.execute();
             }
-            post(RUNS).exchange().expectStatus().isEqualTo(409);
+            post(RUNS)
+                    .exchange()
+                    .expectStatus()
+                    .isEqualTo(409)
+                    .expectHeader()
+                    .contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                    .expectBody()
+                    .jsonPath("$.detail")
+                    .isEqualTo("A reconciliation run is already in progress")
+                    .jsonPath("$.instance")
+                    .isEqualTo("/api/v1/reconciliation/runs");
             assertThat(service.runNow()).isEmpty();
             try (PreparedStatement unlock = other.prepareStatement("SELECT pg_advisory_unlock(?)")) {
                 unlock.setLong(1, ReconciliationService.LOCK_KEY);

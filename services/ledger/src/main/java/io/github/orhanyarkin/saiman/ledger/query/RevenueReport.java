@@ -5,29 +5,54 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
- * Seller revenue per {@code payTo} from the SELLER book (ADR-0021), largest gross sales first.
+ * Seller revenue per {@code payTo} and asset from the SELLER book (ADR-0021), largest gross sales first, at most
+ * {@link LedgerQueries#MAX_REVENUE_ROWS} rows.
+ *
+ * <p>Kafka is unauthenticated until M6, so the books can hold forged seller facts (a phantom SALE, a phantom
+ * CREDIT_NOTE) that reconciliation flags but never removes from the revenue accounts: its ADJUSTMENT moves only the
+ * seller wallet against {@code platform:suspense}. The top-level figures of each row are therefore <b>per books, not
+ * chain-verified</b>; {@link Seller#chainVerified()} is the part Base Sepolia confirms.
+ *
+ * @param items one row per seller and asset
+ * @param truncated true when more sellers exist than the {@link LedgerQueries#MAX_REVENUE_ROWS} rows shown (payTo
+ *     values can be forged, so the list is capped)
  */
-public record RevenueReport(List<Seller> items) {
+@Schema(
+        description = "Revenue per seller and asset, largest gross first, at most 100 rows; truncated says more exist"
+                + " (filter with payTo).")
+public record RevenueReport(List<Seller> items, boolean truncated) {
 
     public RevenueReport {
         items = List.copyOf(items);
     }
 
     /**
-     * One seller's totals. Sums run as {@code numeric} in Postgres and saturate at {@code Long.MAX_VALUE} (a flood of
-     * forged events must not turn the report into a 500); a client that refuses integers above 2^53-1 shows such a
-     * value as out of range rather than a wrong number.
+     * One seller's totals. Every account figure is a net over all its postings (REVERSAL entries included), summed as
+     * {@code numeric} in Postgres and clamped to [0, 2^53-1] ({@code netRevenue}: [-(2^53-1), 2^53-1]), the range
+     * every JSON client reads exactly; {@code saturated} says a clamp happened.
      *
      * @param payTo the seller's address, lower-case
-     * @param grossSales credits of {@code revenue:data} (one SALE per settled request)
-     * @param creditNotes debits of {@code revenue:credit-notes} (one CREDIT_NOTE per paid request the seller did not
-     *     serve)
-     * @param netRevenue {@code grossSales - creditNotes}; signed by type, though the books never let it go negative
-     * @param customerCredits credits of {@code liability:customer-credits}: what the seller owes buyers
+     * @param grossSales per books, not chain-verified: {@code revenue:data} credits minus debits
+     * @param creditNotes per books, not chain-verified: {@code revenue:credit-notes} debits minus credits
+     * @param netRevenue per books, not chain-verified: {@code grossSales - creditNotes}; signed by type
+     * @param customerCredits per books: {@code liability:customer-credits} credits minus debits (what the seller owes
+     *     buyers; a human REVERSAL of a credit note lowers it)
      * @param sales number of SALE entries
      * @param credited number of CREDIT_NOTE entries
+     * @param chainVerified the same figures from verified payments only
+     * @param unverifiedGrossSales {@code grossSales - chainVerified.grossSales}, never negative: sales Base Sepolia has
+     *     not confirmed (yet, or ever)
+     * @param openFindings number of this seller's payments with at least one reconciliation finding
+     * @param saturated true when any figure in this row was clamped
      */
-    @Schema(name = "SellerRevenue")
+    @Schema(
+            name = "SellerRevenue",
+            description = "One seller's revenue. grossSales, creditNotes, netRevenue and customerCredits are PER BOOKS,"
+                    + " NOT CHAIN-VERIFIED: forged seller events (unauthenticated Kafka until M6) stay in them even"
+                    + " after reconciliation flags them. chainVerified is the part Base Sepolia confirms;"
+                    + " unverifiedGrossSales = grossSales - chainVerified.grossSales (never negative); openFindings"
+                    + " counts this seller's payments with a reconciliation finding. Amounts are clamped to"
+                    + " [0, 2^53-1] (netRevenue: +-(2^53-1)) and saturated says a clamp happened.")
     public record Seller(
             String payTo,
             Money grossSales,
@@ -35,5 +60,25 @@ public record RevenueReport(List<Seller> items) {
             SignedAmount netRevenue,
             Money customerCredits,
             long sales,
-            long credited) {}
+            long credited,
+            Verified chainVerified,
+            Money unverifiedGrossSales,
+            long openFindings,
+            boolean saturated) {}
+
+    /**
+     * Revenue Base Sepolia confirms. A sale counts when reconciliation saw its transfer on chain ({@code chainState}
+     * USED) and recorded no finding against the payment other than buyer-side or bookkeeping ones
+     * ({@code ENCUMBRANCE_NOT_CLEARED}, {@code BOOKS_OPEN}) or an uncorroborated credit note. A credit note counts
+     * when its sale counts and seller-api corroborated it with the ledger's tx hash and amount (ADR-0021).
+     *
+     * @param grossSales {@code revenue:data} net over verified sales
+     * @param creditNotes {@code revenue:credit-notes} net over corroborated credit notes of verified sales
+     * @param netRevenue {@code grossSales - creditNotes}
+     */
+    @Schema(
+            name = "ChainVerifiedRevenue",
+            description = "Revenue Base Sepolia confirms: sales seen on chain (chainState USED) without a chain"
+                    + " finding, and credit notes of those sales that seller-api corroborated.")
+    public record Verified(Money grossSales, Money creditNotes, SignedAmount netRevenue) {}
 }

@@ -1,6 +1,22 @@
 {
   "components" : {
     "schemas" : {
+      "ChainVerifiedRevenue" : {
+        "description" : "Revenue Base Sepolia confirms: sales seen on chain (chainState USED) without a chain finding, and credit notes of those sales that seller-api corroborated.",
+        "properties" : {
+          "creditNotes" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "grossSales" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "netRevenue" : {
+            "$ref" : "#/components/schemas/SignedAmount"
+          }
+        },
+        "required" : [ "creditNotes", "grossSales", "netRevenue" ],
+        "type" : "object"
+      },
       "Money" : {
         "properties" : {
           "asset" : {
@@ -413,19 +429,27 @@
         "type" : "object"
       },
       "RevenueReport" : {
+        "description" : "Revenue per seller and asset, largest gross first, at most 100 rows; truncated says more exist (filter with payTo).",
         "properties" : {
           "items" : {
             "items" : {
               "$ref" : "#/components/schemas/SellerRevenue"
             },
             "type" : "array"
+          },
+          "truncated" : {
+            "type" : "boolean"
           }
         },
-        "required" : [ "items" ],
+        "required" : [ "items", "truncated" ],
         "type" : "object"
       },
       "SellerRevenue" : {
+        "description" : "One seller's revenue. grossSales, creditNotes, netRevenue and customerCredits are PER BOOKS, NOT CHAIN-VERIFIED: forged seller events (unauthenticated Kafka until M6) stay in them even after reconciliation flags them. chainVerified is the part Base Sepolia confirms; unverifiedGrossSales = grossSales - chainVerified.grossSales (never negative); openFindings counts this seller's payments with a reconciliation finding. Amounts are clamped to [0, 2^53-1] (netRevenue: +-(2^53-1)) and saturated says a clamp happened.",
         "properties" : {
+          "chainVerified" : {
+            "$ref" : "#/components/schemas/ChainVerifiedRevenue"
+          },
           "creditNotes" : {
             "$ref" : "#/components/schemas/Money"
           },
@@ -442,15 +466,25 @@
           "netRevenue" : {
             "$ref" : "#/components/schemas/SignedAmount"
           },
+          "openFindings" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
           "payTo" : {
             "type" : "string"
           },
           "sales" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "saturated" : {
+            "type" : "boolean"
+          },
+          "unverifiedGrossSales" : {
+            "$ref" : "#/components/schemas/Money"
           }
         },
-        "required" : [ "creditNotes", "credited", "customerCredits", "grossSales", "netRevenue", "payTo", "sales" ],
+        "required" : [ "chainVerified", "creditNotes", "credited", "customerCredits", "grossSales", "netRevenue", "openFindings", "payTo", "sales", "saturated", "unverifiedGrossSales" ],
         "type" : "object"
       },
       "SignedAmount" : {
@@ -621,6 +655,14 @@
     "/api/v1/ledger/revenue" : {
       "get" : {
         "operationId" : "revenue",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "payTo",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
         "responses" : {
           "200" : {
             "content" : {
@@ -630,7 +672,17 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "Revenue per seller"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "payTo is not an address"
           }
         },
         "tags" : [ "revenue-controller" ]
