@@ -14,7 +14,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.test.web.servlet.client.RestTestClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -34,8 +40,25 @@ import tools.jackson.databind.json.JsonMapper;
         webEnvironment = WebEnvironment.RANDOM_PORT,
         properties = {"springdoc.api-docs.enabled=true", "springdoc.writer-with-order-by-keys=true"})
 @AutoConfigureRestTestClient
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, OpenApiContractTests.DocsAccess.class})
 class OpenApiContractTests {
+
+    /**
+     * The production chain denies {@code /v3/api-docs} (springdoc is off there). This test turns springdoc on, so it
+     * adds a chain that opens exactly that path; the test-only chain is ordered first and matches nothing else.
+     */
+    @TestConfiguration(proxyBeanMethods = false)
+    static class DocsAccess {
+
+        @Bean
+        @Order(Ordered.HIGHEST_PRECEDENCE)
+        SecurityFilterChain apiDocsOnly(HttpSecurity http) throws Exception {
+            return http.securityMatcher("/v3/api-docs/**")
+                    .authorizeHttpRequests(requests -> requests.anyRequest().permitAll())
+                    .csrf(csrf -> csrf.disable())
+                    .build();
+        }
+    }
 
     private static final Path SNAPSHOT = Path.of("..", "..", "docs", "api", "orchestrator.openapi.json");
     private static final ObjectMapper MAPPER = JsonMapper.builder().build();

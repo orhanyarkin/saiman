@@ -88,13 +88,19 @@ class ApiAuthenticationTests extends RunTestSupport {
         as(null).get().uri("/actuator/health").exchange().expectStatus().isOk();
         as(null).get().uri("/actuator/info").exchange().expectStatus().isUnauthorized();
         as(null).get().uri("/v3/api-docs").exchange().expectStatus().isUnauthorized();
-        as(TestTokens.OPERATOR).get().uri("/not-an-api").exchange().expectStatus().isForbidden();
+        as(TestTokens.OPERATOR)
+                .get()
+                .uri("/not-an-api")
+                .exchange()
+                .expectStatus()
+                .isForbidden();
     }
 
     @Test
     void aReaderReadsEverythingButCannotStartRunsOrDecideApprovals() {
         RestTestClient reader = as(TestTokens.READER);
-        for (String path : List.of("/api/v1/runs", "/api/v1/approvals", "/api/v1/spend", "/api/v1/ping", "/api/v1/me")) {
+        for (String path :
+                List.of("/api/v1/runs", "/api/v1/approvals", "/api/v1/spend", "/api/v1/ping", "/api/v1/me")) {
             reader.get().uri(path).exchange().expectStatus().isOk();
         }
 
@@ -177,7 +183,8 @@ class ApiAuthenticationTests extends RunTestSupport {
     void theEventStreamAuthenticatesWithABearerHeaderAndEndsCleanlyAfterItsAsyncDispatch() throws Exception {
         UUID run = createRun(50_000);
         HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/runs/" + run + "/events"))
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + "/api/v1/runs/" + run + "/events"))
                 .header(HttpHeaders.AUTHORIZATION, TestTokens.bearer(TestTokens.READER))
                 .header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE)
                 .build();
@@ -206,25 +213,28 @@ class ApiAuthenticationTests extends RunTestSupport {
                 return false;
             });
         }
-        assertThat(lines).anyMatch(line -> line.startsWith("event:STEP_CHANGED") || line.startsWith("event: STEP_CHANGED"));
+        assertThat(lines).anyMatch(line -> line.startsWith("event:STEP_STARTED"));
         assertThat(lines).anyMatch(line -> line.contains("RUN_FAILED"));
     }
 
     @Test
     void theEventStreamWithoutATokenIs401AndOpensNoSubscription() throws Exception {
         UUID run = createRun(50_000);
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/runs/" + run + "/events"))
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + "/api/v1/runs/" + run + "/events"))
                 .header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE)
                 .build();
 
         HttpResponse<String> response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
 
         assertThat(response.statusCode()).isEqualTo(401);
-        HttpRequest inQuery = HttpRequest.newBuilder(URI.create(
-                        "http://localhost:" + port + "/api/v1/runs/" + run + "/events?access_token=" + TestTokens.READER))
+        HttpRequest inQuery = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/runs/" + run
+                        + "/events?access_token=" + TestTokens.READER))
                 .header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE)
                 .build();
-        assertThat(HttpClient.newHttpClient().send(inQuery, HttpResponse.BodyHandlers.ofString()).statusCode())
+        assertThat(HttpClient.newHttpClient()
+                        .send(inQuery, HttpResponse.BodyHandlers.ofString())
+                        .statusCode())
                 .isEqualTo(401);
     }
 

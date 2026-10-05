@@ -38,23 +38,25 @@ class RuntimeRoleGrantsTests extends SpendTestSupport {
 
     @Test
     void theAppRoleCannotTurnTheTriggersOffOrReplaceThem() {
-        assertThat(sqlState(() -> jdbc.sql("SET session_replication_role = replica").update()))
+        assertThat(sqlState(
+                        () -> jdbc.sql("SET session_replication_role = replica").update()))
                 .isEqualTo(PERMISSION_DENIED);
-        assertThat(sqlState(() -> jdbc.sql("ALTER TABLE run DISABLE TRIGGER ALL").update()))
+        assertThat(sqlState(
+                        () -> jdbc.sql("ALTER TABLE run DISABLE TRIGGER ALL").update()))
                 .isEqualTo(PERMISSION_DENIED);
-        assertThat(sqlState(() -> jdbc.sql("ALTER TABLE run DISABLE TRIGGER run_committed_monotonic").update()))
+        assertThat(sqlState(() -> jdbc.sql("ALTER TABLE run DISABLE TRIGGER run_committed_monotonic")
+                        .update()))
                 .isEqualTo(PERMISSION_DENIED);
         assertThat(sqlState(() -> jdbc.sql("ALTER TABLE spend_day DISABLE TRIGGER spend_day_committed_monotonic")
                         .update()))
                 .isEqualTo(PERMISSION_DENIED);
-        assertThat(sqlState(() -> jdbc.sql("DROP TRIGGER run_committed_monotonic ON run").update()))
+        assertThat(sqlState(() ->
+                        jdbc.sql("DROP TRIGGER run_committed_monotonic ON run").update()))
                 .isEqualTo(PERMISSION_DENIED);
         assertThat(sqlState(() -> jdbc.sql("""
                                 CREATE OR REPLACE FUNCTION committed_atomic_is_monotonic() RETURNS trigger
                                 LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$
-                                """)
-                        .update()))
-                .isEqualTo(PERMISSION_DENIED);
+                                """).update())).isEqualTo(PERMISSION_DENIED);
         assertThat(sqlState(() -> jdbc.sql("DROP FUNCTION committed_atomic_is_monotonic() CASCADE")
                         .update()))
                 .isEqualTo(PERMISSION_DENIED);
@@ -72,7 +74,8 @@ class RuntimeRoleGrantsTests extends SpendTestSupport {
         jdbc.sql("UPDATE run SET committed_atomic = 10000 WHERE id = :id") // unchanged is fine
                 .param("id", run)
                 .update();
-        jdbc.sql("UPDATE spend_day SET committed_atomic = committed_atomic + 1000").update();
+        jdbc.sql("UPDATE spend_day SET committed_atomic = committed_atomic + 1000")
+                .update();
 
         assertThat(sqlState(() -> jdbc.sql("UPDATE run SET committed_atomic = committed_atomic - 1 WHERE id = :id")
                         .param("id", run)
@@ -82,7 +85,8 @@ class RuntimeRoleGrantsTests extends SpendTestSupport {
                         .param("id", run)
                         .update()))
                 .isEqualTo(CHECK_VIOLATION);
-        assertThat(sqlState(() -> jdbc.sql("UPDATE spend_day SET committed_atomic = 0").update()))
+        assertThat(sqlState(() ->
+                        jdbc.sql("UPDATE spend_day SET committed_atomic = 0").update()))
                 .isEqualTo(CHECK_VIOLATION);
         assertThat(run(run).committed()).isEqualTo(10_000);
         assertThat(today().committed()).isEqualTo(8_000);
@@ -92,10 +96,12 @@ class RuntimeRoleGrantsTests extends SpendTestSupport {
     void theAppRoleCannotRunDdlTruncateOrReadFlywayHistory() {
         assertThat(sqlState(() -> jdbc.sql("CREATE TABLE sneaky (id int)").update()))
                 .isEqualTo(PERMISSION_DENIED);
-        assertThat(sqlState(() -> jdbc.sql("ALTER TABLE run ADD COLUMN sneaky int").update()))
+        assertThat(sqlState(
+                        () -> jdbc.sql("ALTER TABLE run ADD COLUMN sneaky int").update()))
                 .isEqualTo(PERMISSION_DENIED);
         assertThat(sqlState(() -> jdbc.sql("TRUNCATE run CASCADE").update())).isEqualTo(PERMISSION_DENIED);
-        assertThat(sqlState(() -> jdbc.sql("SELECT * FROM flyway_schema_history").query().listOfRows()))
+        assertThat(sqlState(() ->
+                        jdbc.sql("SELECT * FROM flyway_schema_history").query().listOfRows()))
                 .isEqualTo(PERMISSION_DENIED);
     }
 

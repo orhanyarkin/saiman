@@ -85,9 +85,10 @@ class DashboardReadsSafetyTests extends RunTestSupport {
     @Test
     void theOpenApiDocumentIsNotReachableWhenSpringdocIsDisabled() {
         // the default configuration (springdoc.api-docs.enabled=false): nothing serves the contract
-        http.get().uri("/v3/api-docs").exchange().expectStatus().isNotFound();
-        http.get().uri("/v3/api-docs.yaml").exchange().expectStatus().isNotFound();
-        http.get().uri("/swagger-ui/index.html").exchange().expectStatus().isNotFound();
+        // and the security chain denies the paths anyway (403 for an authenticated caller)
+        http.get().uri("/v3/api-docs").exchange().expectStatus().isForbidden();
+        http.get().uri("/v3/api-docs.yaml").exchange().expectStatus().isForbidden();
+        http.get().uri("/swagger-ui/index.html").exchange().expectStatus().isForbidden();
     }
 
     @Test

@@ -24,13 +24,14 @@ class ActuatorAccessTests {
 
     @ParameterizedTest
     @ValueSource(strings = {"/actuator/env", "/actuator/heapdump", "/actuator/beans", "/actuator/configprops"})
-    void sensitiveEndpointsDoNotExistEvenWhenExposed(String uri) {
-        client.get().uri(uri).exchange().expectStatus().isNotFound();
+    void sensitiveEndpointsAreDeniedEvenWhenExposedAndEvenForAnOperator(String uri) {
+        // The security chain permits only GET /actuator/health/**: everything else is denyAll (403 for an operator).
+        client.get().uri(uri).exchange().expectStatus().isForbidden();
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/actuator/health", "/actuator/info"})
-    void healthAndInfoStayAvailable(String uri) {
+    @ValueSource(strings = {"/actuator/health", "/actuator/health/liveness"})
+    void healthStaysAvailable(String uri) {
         client.get().uri(uri).exchange().expectStatus().isOk();
     }
 }
