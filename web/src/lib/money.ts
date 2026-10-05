@@ -149,3 +149,24 @@ export function usdcInputValue(atomicUnits: number): string {
   const trimmed = fraction.replace(/0+$/, "");
   return trimmed === "" ? whole : `${whole}.${trimmed}`;
 }
+
+/**
+ * USD micros (the model router's unit) at full micro-dollar precision: `6900` becomes `$0.006900`.
+ * BigInt only; null when the count is not a safe integer.
+ */
+export function formatUsdMicros(micros: number): string | null {
+  if (!Number.isSafeInteger(micros)) {
+    return null;
+  }
+  const { negative, whole, fraction } = split({ atomicUnits: micros, decimals: 6 });
+  return `${negative ? "-" : ""}$${groupThousands(whole)}.${fraction}`;
+}
+
+/** `cap - spent` in USD micros, clamped at zero, in BigInt; null when an input is unusable. */
+export function remainingUsdMicros(cap: number, spent: number): number | null {
+  if (!Number.isSafeInteger(cap) || !Number.isSafeInteger(spent)) {
+    return null;
+  }
+  const left = BigInt(cap) - BigInt(spent);
+  return Number(left < 0n ? 0n : left);
+}
