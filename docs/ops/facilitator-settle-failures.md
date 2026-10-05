@@ -34,14 +34,15 @@ One WARN per settle failure, logger `io.github.orhanyarkin.x402.server.PaymentSe
 
 ```
 x402 settlement failed: reason=<code> attemptId=<uuid> payer=<0x..> nonceRef=<8 hex> validAfter=<s> validBefore=<s>
-  secondsLeft=<n> verifyToSettleGapMs=<n> settleDurationMs=<n> facilitatorStatus=<http|0> txHashPresent=<bool> txHash=<0x..|-> outcome=<tag value>
+  secondsLeft=<n> verifyToSettleGapMs=<n> settleDurationMs=<n> facilitatorStatus=<http|0> txHashPresent=<bool> txHash=<0x..|-> outcome=<tag value> [facilitatorMessage="<untrusted, sanitised>"]
 ```
 
 - `attemptId` equals the `eventId` of the published `X402PaymentFailedEvent`.
 - `nonceRef` is the first 8 hex of `sha256(lowercase(from) + lowercase(nonce))`. To find the authorization, compute the same prefix over the (public, on-chain) `AuthorizationUsed` events or the ledger's rows; the prefix cannot be turned back into the nonce.
 - `secondsLeft` is `validBefore` minus the instant the `/settle` call started, on our clock (not the time of the log line) (negative means already expired). `verifyToSettleGapMs` is the time between a successful `/verify` and the `/settle` call (large in the default flow, since it includes the handler).
 - `facilitatorStatus` is `200` for any decoded answer, the real status for a 4xx/5xx, `0` when no response arrived.
-- Never logged or tagged: the signature, the payload, the facilitator's `errorMessage`, the raw nonce.
+- `facilitatorMessage` is present only when the facilitator returned a message, and is **untrusted text**. Before it is logged: the request's own signature and nonce are removed (with and without `0x`, case-insensitive); every character outside `[A-Za-z0-9 _:.,()-]` becomes `?` (so no newline, control character, quote or brace survives); every `0x` run and every run of 16 or more hex digits becomes `[hex]`; the result is cut to 120 characters. It appears in this one log line only: never in a metric tag, span, event or exception. Treat it as a hint to read, never to parse or act on.
+- Never logged or tagged: the signature, the payload, the raw nonce. Never tagged, spanned, published or put in an exception: the facilitator's `errorMessage`.
 
 ### What each outcome means for the money and the claim
 

@@ -138,4 +138,44 @@ final class FacilitatorTelemetry {
             throw new IllegalStateException("SHA-256 is required by every Java platform", e);
         }
     }
+
+    /** Longest facilitator message the WARN will carry, in characters. */
+    static final int MAX_MESSAGE_CHARS = 120;
+
+    private static final int MAX_RAW_MESSAGE_CHARS = 8192;
+    private static final Pattern UNSAFE_CHARS = Pattern.compile("[^A-Za-z0-9 _:.,()\\-]");
+    private static final Pattern HEX_0X_RUN = Pattern.compile("0[xX][0-9a-fA-F]*");
+    private static final Pattern LONG_HEX_RUN = Pattern.compile("[0-9a-fA-F]{16,}");
+
+    /**
+     * Makes a facilitator's free-text message safe for one log line, or returns {@code null} when
+     * there is none. UNTRUSTED input, so in order: (1) the request's own signature and nonce are
+     * removed (with and without {@code 0x}, case-insensitively); (2) every character outside {@code
+     * [A-Za-z0-9 _:.,()-]} becomes {@code ?} (no newline, control, quote or brace survives); (3)
+     * every {@code 0x} run and every run of 16 or more hex digits becomes {@code [hex]}; (4) the
+     * result is cut to {@value #MAX_MESSAGE_CHARS} characters. The input is first capped so a huge
+     * message costs bounded work.
+     */
+    static @Nullable String sanitizeMessage(@Nullable String raw, String signature, String nonce) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String text = raw.length() > MAX_RAW_MESSAGE_CHARS ? raw.substring(0, MAX_RAW_MESSAGE_CHARS) : raw;
+        for (String secret : new String[] {signature, nonce}) {
+            if (secret.isEmpty()) {
+                continue;
+            }
+            String bare = secret.startsWith("0x") || secret.startsWith("0X") ? secret.substring(2) : secret;
+            // With the prefix first, then without: the longer form must go before its own suffix.
+            for (String form : new String[] {"0x" + bare, bare}) {
+                text = Pattern.compile(Pattern.quote(form), Pattern.CASE_INSENSITIVE)
+                        .matcher(text)
+                        .replaceAll("");
+            }
+        }
+        text = UNSAFE_CHARS.matcher(text).replaceAll("?");
+        text = HEX_0X_RUN.matcher(text).replaceAll("[hex]");
+        text = LONG_HEX_RUN.matcher(text).replaceAll("[hex]");
+        return text.length() > MAX_MESSAGE_CHARS ? text.substring(0, MAX_MESSAGE_CHARS) : text;
+    }
 }

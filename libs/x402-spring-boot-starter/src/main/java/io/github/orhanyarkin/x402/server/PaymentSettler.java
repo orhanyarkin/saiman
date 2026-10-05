@@ -60,7 +60,8 @@ final class PaymentSettler {
             @Nullable String txHash,
             boolean txHashPresent,
             long startedAtEpochSecond,
-            String outcome) {}
+            String outcome,
+            @Nullable String rawFacilitatorMessage) {}
 
     PaymentSettler(
             FacilitatorClient facilitatorClient,
@@ -98,7 +99,11 @@ final class PaymentSettler {
             FacilitatorTelemetry.Result result = FacilitatorTelemetry.ofFailure(settleError);
             FacilitatorTelemetry.finish(observation, result);
             failSettlement(
-                    request, response, attempt, null, trace(attempt, startedAt, startedAtEpochSecond, result, null));
+                    request,
+                    response,
+                    attempt,
+                    null,
+                    trace(attempt, startedAt, startedAtEpochSecond, result, null, null));
             return false;
         }
         // Classification, telemetry and the trace all sit inside the fail-safe try below: ANY
@@ -109,7 +114,13 @@ final class PaymentSettler {
         try {
             settleResult = FacilitatorTelemetry.ofSettle(settlement);
             FacilitatorTelemetry.finish(observation, settleResult);
-            settleTrace = trace(attempt, startedAt, startedAtEpochSecond, settleResult, settlement.transaction());
+            settleTrace = trace(
+                    attempt,
+                    startedAt,
+                    startedAtEpochSecond,
+                    settleResult,
+                    settlement.transaction(),
+                    settlement.errorMessage());
             String transaction = settlement.transaction();
             if (!settlement.success()
                     || transaction == null
@@ -156,7 +167,7 @@ final class PaymentSettler {
                 FacilitatorTelemetry.finish(observation, settleResult);
             }
             if (settleTrace == null) {
-                settleTrace = trace(attempt, startedAt, startedAtEpochSecond, settleResult, null);
+                settleTrace = trace(attempt, startedAt, startedAtEpochSecond, settleResult, null, null);
             }
             failSettlement(request, response, attempt, "internal_error", settleTrace);
             return false;
@@ -198,12 +209,16 @@ final class PaymentSettler {
                 errorReason != null && REASON_CODE.matcher(errorReason).matches() ? errorReason : "unrecognised";
         UUID eventId = UUID.randomUUID();
         Eip3009Authorization authorization = attempt.payload().payload().authorization();
-        // Only public or one-way values (ADR-0008, THREAT_MODEL): never the signature, the payload,
-        // the facilitator's errorMessage or the raw nonce.
+        // Only public or one-way values (ADR-0008, THREAT_MODEL): never the signature, the payload
+        // or the raw nonce. The facilitator's message is untrusted free text: it is logged only in
+        // this one line, sanitised and bounded (see FacilitatorTelemetry#sanitizeMessage), and never
+        // reaches a tag, span, event or exception.
+        String sanitizedMessage = FacilitatorTelemetry.sanitizeMessage(
+                trace.rawFacilitatorMessage(), attempt.payload().payload().signature(), authorization.nonce());
         log.warn(
                 "x402 settlement failed: reason={} attemptId={} payer={} nonceRef={} validAfter={} validBefore={}"
                         + " secondsLeft={} verifyToSettleGapMs={} settleDurationMs={} facilitatorStatus={}"
-                        + " txHashPresent={} txHash={} outcome={}",
+                        + " txHashPresent={} txHash={} outcome={}{}",
                 reasonCode,
                 eventId,
                 authorization.from(),
@@ -216,7 +231,8 @@ final class PaymentSettler {
                 trace.httpStatus(),
                 trace.txHashPresent(),
                 trace.txHash() == null ? "-" : trace.txHash(),
-                trace.outcome());
+                trace.outcome(),
+                sanitizedMessage == null ? "" : " facilitatorMessage=\"" + sanitizedMessage + "\"");
         RequiresPaymentInterceptor.writePaymentRequired(
                 response,
                 codec,
@@ -241,7 +257,8 @@ final class PaymentSettler {
             long startedAtNanos,
             long startedAtEpochSecond,
             FacilitatorTelemetry.Result result,
-            @Nullable String transaction) {
+            @Nullable String transaction,
+            @Nullable String rawFacilitatorMessage) {
         long now = System.nanoTime();
         boolean present = transaction != null && !transaction.isEmpty();
         String wellFormed = present
@@ -257,7 +274,8 @@ final class PaymentSettler {
                 wellFormed,
                 present,
                 startedAtEpochSecond,
-                result.outcome().tag());
+                result.outcome().tag(),
+                rawFacilitatorMessage);
     }
 
     /** Seconds from the settle start until {@code validBefore} (negative if expired); exact for any uint256. */

@@ -37,6 +37,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,6 +72,8 @@ class FacilitatorTelemetryIntegrationTests {
     private static final String PAY_TO = TestWallets.OTHER_PAYER.address();
     private static final String PRICE = "10000";
     private static final String HOSTILE_TEXT = "SECRET-FACILITATOR-MESSAGE-do-not-log";
+    private static final AtomicReference<Function<PaymentPayload, String>> SETTLE_MESSAGE =
+            new AtomicReference<>(payload -> HOSTILE_TEXT);
     private static final AtomicReference<RuntimeException> SETTLE_THROWS = new AtomicReference<>();
     private static final AtomicReference<RuntimeException> VERIFY_THROWS = new AtomicReference<>();
 
@@ -141,6 +144,7 @@ class FacilitatorTelemetryIntegrationTests {
         SETTLE_GARBAGE.set(null);
         GARBAGE_HITS.set(0);
         THROW_ON_START.set(false);
+        SETTLE_MESSAGE.set(payload -> HOSTILE_TEXT);
         FAILED_EVENTS.clear();
         observations.clear();
         STOPPED_CONTEXTS.clear();
@@ -455,6 +459,80 @@ class FacilitatorTelemetryIntegrationTests {
         assertThat(pay("/upfront/ok", newPayload(PaymentFlow.UPFRONT))).isEqualTo(402);
     }
 
+    private String settleFailureMessageField(PaymentPayload payload) {
+        FACILITATOR.injectSettleFailure("invalid_exact_evm_transaction_failed");
+        assertThat(pay("/upfront/ok", payload)).isEqualTo(402);
+        List<String> lines = settleFailureWarnLines();
+        assertThat(lines).hasSize(1);
+        String line = lines.getFirst();
+        assertThat(line).doesNotContain("\n").doesNotContain("\r");
+        String prefix = " facilitatorMessage=\"";
+        int at = line.indexOf(prefix);
+        assertThat(at).isPositive();
+        assertThat(line).endsWith("\"");
+        String field = line.substring(at + prefix.length(), line.length() - 1);
+        assertThat(field).matches("[A-Za-z0-9 _:.,()?\\[\\]-]*").hasSizeLessThanOrEqualTo(120);
+        if (!field.isEmpty()) {
+            assertThat(STOPPED_CONTEXTS).noneMatch(c -> c.contains(field));
+            assertThat(FAILED_EVENTS).noneMatch(e -> e.toString().contains(field));
+        }
+        return field;
+    }
+
+    @Test
+    void messageEchoingTheSignatureAndNonceIsScrubbed() {
+        PaymentPayload payload = newPayload(PaymentFlow.UPFRONT);
+        String signature = payload.payload().signature();
+        String nonce = payload.payload().authorization().nonce();
+        SETTLE_MESSAGE.set(p -> "bad sig " + signature + " nonce " + nonce.toUpperCase(java.util.Locale.ROOT) + " bare "
+                + nonce.substring(2) + " tx 0xdeadbeef and " + "ab".repeat(20) + " end");
+
+        String field = settleFailureMessageField(payload);
+
+        assertThat(field)
+                .doesNotContainIgnoringCase(signature)
+                .doesNotContainIgnoringCase(signature.substring(2))
+                .doesNotContainIgnoringCase(nonce.substring(2))
+                .doesNotContain("0x")
+                .doesNotContain("deadbeef")
+                .contains("[hex]")
+                .contains("bad sig")
+                .contains("end");
+    }
+
+    @Test
+    void hugeMessageIsTruncated() {
+        SETTLE_MESSAGE.set(p -> "word ".repeat(1024));
+
+        String field = settleFailureMessageField(newPayload(PaymentFlow.UPFRONT));
+
+        assertThat(field).hasSize(120);
+    }
+
+    @Test
+    void crlfQuotesAndBracesCannotBreakTheLogLine() {
+        SETTLE_MESSAGE.set(p -> "line1\r\nline2 \"quoted\" {json: 1}\u0000\u001b[31mred\t<script>");
+
+        String field = settleFailureMessageField(newPayload(PaymentFlow.UPFRONT));
+
+        assertThat(field)
+                .doesNotContain("\"")
+                .doesNotContain("{")
+                .doesNotContain("}")
+                .doesNotContain("<")
+                .contains("line1??line2 ?quoted? ?json: 1?");
+    }
+
+    @Test
+    void noMessageMeansNoField() {
+        SETTLE_MESSAGE.set(p -> null);
+        FACILITATOR.injectSettleFailure("invalid_exact_evm_transaction_failed");
+
+        assertThat(pay("/upfront/ok", newPayload(PaymentFlow.UPFRONT))).isEqualTo(402);
+
+        assertThat(settleFailureWarnLines().getFirst()).doesNotContain("facilitatorMessage");
+    }
+
     @Test
     void signatureNonceAndFacilitatorMessageNeverReachLogsOrObservations() {
         FACILITATOR.injectSettleFailure("invalid_exact_evm_transaction_failed");
@@ -477,11 +555,15 @@ class FacilitatorTelemetryIntegrationTests {
                 nonce,
                 nonce.substring(2),
                 second.payload().signature(),
-                second.payload().authorization().nonce(),
-                HOSTILE_TEXT)) {
+                second.payload().authorization().nonce())) {
             assertThat(everything).noneMatch(line -> line.contains(secret));
             assertThat(observed).noneMatch(kv -> kv.contains(secret));
         }
+        // The facilitator's message is allowed in exactly one place: the sanitised WARN field.
+        assertThat(observed).noneMatch(kv -> kv.contains(HOSTILE_TEXT));
+        assertThat(FAILED_EVENTS).noneMatch(event -> event.toString().contains(HOSTILE_TEXT));
+        assertThat(settleFailureWarnLines())
+                .allMatch(line -> line.contains("facilitatorMessage=\"" + HOSTILE_TEXT + "\""));
         assertThat(observed).anyMatch(kv -> kv.contains("x402.facilitator.settle") || kv.contains("outcome"));
     }
 
@@ -553,7 +635,7 @@ class FacilitatorTelemetryIntegrationTests {
                     return new SettlementResponse(
                             real.success(),
                             real.errorReason(),
-                            HOSTILE_TEXT,
+                            SETTLE_MESSAGE.get().apply(payload),
                             real.payer(),
                             real.transaction(),
                             real.network(),
