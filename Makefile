@@ -24,7 +24,7 @@ export X402_SELLER_PAYTO_ADDRESS
 	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check \
 	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask \
 	research-run research-approve research-status web-build e2e e2e-live lighthouse gen-api \
-	recon-run recon-report ledger-balance ledger-tamper-demo db-roles psql auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest
+	shellcheck recon-run recon-report ledger-balance ledger-tamper-demo db-roles psql auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest
 
 help: ## Show this help.
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -35,6 +35,11 @@ web/node_modules: web/pnpm-lock.yaml
 
 images: ## Build all service images for the host architecture (./gradlew bootBuildImage).
 	./gradlew bootBuildImage
+
+SHELLCHECK_IMAGE ?= koalaman/shellcheck@sha256:2097951f02e735b613f4a34de20c40f937a6c8f18ecb170612c88c34517221fb
+
+shellcheck: ## ShellCheck every tracked shell script (warning and above) with the pinned official image; same check as CI.
+	git ls-files '*.sh' | xargs docker run --rm -v "$$PWD":/mnt -w /mnt $(SHELLCHECK_IMAGE) -x -S warning
 
 check-x402-env: ## Verify X402_SELLER_PAYTO_ADDRESS is a valid address (required by `make up`, not `infra-up`).
 	scripts/check-x402-env.sh

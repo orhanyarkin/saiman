@@ -130,6 +130,21 @@ jobs:
       - name: Self-test the agent usage-profile switch
         run: scripts/test-usage-profile.sh
 
+  shellcheck:
+    name: shellcheck (scripts, deploy, hooks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: ShellCheck every tracked shell script (warning and above)
+        # Official image, pinned by digest (koalaman/shellcheck v0.10.0); nothing is installed on the runner.
+        run: |
+          git ls-files '*.sh' | xargs docker run --rm -v "$PWD":/mnt -w /mnt \
+            koalaman/shellcheck@sha256:2097951f02e735b613f4a34de20c40f937a6c8f18ecb170612c88c34517221fb -x -S warning
+
   images:
     name: images (bootBuildImage, ${{ matrix.runs-on }})
     needs: backend

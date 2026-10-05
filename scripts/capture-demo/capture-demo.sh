@@ -19,6 +19,11 @@
 #   RUN_LIMIT (20)                     RECON_LIMIT (20)         PAYMENT_LIMIT (20)
 #   CAPTURE_OUT   output path          (default build/capture/capture-<UTC timestamp>.json)
 #   CAPTURE_ENVIRONMENT  label stored in the capture (default "local docker compose")
+#   CAPTURE_RUN_IDS      space/comma separated run ids to keep (default: the RUN_LIMIT newest runs); every
+#                        listed id must be among them, and the runs list responses are filtered to them
+#   CAPTURE_ANNOTATIONS_FILE  JSON {"<runId>": {"label","detail","tone": "warning"|"info"}} stored as `annotations`
+#   CAPTURE_CORPUS_WATERMARK  newest disclosure time of the frozen KAP snapshot (default: corpusWatermark of
+#                        docs/evals/latest.json); stored as `corpus` so the replay banner can show it
 #   SECRETS_DIR (secrets)              reader token: <SECRETS_DIR>/api_reader_token
 # Publish for the replay build with: CAPTURE_OUT=web/public/demo/capture.json make capture-demo
 set -euo pipefail
@@ -105,6 +110,16 @@ echo "capture-demo: reading ${ORCH_URL} and ${LEDGER_URL}"
 record "${ORCH_URL}" "/api/v1/ping" optional
 record "${ORCH_URL}" "/api/v1/runs?limit=${RUN_LIMIT}" required
 run_ids="$(jq -r '.items[].runId' "${work}/last-body")"
+if [[ -n "${CAPTURE_RUN_IDS:-}" ]]; then
+  wanted="$(printf '%s' "${CAPTURE_RUN_IDS}" | tr ',' ' ')"
+  for id in ${wanted}; do
+    grep -qx -- "${id}" <<<"${run_ids}" || {
+      echo "capture-demo: CAPTURE_RUN_IDS lists a run that is not among the ${RUN_LIMIT} newest (raise RUN_LIMIT)" >&2
+      exit 1
+    }
+  done
+  run_ids="${wanted}"
+fi
 record "${ORCH_URL}" "/api/v1/runs?limit=5" optional
 record "${ORCH_URL}" "/api/v1/approvals" optional
 record "${ORCH_URL}" "/api/v1/approvals?status=PENDING" optional
@@ -131,6 +146,16 @@ for run_id in ${run_ids}; do
   run_count=$((run_count + 1))
 done
 
+if [[ -n "${CAPTURE_RUN_IDS:-}" ]]; then
+  # Keep only the chosen runs in every recorded runs list (ledger-wide data stays the real ledger state).
+  keep="$(printf '%s\n' ${run_ids} | jq -R . | jq -s .)"
+  jq --argjson keep "${keep}" '
+    with_entries(if (.key | startswith("/api/v1/runs?limit="))
+      then .value.items |= map(select(.runId as $r | $keep | index($r))) else . end)' \
+    "${responses}" >"${responses}.new"
+  mv "${responses}.new" "${responses}"
+fi
+
 # --- Ledger and reconciliation -------------------------------------------------------------
 record "${LEDGER_URL}" "/api/v1/ledger/payments?limit=${PAYMENT_LIMIT}" required
 payment_ids="$(jq -r '.items[].paymentId' "${work}/last-body")"
@@ -156,14 +181,30 @@ record "${LEDGER_URL}" "/api/v1/reconciliation/runs/latest" optional
 
 # --- Assemble (sorted keys = deterministic), scrub, then publish ---------------------------
 candidate="${work}/capture.json"
-jq -S -n \
+annotations='{}'
+if [[ -n "${CAPTURE_ANNOTATIONS_FILE:-}" ]]; then
+  annotations="$(jq -c 'if type == "object" and all(.[]; (.label | type == "string") and (.detail | type == "string")
+      and (.tone == "warning" or .tone == "info")) then . else error("annotations must map runId to {label, detail, tone}") end' \
+    "${CAPTURE_ANNOTATIONS_FILE}")" || {
+    echo "capture-demo: ${CAPTURE_ANNOTATIONS_FILE} is not a valid annotations file" >&2
+    exit 1
+  }
+fi
+watermark="${CAPTURE_CORPUS_WATERMARK:-$(jq -r '.corpusWatermark // empty' docs/evals/latest.json 2>/dev/null || true)}"
+corpus='null'
+if [[ -n "${watermark}" ]]; then
+  corpus="$(jq -n -c --arg w "${watermark}" '{snapshotLabel: "KAP disclosures up to \($w[0:10]) (frozen MKK snapshot, ADR-0010)", newestDisclosureAt: $w}')"
+fi
+jq -S -n --argjson annotations "${annotations}" --argjson corpus "${corpus}" \
   --arg capturedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg environment "${environment}" \
   --arg sourceCommit "$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
   --slurpfile responses "${responses}" \
   --slurpfile runEvents "${events}" \
   '{schemaVersion: 1, capturedAt: $capturedAt, environment: $environment, network: "eip155:84532",
-    sourceCommit: $sourceCommit, responses: $responses[0], runEvents: $runEvents[0]}' |
+    sourceCommit: $sourceCommit, responses: $responses[0], runEvents: $runEvents[0]}
+    + (if $corpus == null then {} else {corpus: $corpus} end)
+    + (if ($annotations | length) == 0 then {} else {annotations: $annotations} end)' |
   jq -S 'walk(if type == "string" then gsub("http://[A-Za-z0-9_.-]+:[0-9]+"; "https://demo.invalid") else . end)' >"${candidate}"
 
 if ! SECRETS_DIR="${secrets_dir}" scrub_check "${candidate}"; then

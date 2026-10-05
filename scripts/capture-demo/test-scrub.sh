@@ -101,6 +101,36 @@ else
   fi
 fi
 
+# Run selection, annotations and the corpus snapshot (ADR-0026).
+run_id="6ad4354c-8e79-4b49-b5d9-d45eb9689b41"
+printf '{"%s":{"label":"Failed run","detail":"The facilitator refused the settlement.","tone":"warning"}}' "${run_id}" >"${work}/annotations.json"
+rc=0
+CAPTURE_RUN_IDS="${run_id}" CAPTURE_ANNOTATIONS_FILE="${work}/annotations.json" CAPTURE_CORPUS_WATERMARK="2023-12-29T20:46:52Z" \
+  run_capture "${work}/sel.json" || rc=$?
+if [[ "${rc}" -eq 0 ]] && jq -e --arg id "${run_id}" '.annotations[$id].tone == "warning"
+    and .corpus.newestDisclosureAt == "2023-12-29T20:46:52Z"
+    and (.corpus.snapshotLabel | contains("2023-12-29"))
+    and (.responses["/api/v1/runs?limit=20"].items | map(.runId) == [$id])' "${work}/sel.json" >/dev/null; then
+  pass "capture-demo: selected runs, annotations and the corpus snapshot are stored"
+else
+  fail "capture-demo: run selection / annotations / corpus (rc=${rc}): $(cat "${work}/err")"
+fi
+rc=0
+CAPTURE_RUN_IDS="00000000-0000-0000-0000-000000000000" run_capture "${work}/sel2.json" || rc=$?
+if [[ "${rc}" -ne 0 && ! -e "${work}/sel2.json" ]]; then
+  pass "capture-demo: an unknown run id in CAPTURE_RUN_IDS fails without output"
+else
+  fail "capture-demo: an unknown run id was accepted (rc=${rc})"
+fi
+printf '{"%s":{"label":"x","detail":"y","tone":"loud"}}' "${run_id}" >"${work}/bad-annotations.json"
+rc=0
+CAPTURE_ANNOTATIONS_FILE="${work}/bad-annotations.json" run_capture "${work}/sel3.json" || rc=$?
+if [[ "${rc}" -ne 0 && ! -e "${work}/sel3.json" ]]; then
+  pass "capture-demo: a malformed annotations file fails without output"
+else
+  fail "capture-demo: malformed annotations were accepted (rc=${rc})"
+fi
+
 # A leak (forbidden key in an event) must fail and leave no output file.
 rc=0
 FAKE_CURL_LEAK=1 run_capture "${work}/leak.json" || rc=$?
