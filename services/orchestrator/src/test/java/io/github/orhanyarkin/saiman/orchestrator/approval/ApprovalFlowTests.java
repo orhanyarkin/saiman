@@ -81,6 +81,7 @@ class ApprovalFlowTests extends SpendTestSupport {
                 .jsonPath("$.status")
                 .isEqualTo("APPROVED");
         assertThat(waiting.get(10, TimeUnit.SECONDS)).isEqualTo(ApprovalStatus.APPROVED);
+        assertThat(approvals.find(approvalId).orElseThrow().decidedBy()).matches("operator:[0-9a-f]{8}");
 
         assertThat(client.send(handle, null).paid()).isTrue();
 

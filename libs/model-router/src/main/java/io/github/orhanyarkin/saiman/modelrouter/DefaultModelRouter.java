@@ -1,11 +1,14 @@
 package io.github.orhanyarkin.saiman.modelrouter;
 
+import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.micrometer.observation.ObservationRegistry;
 import java.util.EnumMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -33,7 +36,10 @@ public final class DefaultModelRouter implements ModelRouter {
      */
     public static final long HARD_CEILING_USD_MICROS = 700_000L;
 
+    private static final Logger log = LoggerFactory.getLogger(DefaultModelRouter.class);
+
     private final CostGuard guard;
+    private final long dailyCapUsdMicros;
     private final RouterMetrics metrics;
     private final Map<Tier, ChatModel> chatModels = new EnumMap<>(Tier.class);
     private final Map<Tier, RouterProperties.Route> routes = new EnumMap<>(Tier.class);
@@ -61,6 +67,7 @@ public final class DefaultModelRouter implements ModelRouter {
             @Nullable ScopedCostGuard scopedGuard,
             ObservationRegistry observations) {
         this.guard = guard;
+        this.dailyCapUsdMicros = properties.dailyCapUsdMicros();
         this.metrics = metrics;
         this.observations = observations;
         if (properties.dailyCapUsdMicros() < 0 || properties.dailyCapUsdMicros() > HARD_CEILING_USD_MICROS) {
@@ -153,6 +160,25 @@ public final class DefaultModelRouter implements ModelRouter {
     public EmbeddingModel embeddingModel(DataClass dataClass) {
         requireAllowed(embeddingRoute.allowedDataClasses(), dataClass, "the embedding route");
         return embeddingModel;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Fails closed: if the counter cannot be read (Redis down, a corrupt value), the status is "fully spent" and
+     * the failure is logged by type only. The model calls themselves fail closed in the same situation.
+     */
+    @Override
+    public DailyCapStatus dailyCap() {
+        Money cap = Money.usdMicros(dailyCapUsdMicros);
+        try {
+            return new DailyCapStatus(guard.todayTotal(), cap);
+        } catch (RuntimeException e) {
+            log.warn(
+                    "Daily model cap counter unreadable ({}); reporting the cap as reached",
+                    e.getClass().getSimpleName());
+            return DailyCapStatus.reached(cap);
+        }
     }
 
     static String tierLabel(Tier tier) {

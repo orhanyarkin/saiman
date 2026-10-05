@@ -13,6 +13,7 @@ import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentStatus;
 import io.github.orhanyarkin.saiman.orchestrator.payment.SellerCallFailedException;
 import io.github.orhanyarkin.saiman.orchestrator.payment.SellerEndpoint;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.FakeSeller;
+import io.github.orhanyarkin.saiman.orchestrator.spendtest.TestTables;
 import io.github.orhanyarkin.x402.client.PropertiesSpendGuard;
 import io.github.orhanyarkin.x402.client.SpendGuard;
 import io.github.orhanyarkin.x402.client.X402PaymentInterceptor;
@@ -69,9 +70,7 @@ class SpendGuardWiringTests {
 
     @BeforeEach
     void reset() {
-        jdbc.sql("TRUNCATE event_publication, payment_event_log, tool_result, approval, payment_intent,"
-                        + " run_event, spend_day, run")
-                .update();
+        TestTables.clearAll(jdbc);
         seller.reset();
     }
 

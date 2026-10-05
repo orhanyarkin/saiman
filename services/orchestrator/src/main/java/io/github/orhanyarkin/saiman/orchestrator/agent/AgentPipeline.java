@@ -56,8 +56,8 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * Every model call names the run as the router's cost scope with the run's LLM budget; the router's
  * {@code saiman.model.call} observation feeds {@link ModelCallTap}, which records each round trip's
- * cost on the run. A scope-budget or daily-cap refusal ends the run with {@code LLM_BUDGET_EXHAUSTED}
- * and no further model call. Nothing a model writes becomes a limit, a URL, a payee or an amount.
+ * cost on the run. A scope-budget refusal ends the run with {@code LLM_BUDGET_EXHAUSTED}, a daily-cap
+ * refusal with {@code LLM_DAILY_CAP_REACHED}, and neither makes a further model call. Nothing a model writes becomes a limit, a URL, a payee or an amount.
  */
 @Component
 @EnableConfigurationProperties(AgentProperties.class)
@@ -308,9 +308,11 @@ public class AgentPipeline implements ResearchPipeline {
     }
 
     static FailureCode classify(Throwable failure) {
-        if (causedBy(failure, ScopeBudgetExceededException.class)
-                || causedBy(failure, DailyCapExceededException.class)) {
+        if (causedBy(failure, ScopeBudgetExceededException.class)) {
             return FailureCode.LLM_BUDGET_EXHAUSTED;
+        }
+        if (causedBy(failure, DailyCapExceededException.class)) {
+            return FailureCode.LLM_DAILY_CAP_REACHED;
         }
         if (causedBy(failure, DataClassViolationException.class)) {
             return FailureCode.INTERNAL_ERROR;

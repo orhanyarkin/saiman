@@ -4,7 +4,10 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -23,6 +26,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param retryAttempts attempts per lookup, including the first (retried only on IO errors, 429 and 5xx)
  * @param retryWait base wait between attempts (exponential, jittered)
  * @param circuitOpenWait how long the breaker stays open after the seller kept failing
+ * @param serviceToken the ledger's own service token for seller-api's {@code /internal/**} (ADR-0023), sent as {@code
+ *     Authorization: Bearer}; from the configtree secret {@code saiman.ledger.seller.service-token}. Required whenever
+ *     {@code base-url} is set (it always is: it has a default), so the ledger refuses to start without it. Never logged:
+ *     {@link #toString()} redacts it.
  */
 @ConfigurationProperties("saiman.ledger.seller")
 public record SellerProperties(
@@ -32,7 +39,11 @@ public record SellerProperties(
         @DefaultValue("5s") Duration readTimeout,
         @DefaultValue("3") int retryAttempts,
         @DefaultValue("200ms") Duration retryWait,
-        @DefaultValue("30s") Duration circuitOpenWait) {
+        @DefaultValue("30s") Duration circuitOpenWait,
+        @Nullable String serviceToken) {
+
+    /** The shape every API token has (libs/api-security {@code StaticTokenIntrospector}). */
+    private static final Pattern TOKEN = Pattern.compile("[A-Za-z0-9_-]{32,128}");
 
     private static final Set<String> LOOPBACK = Set.of("localhost", "127.0.0.1", "[::1]");
 
@@ -55,10 +66,33 @@ public record SellerProperties(
         if (retryWait.toMillis() < 1) {
             throw new IllegalArgumentException("saiman.ledger.seller.retry-wait must be at least 1ms");
         }
+        // A configtree file usually ends with a newline. The messages never quote the value.
+        serviceToken = serviceToken == null ? null : serviceToken.strip();
+        if (serviceToken == null || serviceToken.isEmpty()) {
+            throw new IllegalArgumentException("saiman.ledger.seller.service-token is required when"
+                    + " saiman.ledger.seller.base-url is set (secret seller_service_token_ledger)");
+        }
+        if (!TOKEN.matcher(serviceToken).matches()) {
+            throw new IllegalArgumentException(
+                    "saiman.ledger.seller.service-token is malformed (expected 32-128 characters of [A-Za-z0-9_-])");
+        }
     }
 
-    /** Defaults for everything but the URL and its host (tests). */
-    public static SellerProperties of(String baseUrl) {
+    /** The token, known to be present after construction. */
+    String requireServiceToken() {
+        return Objects.requireNonNull(serviceToken);
+    }
+
+    /** Never prints the service token. */
+    @Override
+    public String toString() {
+        return "SellerProperties[baseUrl=" + baseUrl + ", allowedHosts=" + allowedHosts + ", connectTimeout="
+                + connectTimeout + ", readTimeout=" + readTimeout + ", retryAttempts=" + retryAttempts
+                + ", retryWait=" + retryWait + ", circuitOpenWait=" + circuitOpenWait + ", serviceToken=[PROTECTED]]";
+    }
+
+    /** Defaults for everything but the URL, its host and the token (tests). */
+    public static SellerProperties of(String baseUrl, @Nullable String serviceToken) {
         return new SellerProperties(
                 baseUrl,
                 List.of("seller-api"),
@@ -66,7 +100,8 @@ public record SellerProperties(
                 Duration.ofSeconds(5),
                 3,
                 Duration.ofMillis(200),
-                Duration.ofSeconds(30));
+                Duration.ofSeconds(30),
+                serviceToken);
     }
 
     /** The validated base URL without a trailing slash. */

@@ -20,6 +20,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.boot.http.client.HttpClientSettings;
 import org.springframework.boot.http.client.HttpRedirects;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
@@ -45,6 +46,10 @@ import tools.jackson.databind.json.JsonMapper;
  * are). Errors carry fixed messages, never response text. Each call runs as {@code Retry(CircuitBreaker(call))} inside
  * the observation {@code saiman.ledger.seller.credit_note.lookup}, and counts {@code
  * saiman.ledger.seller.credit_note_lookups{outcome}}.
+ *
+ * <p>Every request carries the ledger's service token ({@code Authorization: Bearer}, ADR-0023; seller-api grants
+ * {@code /internal/credit-notes/**} to {@code SERVICE_ledger} only). A 401 or 403 is "unavailable" like any other
+ * unexpected status: the payment stays PENDING until the token is fixed.
  */
 public class RestSellerCreditNoteClient implements SellerCreditNoteClient {
 
@@ -62,6 +67,9 @@ public class RestSellerCreditNoteClient implements SellerCreditNoteClient {
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final String baseUrl;
+    /** {@code Bearer <token>}; never logged, never part of an exception message. */
+    private final String authorization;
+
     private final RestClient client;
     private final Retry retry;
     private final CircuitBreaker breaker;
@@ -70,6 +78,7 @@ public class RestSellerCreditNoteClient implements SellerCreditNoteClient {
 
     public RestSellerCreditNoteClient(SellerProperties config, ObservationRegistry observations, MeterRegistry meters) {
         this.baseUrl = config.baseUrl();
+        this.authorization = "Bearer " + config.requireServiceToken();
         this.observations = observations;
         this.meters = meters;
         HttpClientSettings settings = HttpClientSettings.defaults()
@@ -136,11 +145,14 @@ public class RestSellerCreditNoteClient implements SellerCreditNoteClient {
             answer = client.get()
                     .uri(uri)
                     .accept(MediaType.APPLICATION_JSON, MediaType.APPLICATION_PROBLEM_JSON)
+                    .header(HttpHeaders.AUTHORIZATION, authorization)
                     .exchange((req, resp) -> {
                         int status = resp.getStatusCode().value();
                         if (status == 429 || status >= 500) {
                             throw new TransientSellerException("seller answered HTTP " + status);
                         }
+                        // 401/403 (wrong or missing service token) and any other status: no definite answer, so the
+                        // payment stays PENDING; never "no credit note", never a mismatch.
                         if (status != 200 && status != 404) {
                             throw new SellerUnavailableException("seller answered HTTP " + status);
                         }

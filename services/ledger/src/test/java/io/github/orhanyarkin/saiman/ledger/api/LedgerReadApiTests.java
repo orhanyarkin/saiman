@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.ledger.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.orhanyarkin.saiman.apisecurity.testfixtures.TestTokens;
 import io.github.orhanyarkin.saiman.ledger.LedgerIntegrationTest;
 import io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts;
 import io.github.orhanyarkin.saiman.ledger.journal.EntryKind;
@@ -802,7 +803,12 @@ class LedgerReadApiTests {
     @ParameterizedTest
     @ValueSource(strings = {"/v3/api-docs", "/v3/api-docs.yaml", "/swagger-ui/index.html", "/swagger-ui.html"})
     void openApiDocumentIsOffAtRuntime(String path) {
-        client.get().uri(path).exchange().expectStatus().isNotFound();
+        // /v3/api-docs is READER-readable and absent (404); the other paths are not in the rules at all (403).
+        client.get()
+                .uri(path)
+                .exchange()
+                .expectStatus()
+                .value(status -> assertThat(status).isIn(403, 404));
     }
 
     /** Unknown routes get the fixed 404 too: no request path in {@code detail} or {@code instance}. */
@@ -984,7 +990,9 @@ class LedgerReadApiTests {
         try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(10_000);
             OutputStream out = socket.getOutputStream();
-            out.write((method + " " + path + " HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n")
+            // Authenticated: these cases are about the guard (auth ordering is in LedgerApiSecurityTests).
+            out.write((method + " " + path + " HTTP/1.1\r\nHost: " + host + "\r\nAuthorization: "
+                            + TestTokens.bearer(TestTokens.OPERATOR) + "\r\nConnection: close\r\n\r\n")
                     .getBytes(StandardCharsets.US_ASCII));
             out.flush();
             BufferedReader in =

@@ -1,9 +1,6 @@
 package io.github.orhanyarkin.saiman.orchestrator.system;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 import io.github.orhanyarkin.saiman.orchestrator.TestcontainersConfiguration;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -13,7 +10,6 @@ import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTe
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.context.annotation.Import;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.test.web.servlet.client.RestTestClient;
 
 /**
@@ -62,20 +58,9 @@ class ActuatorEndpointsTests {
     }
 
     @Test
-    void infoShowsBuildMetadataOnly() {
-        client.get()
-                .uri("/actuator/info")
-                .exchange()
-                .expectStatus()
-                .isOk()
-                .expectBody(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .value(info -> assertThat(info).containsOnlyKeys("build"));
-        client.get()
-                .uri("/actuator/info")
-                .exchange()
-                .expectBody()
-                .jsonPath("$.build.name")
-                .isEqualTo(serviceName);
+    void infoIsNotPartOfTheAuthenticatedApi() {
+        // ADR-0023: only health is open; info is denied by the security chain (403 for the default OPERATOR token).
+        client.get().uri("/actuator/info").exchange().expectStatus().isForbidden();
     }
 
     @ParameterizedTest
@@ -88,7 +73,7 @@ class ActuatorEndpointsTests {
                 "/actuator/loggers",
                 "/actuator/metrics"
             })
-    void otherActuatorEndpointsDoNotExist(String uri) {
-        client.get().uri(uri).exchange().expectStatus().isNotFound();
+    void otherActuatorEndpointsAreDenied(String uri) {
+        client.get().uri(uri).exchange().expectStatus().isForbidden();
     }
 }
