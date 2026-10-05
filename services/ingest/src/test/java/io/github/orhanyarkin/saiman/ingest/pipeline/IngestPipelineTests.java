@@ -251,14 +251,22 @@ class IngestPipelineTests extends IngestIntegrationTests {
     @Test
     void onlyOneRunAtATimeThanksToTheAdvisoryLock() throws Exception {
         try (Connection other = locks.open();
-                PreparedStatement lock = other.prepareStatement("SELECT pg_advisory_lock(?)")) {
+                PreparedStatement lock = other.prepareStatement("SELECT pg_advisory_lock(?)");
+                PreparedStatement unlock = other.prepareStatement("SELECT pg_advisory_unlock(?)")) {
             lock.setLong(1, 0x5A1A_0001_0000_0001L);
             lock.execute();
+            try {
+                RunReport busy = job.run();
 
-            RunReport busy = job.run();
-
-            assertThat(busy.alreadyRunning()).isTrue();
-            assertThat(MKK.requests()).isEmpty();
+                assertThat(busy.alreadyRunning()).isTrue();
+                assertThat(MKK.requests()).isEmpty();
+            } finally {
+                // Release explicitly: closing the connection only releases the lock once the server has torn the
+                // session down, which lags under load, and the next run (here or in the next test) would still see
+                // it held. IngestJob does the same in production.
+                unlock.setLong(1, 0x5A1A_0001_0000_0001L);
+                unlock.execute();
+            }
         }
         assertThat(job.run().alreadyRunning()).isFalse();
     }
