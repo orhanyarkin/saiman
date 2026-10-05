@@ -4,7 +4,6 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.introspection.OpaqueTokenIntrospector;
-import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.web.savedrequest.NullRequestCache;
 
 /**
@@ -14,6 +13,7 @@ import org.springframework.security.web.savedrequest.NullRequestCache;
  *
  * <pre>{@code
  * @Configuration(proxyBeanMethods = false)
+ * @ConditionalOnSaimanAuth
  * class ApiSecurityConfiguration {
  *
  *     @Bean
@@ -31,9 +31,21 @@ import org.springframework.security.web.savedrequest.NullRequestCache;
  * }
  * }</pre>
  *
- * <p>An internal route checks the caller instead: {@code .requestMatchers("/internal/credit-notes/**")
- * .hasAuthority(SaimanAuthorities.service("ledger"))}. The {@code RoleHierarchy} bean of the auto-configuration makes
- * {@code hasRole("READER")} true for an OPERATOR.
+ * <p>The {@code RoleHierarchy} bean of the auto-configuration makes {@code hasRole("READER")} true for an OPERATOR.
+ *
+ * <p><b>Rules every service must follow:</b>
+ *
+ * <ul>
+ *   <li>A service route checks the <em>caller</em>: {@code .requestMatchers("/internal/credit-notes/**")
+ *       .hasAuthority(SaimanAuthorities.service("ledger"))}. Never {@code hasRole("SERVICE")} or {@code
+ *       authenticated()}: those let every service token (and, for {@code authenticated()}, every human token) in.
+ *   <li>End with {@code anyRequest().denyAll()}, and never add a second {@code SecurityFilterChain} that permits
+ *       everything as a fallback, not even for {@code saiman.auth.enabled=false}: with authentication disabled the
+ *       service defines no chain at all (its configuration is {@code @ConditionalOnSaimanAuth}), and the
+ *       acknowledgement {@code saiman.auth.allow-disabled-insecure=true} is the only way to get there.
+ *   <li>Code that holds the authenticated {@code BearerTokenAuthentication} must not log {@code getToken()} or {@code
+ *       getCredentials()}: they return the raw token. Read the principal name only.
+ * </ul>
  *
  * <p>What {@link #apply} sets:
  *
@@ -43,7 +55,10 @@ import org.springframework.security.web.savedrequest.NullRequestCache;
  *       The services' own {@code X-Saiman-Csrf} guard filters stay as defence in depth.
  *   <li>No form login, HTTP Basic or logout endpoints.
  *   <li>The token is read from the {@code Authorization: Bearer} header only; {@code access_token} query and form
- *       parameters are ignored (a token in a URL ends up in access logs and browser history).
+ *       parameters are ignored (a token in a URL ends up in access logs and browser history). The authentication
+ *       request built from it ({@link RedactingBearerTokenConverter}) returns {@code [PROTECTED]} as principal, name,
+ *       credentials and string form, unlike Spring's {@code BearerTokenAuthenticationToken} whose {@code getName()}
+ *       is the raw token.
  *   <li>401 and 403 answers are fixed RFC 9457 bodies ({@link ProblemAuthenticationEntryPoint}, {@link
  *       ProblemAccessDeniedHandler}), for both the missing-token path (exception translation) and the bad-token path
  *       (the bearer filter's failure handler).
@@ -67,9 +82,8 @@ public final class SaimanResourceServer {
     public static HttpSecurity apply(HttpSecurity http, OpaqueTokenIntrospector introspector) throws Exception {
         ProblemAuthenticationEntryPoint entryPoint = new ProblemAuthenticationEntryPoint();
         ProblemAccessDeniedHandler accessDenied = new ProblemAccessDeniedHandler();
-        DefaultBearerTokenResolver headerOnly = new DefaultBearerTokenResolver();
-        headerOnly.setAllowUriQueryParameter(false);
-        headerOnly.setAllowFormEncodedBodyParameter(false);
+        // Header-only bearer resolution; the unauthenticated token never exposes the raw value as its principal.
+        RedactingBearerTokenConverter headerOnly = new RedactingBearerTokenConverter();
 
         return http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .requestCache(cache -> cache.requestCache(new NullRequestCache()))
@@ -80,7 +94,7 @@ public final class SaimanResourceServer {
                 .exceptionHandling(exceptions ->
                         exceptions.authenticationEntryPoint(entryPoint).accessDeniedHandler(accessDenied))
                 .oauth2ResourceServer(resourceServer -> resourceServer
-                        .bearerTokenResolver(headerOnly)
+                        .authenticationConverter(headerOnly)
                         .authenticationEntryPoint(entryPoint)
                         .accessDeniedHandler(accessDenied)
                         .opaqueToken(opaque -> opaque.introspector(introspector)));

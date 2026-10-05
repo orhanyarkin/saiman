@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.apisecurity.sample;
 
+import io.github.orhanyarkin.saiman.apisecurity.ConditionalOnSaimanAuth;
 import io.github.orhanyarkin.saiman.apisecurity.SaimanAuthorities;
 import io.github.orhanyarkin.saiman.apisecurity.SaimanResourceServer;
 import io.github.orhanyarkin.saiman.apisecurity.SaimanRole;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class SampleApplication {
 
     @Configuration(proxyBeanMethods = false)
+    @ConditionalOnSaimanAuth
     static class SampleApiSecurityConfiguration {
 
         @Bean

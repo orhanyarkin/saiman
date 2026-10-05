@@ -14,6 +14,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *   <caption>Properties and their environment variables</caption>
  *   <tr><th>Property</th><th>Environment variable</th><th>Default</th></tr>
  *   <tr><td>{@code saiman.auth.enabled}</td><td>{@code SAIMAN_AUTH_ENABLED}</td><td>{@code true}</td></tr>
+ *   <tr><td>{@code saiman.auth.allow-disabled-insecure}</td><td>{@code SAIMAN_AUTH_ALLOW_DISABLED_INSECURE}</td>
+ *       <td>{@code false}</td></tr>
  *   <tr><td>{@code saiman.auth.require-human-tokens}</td><td>{@code SAIMAN_AUTH_REQUIRE_HUMAN_TOKENS}</td>
  *       <td>{@code true}</td></tr>
  *   <tr><td>{@code saiman.auth.reader-token-sha256} (list)</td><td>{@code SAIMAN_AUTH_READER_TOKEN_SHA256}
@@ -39,6 +41,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *
  * @param enabled whether the auto-configuration creates the token introspector and role hierarchy at all
  * @param requireHumanTokens whether READER and OPERATOR digests are mandatory
+ * @param allowDisabledInsecure the explicit acknowledgement that {@code enabled=false} is wanted; without it a
+ *     disabled configuration refuses to start
  * @param readerTokenSha256 digests of READER tokens (more than one allows a rotation overlap)
  * @param operatorTokenSha256 digests of OPERATOR tokens
  * @param service the service callers' tokens ({@code saiman.auth.service.tokens.<caller>.sha256})
@@ -47,6 +51,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record ApiTokenProperties(
         @DefaultValue("true") boolean enabled,
         @DefaultValue("true") boolean requireHumanTokens,
+        @DefaultValue("false") boolean allowDisabledInsecure,
         @DefaultValue List<String> readerTokenSha256,
         @DefaultValue List<String> operatorTokenSha256,
         @DefaultValue Service service) {
@@ -62,11 +67,25 @@ public record ApiTokenProperties(
         return service.tokens();
     }
 
+    /** Whether any READER, OPERATOR or service digest is configured. */
+    public boolean hasAnyDigest() {
+        if (!readerTokenSha256.isEmpty() || !operatorTokenSha256.isEmpty()) {
+            return true;
+        }
+        for (ServiceToken token : serviceTokens().values()) {
+            String digest = token.sha256();
+            if (digest != null && !digest.isBlank()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Counts only: digests are not secrets, but a raw token pasted by mistake into a digest property would be. */
     @Override
     public String toString() {
         return "ApiTokenProperties[enabled=" + enabled + ", requireHumanTokens=" + requireHumanTokens
-                + ", readerDigests="
+                + ", allowDisabledInsecure=" + allowDisabledInsecure + ", readerDigests="
                 + readerTokenSha256.size() + ", operatorDigests=" + operatorTokenSha256.size() + ", serviceCallers="
                 + serviceTokens().keySet().stream().sorted().toList() + "]";
     }

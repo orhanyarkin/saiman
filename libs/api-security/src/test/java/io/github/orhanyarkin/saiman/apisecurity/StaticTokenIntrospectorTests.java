@@ -27,7 +27,7 @@ class StaticTokenIntrospectorTests {
             List<String> operators,
             Map<String, ApiTokenProperties.ServiceToken> services) {
         return new ApiTokenProperties(
-                enabled, requireHumanTokens, readers, operators, new ApiTokenProperties.Service(services));
+                enabled, requireHumanTokens, false, readers, operators, new ApiTokenProperties.Service(services));
     }
 
     private static ApiTokenProperties allTestTokens() {

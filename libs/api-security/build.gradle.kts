@@ -14,7 +14,7 @@ dependencies {
     // TestTokens: known raw tokens and their digests for the services' tests (DynamicPropertyRegistry helper).
     testFixturesApi(platform(libs.spring.boot.dependencies))
     testFixturesImplementation(libs.jspecify)
-    testFixturesImplementation(libs.spring.boot.starter.test)
+    testFixturesApi(libs.spring.boot.starter.test) // TestTokens.register exposes DynamicPropertyRegistry
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.spring.boot.starter.security.test)
