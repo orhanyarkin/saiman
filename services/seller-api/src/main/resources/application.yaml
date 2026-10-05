@@ -135,7 +135,7 @@ management:
       default: none
     web:
       exposure:
-        include: health,info
+        include: health
   endpoint:
     health:
       access: read-only
@@ -143,8 +143,8 @@ management:
         enabled: true
       show-details: never
       show-components: never
-    info:
-      access: read-only
+    # No info endpoint: seller-api has no human users (no READER token) and 8081 is published, so build metadata is
+    # not served at all (milestone audit I4). Health stays open for probes.
   otlp:
     metrics:
       export:
@@ -152,7 +152,7 @@ management:
   tracing:
     sampling:
       probability: 1.0
-# Actuator: only health and info exist at all (access), not just over HTTP (exposure).
+# Actuator: only health exists at all (access), not just over HTTP (exposure).
 # Telemetry export is off unless the runtime turns it on, so tests and a plain `bootRun` never
 # reach for a collector. Compose sets OTEL_EXPORTER_OTLP_ENDPOINT (Boot 4.1 maps it to the
 # trace exporter) and MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED=true (ADR-0006).
