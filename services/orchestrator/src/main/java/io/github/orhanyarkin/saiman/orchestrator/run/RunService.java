@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.orchestrator.run;
 
+import io.github.orhanyarkin.saiman.modelrouter.DailyCapStatus;
 import io.github.orhanyarkin.saiman.modelrouter.ModelRouter;
 import io.github.orhanyarkin.saiman.orchestrator.approval.ApprovalService;
 import io.github.orhanyarkin.saiman.orchestrator.budget.RunLimitsProperties;
@@ -143,8 +144,9 @@ public class RunService {
         } catch (IllegalArgumentException e) {
             throw rejected(RunAdmissionException.Reason.INVALID_BUDGET);
         }
-        if (dailyModelBudgetUsedUp()) {
-            throw rejected(RunAdmissionException.Reason.LLM_DAILY_CAP);
+        RunAdmissionException.Reason capRefusal = dailyCapRefusal();
+        if (capRefusal != null) {
+            throw rejected(capRefusal);
         }
         if (!permits.tryAcquire()) {
             throw rejected(RunAdmissionException.Reason.TOO_MANY_RUNS);
@@ -174,14 +176,20 @@ public class RunService {
      * Fails closed: if the router cannot say, no run starts. The cap is still enforced by reservation on every model
      * call; this only decides whether to begin.
      */
-    private boolean dailyModelBudgetUsedUp() {
+    private RunAdmissionException.@Nullable Reason dailyCapRefusal() {
         try {
-            return router.dailyCap().remaining().atomicUnits() < limits.llmBudgetUsdMicros();
+            DailyCapStatus status = router.dailyCap();
+            if (!status.counterReadable()) {
+                return RunAdmissionException.Reason.LLM_DAILY_CAP_UNKNOWN;
+            }
+            return status.remaining().atomicUnits() < limits.llmBudgetUsdMicros()
+                    ? RunAdmissionException.Reason.LLM_DAILY_CAP
+                    : null;
         } catch (RuntimeException e) {
             LOG.warn(
                     "Daily model cap unreadable ({}); refusing the run",
                     e.getClass().getSimpleName());
-            return true;
+            return RunAdmissionException.Reason.LLM_DAILY_CAP_UNKNOWN;
         }
     }
 

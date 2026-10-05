@@ -122,7 +122,8 @@ class ApiSecurityAutoConfigurationTests {
                     assertThat(context.getBean(ApiTokenProperties.class).enabled())
                             .isFalse();
                 });
-        assertThat(output.getAll()).contains("INSECURE: saiman.auth.enabled=false", "NO authentication");
+        assertThat(output.getAll())
+                .contains("INSECURE: saiman.auth.enabled=false", "authentication rules are NOT applied");
     }
 
     @ParameterizedTest

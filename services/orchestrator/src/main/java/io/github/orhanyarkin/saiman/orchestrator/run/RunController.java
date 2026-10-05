@@ -38,6 +38,9 @@ class RunController {
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 100;
     private static final URI RUNS_ROUTE = URI.create("/api/v1/runs");
+    /** Retry-After when the cap counter cannot be read: the outage may clear soon, midnight would be wrong. */
+    static final long UNREADABLE_RETRY_SECONDS = 60;
+
     private static final URI DAILY_CAP_TYPE = URI.create("urn:saiman:problem:llm-daily-cap");
 
     private final RunService runs;
@@ -152,9 +155,10 @@ class RunController {
         HttpStatus status = switch (e.reason()) {
             case INVALID_QUESTION, INVALID_BUDGET -> HttpStatus.BAD_REQUEST;
             case TOO_MANY_RUNS -> HttpStatus.TOO_MANY_REQUESTS;
-            case NOT_READY, LLM_DAILY_CAP -> HttpStatus.SERVICE_UNAVAILABLE;
+            case NOT_READY, LLM_DAILY_CAP, LLM_DAILY_CAP_UNKNOWN -> HttpStatus.SERVICE_UNAVAILABLE;
         };
-        if (e.reason() == RunAdmissionException.Reason.LLM_DAILY_CAP) {
+        if (e.reason() == RunAdmissionException.Reason.LLM_DAILY_CAP
+                || e.reason() == RunAdmissionException.Reason.LLM_DAILY_CAP_UNKNOWN) {
             return dailyCapReached(e);
         }
         ResponseEntity.BodyBuilder response =
@@ -182,7 +186,12 @@ class RunController {
         problem.setProperty("replayAvailable", true);
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)
-                .header("Retry-After", Long.toString(secondsUntilMidnightUtc()))
+                .header(
+                        "Retry-After",
+                        Long.toString(
+                                e.reason() == RunAdmissionException.Reason.LLM_DAILY_CAP_UNKNOWN
+                                        ? UNREADABLE_RETRY_SECONDS
+                                        : secondsUntilMidnightUtc()))
                 .body(problem);
     }
 

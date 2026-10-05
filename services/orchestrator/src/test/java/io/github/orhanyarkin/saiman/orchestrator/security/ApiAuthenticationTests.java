@@ -30,6 +30,7 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.client.RestTestClient;
 
@@ -122,6 +123,31 @@ class ApiAuthenticationTests extends RunTestSupport {
                 .isForbidden();
         assertThat(jdbc.sql("SELECT count(*) FROM run").query(Integer.class).single())
                 .isZero();
+    }
+
+    @Test
+    void anOperatorGetsNothingOutsideTheListedMethodsAndPaths() {
+        RestTestClient operator = as(TestTokens.OPERATOR);
+        for (HttpMethod method :
+                List.of(HttpMethod.HEAD, HttpMethod.OPTIONS, HttpMethod.PUT, HttpMethod.PATCH, HttpMethod.DELETE)) {
+            operator.method(method)
+                    .uri("/api/v1/runs")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header(ApiRequestGuardFilter.CSRF_HEADER, "1")
+                    .exchange()
+                    .expectStatus()
+                    .isForbidden();
+        }
+        for (String path : List.of("/api/v1/runs/", "/api/v1/ping", "/api/v1/spend", "/api/v1/runs/x/other")) {
+            operator.post()
+                    .uri(path)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header(ApiRequestGuardFilter.CSRF_HEADER, "1")
+                    .body("{}")
+                    .exchange()
+                    .expectStatus()
+                    .isForbidden();
+        }
     }
 
     @Test

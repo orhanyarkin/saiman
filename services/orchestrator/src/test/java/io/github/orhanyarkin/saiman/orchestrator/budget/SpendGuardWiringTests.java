@@ -14,6 +14,7 @@ import io.github.orhanyarkin.saiman.orchestrator.payment.SellerCallFailedExcepti
 import io.github.orhanyarkin.saiman.orchestrator.payment.SellerEndpoint;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.FakeSeller;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.TestTables;
+import io.github.orhanyarkin.saiman.testsupport.PostgresContainerConfiguration.SuperuserDatabase;
 import io.github.orhanyarkin.x402.client.PropertiesSpendGuard;
 import io.github.orhanyarkin.x402.client.SpendGuard;
 import io.github.orhanyarkin.x402.client.X402PaymentInterceptor;
@@ -58,6 +59,9 @@ class SpendGuardWiringTests {
     private JdbcClient jdbc;
 
     @Autowired
+    private SuperuserDatabase superuser;
+
+    @Autowired
     private PaymentIntentService intents;
 
     @Autowired
@@ -70,7 +74,7 @@ class SpendGuardWiringTests {
 
     @BeforeEach
     void reset() {
-        TestTables.clearAll(jdbc);
+        TestTables.clearAll(superuser);
         seller.reset();
     }
 

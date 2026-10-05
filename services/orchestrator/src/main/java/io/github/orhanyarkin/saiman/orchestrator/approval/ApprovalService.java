@@ -196,6 +196,18 @@ public class ApprovalService {
         return updated;
     }
 
+    /**
+     * The API shows only the role of the decider ({@code operator}), never the digest fragment of the principal name
+     * ({@code operator:1a2b3c4d}), which any READER could otherwise see. The column keeps the full name for audit.
+     */
+    private static @Nullable String roleOf(@Nullable String principalName) {
+        if (principalName == null) {
+            return null;
+        }
+        int colon = principalName.indexOf(':');
+        return colon < 0 ? principalName : principalName.substring(0, colon);
+    }
+
     private static ApprovalView map(ResultSet rs, int row) throws SQLException {
         Timestamp decidedAt = rs.getTimestamp("decided_at");
         return new ApprovalView(
@@ -209,7 +221,7 @@ public class ApprovalService {
                 rs.getTimestamp("requested_at").toInstant(),
                 decidedAt == null ? null : decidedAt.toInstant(),
                 rs.getTimestamp("expires_at").toInstant(),
-                rs.getString("decided_by"));
+                roleOf(rs.getString("decided_by")));
     }
 
     /**

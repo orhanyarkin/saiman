@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
+import io.github.orhanyarkin.saiman.apisecurity.testfixtures.TestTokens;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaidCallException;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentApprovalRequiredException;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentDeniedException;
@@ -81,7 +82,24 @@ class ApprovalFlowTests extends SpendTestSupport {
                 .jsonPath("$.status")
                 .isEqualTo("APPROVED");
         assertThat(waiting.get(10, TimeUnit.SECONDS)).isEqualTo(ApprovalStatus.APPROVED);
-        assertThat(approvals.find(approvalId).orElseThrow().decidedBy()).matches("operator:[0-9a-f]{8}");
+        assertThat(approvals.find(approvalId).orElseThrow().decidedBy()).isEqualTo("operator");
+        assertThat(jdbc.sql("SELECT decided_by FROM approval WHERE id = :id")
+                        .param("id", approvalId)
+                        .query(String.class)
+                        .single())
+                .matches("operator:[0-9a-f]{8}"); // the audit trail keeps the full principal name
+        String body = http.mutate()
+                .defaultHeaders(h -> h.set("Authorization", TestTokens.bearer(TestTokens.READER)))
+                .build()
+                .get()
+                .uri("/api/v1/approvals?status=APPROVED")
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody(String.class)
+                .returnResult()
+                .getResponseBody();
+        assertThat(body).contains("\"decidedBy\":\"operator\"").doesNotContain("operator:");
 
         assertThat(client.send(handle, null).paid()).isTrue();
 

@@ -1,36 +1,39 @@
 package io.github.orhanyarkin.saiman.orchestrator.spendtest;
 
-import org.springframework.jdbc.core.simple.JdbcClient;
+import io.github.orhanyarkin.saiman.testsupport.PostgresContainerConfiguration.SuperuserDatabase;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.Statement;
 
 /**
- * Empties tables as the runtime role. Tests run as {@code orchestrator_app} (ADR-0024), which has no TRUNCATE privilege,
- * so rows are deleted child-first instead.
+ * Empties tables as the database superuser. Tests run as {@code orchestrator_app} (ADR-0024), which has neither
+ * TRUNCATE nor DELETE on the counter tables, so cleanup goes around the runtime role on purpose.
  */
 public final class TestTables {
 
-    private static final String[] CHILD_FIRST = {
-        "event_publication",
-        "payment_event_log",
-        "tool_result",
-        "approval",
-        "payment_intent",
-        "run_event",
-        "spend_day",
-        "run"
-    };
-
     private TestTables() {}
 
-    /** Deletes every row of the run, payment, approval, event and outbox tables. */
-    public static void clearAll(JdbcClient jdbc) {
-        for (String table : CHILD_FIRST) {
-            jdbc.sql("DELETE FROM " + table).update();
-        }
+    /** Truncates the run, payment, approval, event and outbox tables. */
+    public static void clearAll(SuperuserDatabase db) {
+        run(
+                db,
+                "TRUNCATE orchestrator.event_publication, orchestrator.payment_event_log, orchestrator.tool_result,"
+                        + " orchestrator.approval, orchestrator.payment_intent, orchestrator.run_event,"
+                        + " orchestrator.spend_day, orchestrator.run");
     }
 
-    /** Deletes the outbox publications and the payment event log only. */
-    public static void clearOutbox(JdbcClient jdbc) {
-        jdbc.sql("DELETE FROM event_publication").update();
-        jdbc.sql("DELETE FROM payment_event_log").update();
+    /** Truncates the outbox publications and the payment event log only. */
+    public static void clearOutbox(SuperuserDatabase db) {
+        run(db, "TRUNCATE orchestrator.event_publication, orchestrator.payment_event_log");
+    }
+
+    private static void run(SuperuserDatabase db, String sql) {
+        try (Connection connection = DriverManager.getConnection(db.jdbcUrl(), db.username(), db.password());
+                Statement statement = connection.createStatement()) {
+            statement.execute(sql);
+        } catch (SQLException e) {
+            throw new IllegalStateException("test cleanup failed", e);
+        }
     }
 }

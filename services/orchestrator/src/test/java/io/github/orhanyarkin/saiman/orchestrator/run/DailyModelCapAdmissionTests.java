@@ -9,9 +9,11 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
@@ -69,9 +71,16 @@ class DailyModelCapAdmissionTests extends RunTestSupport {
         postRun("{\"question\":\"What changed at THYAO?\"}")
                 .expectStatus()
                 .isEqualTo(503)
+                .expectHeader()
+                .valueEquals(HttpHeaders.RETRY_AFTER, "60") // an outage may clear soon: not "until midnight"
                 .expectBody()
                 .jsonPath("$.code")
                 .isEqualTo("LLM_DAILY_CAP_REACHED");
+    }
+
+    @Test
+    void redisCallsHaveATimeout(@Autowired Environment environment) {
+        assertThat(environment.getProperty("spring.data.redis.timeout")).isEqualTo("2s");
     }
 
     @Test

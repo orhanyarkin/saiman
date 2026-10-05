@@ -5,12 +5,17 @@
 -- trigger functions below, truncate, or read Flyway's history.
 
 GRANT USAGE ON SCHEMA ${flyway:defaultSchema} TO ${app_role};
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ${flyway:defaultSchema} TO ${app_role};
+-- No DELETE by default: deleting a spend_day row would reset the global daily cap, deleting a run its budget
+-- counters. The only code that deletes rows is Spring Modulith's event publication registry (completion-mode
+-- DELETE removes acknowledged publications), so event_publication is the one table granted DELETE below.
+-- (grep of src/main finds no other DELETE: payment_event_log, tool_result, approval and the rest are never removed.)
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA ${flyway:defaultSchema} TO ${app_role};
+GRANT DELETE ON ${flyway:defaultSchema}.event_publication TO ${app_role};
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ${flyway:defaultSchema} TO ${app_role};
 
 -- Tables and sequences added by later migrations (created by the owner) get the same grants.
 ALTER DEFAULT PRIVILEGES IN SCHEMA ${flyway:defaultSchema}
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${app_role};
+    GRANT SELECT, INSERT, UPDATE ON TABLES TO ${app_role};
 ALTER DEFAULT PRIVILEGES IN SCHEMA ${flyway:defaultSchema}
     GRANT USAGE, SELECT ON SEQUENCES TO ${app_role};
 
@@ -32,6 +37,26 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
+-- Defence in depth for the missing DELETE grant: rows of run and spend_day are never deleted, whoever asks (a
+-- superuser must set session_replication_role or disable the trigger to do it on purpose).
+CREATE FUNCTION counter_rows_are_never_deleted() RETURNS trigger
+    LANGUAGE plpgsql AS
+$$
+BEGIN
+    RAISE EXCEPTION '% rows must not be deleted', TG_TABLE_NAME USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+CREATE TRIGGER run_never_deleted
+    BEFORE DELETE ON run
+    FOR EACH ROW
+EXECUTE FUNCTION counter_rows_are_never_deleted();
+
+CREATE TRIGGER spend_day_never_deleted
+    BEFORE DELETE ON spend_day
+    FOR EACH ROW
+EXECUTE FUNCTION counter_rows_are_never_deleted();
 
 CREATE TRIGGER run_committed_monotonic
     BEFORE UPDATE ON run

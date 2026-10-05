@@ -4,6 +4,10 @@ spring:
   threads:
     virtual:
       enabled: true
+  data:
+    redis:
+      # The daily cap counter must answer fast or fail: a hung Redis would hang every run start and model call.
+      timeout: 2s
   config:
     # Docker/compose secrets (ADR-0009): one file per secret, e.g. /run/secrets/x402.client.private-key.
     import: "optional:configtree:${saiman.secrets-dir:/run/secrets/}"

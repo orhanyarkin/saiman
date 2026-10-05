@@ -93,6 +93,24 @@ class RuntimeRoleGrantsTests extends SpendTestSupport {
     }
 
     @Test
+    void counterRowsCannotBeDeletedButAcknowledgedPublicationsCanBe() {
+        UUID run = createRun(50_000);
+        jdbc.sql("INSERT INTO spend_day (day) VALUES (current_date)").update();
+
+        assertThat(sqlState(() -> jdbc.sql("DELETE FROM spend_day").update())).isEqualTo(PERMISSION_DENIED);
+        assertThat(sqlState(() -> jdbc.sql("DELETE FROM run").update())).isEqualTo(PERMISSION_DENIED);
+        assertThat(sqlState(() -> jdbc.sql("DELETE FROM payment_intent").update()))
+                .isEqualTo(PERMISSION_DENIED);
+        jdbc.sql("DELETE FROM event_publication").update(); // Modulith's completion-mode delete
+
+        assertThat(run(run).budget()).isEqualTo(50_000);
+        assertThat(jdbc.sql("SELECT count(*) FROM spend_day")
+                        .query(Integer.class)
+                        .single())
+                .isEqualTo(1);
+    }
+
+    @Test
     void theAppRoleCannotRunDdlTruncateOrReadFlywayHistory() {
         assertThat(sqlState(() -> jdbc.sql("CREATE TABLE sneaky (id int)").update()))
                 .isEqualTo(PERMISSION_DENIED);

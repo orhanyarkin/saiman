@@ -95,7 +95,7 @@ public class ApiSecurityAutoConfiguration {
             }
             log.warn("**********************************************************************************");
             log.warn(
-                    "* INSECURE: {}=false and {}=true. The API has NO authentication.",
+                    "* INSECURE: {}=false and {}=true. Saiman's authentication rules are NOT applied; Boot's default security chain, not Saiman, decides who gets in.",
                     ENABLED_PROPERTY,
                     ALLOW_DISABLED_PROPERTY);
             log.warn("* Never run a deployment reachable by anyone else like this.");
