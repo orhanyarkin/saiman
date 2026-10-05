@@ -21,5 +21,11 @@ import org.springframework.context.annotation.Import;
 @Documented
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureRestTestClient
-@Import({TestcontainersConfiguration.class, RegistryProbe.class, FakeChain.class, FakeSellerCreditNotes.class})
+@Import({
+    TestcontainersConfiguration.class,
+    RegistryProbe.class,
+    FakeChain.class,
+    FakeSellerCreditNotes.class,
+    OperatorTokenClient.class
+})
 public @interface LedgerIntegrationTest {}

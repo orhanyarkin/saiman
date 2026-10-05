@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.ledger.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.orhanyarkin.saiman.apisecurity.testfixtures.TestTokens;
 import io.github.orhanyarkin.saiman.ledger.LedgerIntegrationTest;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentFact;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentLedgerService;
@@ -164,30 +165,33 @@ class TrialBalanceApiTests {
                 .isEqualTo(403);
         assertThat(status("POST " + PATH, "localhost", LedgerApiGuardFilter.CSRF_HEADER + ": 1\r\n"))
                 .isEqualTo(403);
-        // Past the guard, the trial balance is read-only.
+        // Past the guard, the security chain denies every write to the read-only trial balance (ADR-0023; was 405).
         assertThat(status(
                         "POST " + PATH,
                         "localhost",
                         "Content-Type: application/json\r\n" + LedgerApiGuardFilter.CSRF_HEADER + ": 1\r\n"))
-                .isEqualTo(405);
+                .isEqualTo(403);
     }
 
     @Test
     void oversizedOrChunkedBodiesAreRefused() throws IOException {
         String headers = "Content-Type: application/json\r\n" + LedgerApiGuardFilter.CSRF_HEADER + ": 1\r\n";
         String big = "{}" + " ".repeat(LedgerApiGuardFilter.MAX_BODY_BYTES);
-        assertThat(raw("POST " + PATH + " HTTP/1.1\r\nHost: localhost\r\n" + headers + "Content-Length: " + big.length()
-                        + "\r\nConnection: close\r\n\r\n" + big))
+        assertThat(raw("POST " + PATH + " HTTP/1.1\r\nHost: localhost\r\n" + AUTHORIZATION + headers
+                        + "Content-Length: " + big.length() + "\r\nConnection: close\r\n\r\n" + big))
                 .isEqualTo(413);
-        assertThat(raw("POST " + PATH + " HTTP/1.1\r\nHost: localhost\r\n" + headers
+        assertThat(raw("POST " + PATH + " HTTP/1.1\r\nHost: localhost\r\n" + AUTHORIZATION + headers
                         + "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n2\r\n{}\r\n0\r\n\r\n"))
                 .isEqualTo(413);
     }
 
+    /** The guard tests are about the guard, so they authenticate: auth-ordering cases are in LedgerApiSecurityTests. */
+    private static final String AUTHORIZATION = "Authorization: " + TestTokens.bearer(TestTokens.OPERATOR) + "\r\n";
+
     private int status(String requestLine, String host, String extraHeaders) throws IOException {
         String body = requestLine.startsWith("POST") ? "{}" : "";
-        return raw(requestLine + " HTTP/1.1\r\nHost: " + host + "\r\n" + extraHeaders + "Content-Length: "
-                + body.length() + "\r\nConnection: close\r\n\r\n" + body);
+        return raw(requestLine + " HTTP/1.1\r\nHost: " + host + "\r\n" + AUTHORIZATION + extraHeaders
+                + "Content-Length: " + body.length() + "\r\nConnection: close\r\n\r\n" + body);
     }
 
     /** Writes the request bytes as given and returns the response status code. */

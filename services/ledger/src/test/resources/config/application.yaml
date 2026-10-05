@@ -11,7 +11,18 @@ logging:
     org.springframework.kafka: warn
 
 saiman:
+  # The pool runs as ledger_app and Flyway as ledger_owner, as in compose (ADR-0024, libs/test-support).
+  test:
+    db:
+      runtime-role: app
   ledger:
     reconciliation:
       # Tests start runs themselves; a scheduled run must never race them.
       interval: 1h
+    seller:
+      # The seller client's service token (ADR-0023); FakeSellerCreditNotes replaces the client in the shared contexts.
+      service-token: saiman-test-service-ledger-token-0123456789abcdef
+  # API authentication (ADR-0023): digests of libs/api-security's TestTokens.READER and TestTokens.OPERATOR.
+  auth:
+    reader-token-sha256: bb8a7703e6054c96e9442f822efebaa7c3b1690de33838d7ea49ffbf6f23a8ac
+    operator-token-sha256: 064f3fe639ff9d727d0c62769168ce319345c94ea3833c66c792b81aa50f37a3

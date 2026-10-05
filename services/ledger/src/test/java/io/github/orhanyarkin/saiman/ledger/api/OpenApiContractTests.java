@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.orhanyarkin.saiman.ledger.FakeChain;
 import io.github.orhanyarkin.saiman.ledger.FakeSellerCreditNotes;
+import io.github.orhanyarkin.saiman.ledger.OperatorTokenClient;
 import io.github.orhanyarkin.saiman.ledger.RegistryProbe;
 import io.github.orhanyarkin.saiman.ledger.TestcontainersConfiguration;
 import java.io.IOException;
@@ -31,7 +32,13 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "springdoc.api-docs.enabled=true")
 @AutoConfigureRestTestClient
-@Import({TestcontainersConfiguration.class, RegistryProbe.class, FakeChain.class, FakeSellerCreditNotes.class})
+@Import({
+    TestcontainersConfiguration.class,
+    RegistryProbe.class,
+    FakeChain.class,
+    FakeSellerCreditNotes.class,
+    OperatorTokenClient.class
+})
 class OpenApiContractTests {
 
     /** Relative to the Gradle project directory, the test JVM's working directory. */
@@ -45,7 +52,7 @@ class OpenApiContractTests {
     @Test
     void openApiDocumentMatchesTheCheckedInContract() throws IOException {
         String served = client.get()
-                .uri("/v3/api-docs") // Host localhost:<port>, which the guard allows
+                .uri("/v3/api-docs") // Host localhost:<port>, which the guard allows; READER via OperatorTokenClient
                 .exchange()
                 .expectStatus()
                 .isOk()

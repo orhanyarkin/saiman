@@ -15,7 +15,7 @@ import org.springframework.test.web.servlet.client.RestTestClient;
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "management.endpoints.web.exposure.include=*")
 @AutoConfigureRestTestClient
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, OperatorTokenClient.class})
 class ActuatorAccessTests {
 
     @Autowired
@@ -24,7 +24,8 @@ class ActuatorAccessTests {
     @ParameterizedTest
     @ValueSource(strings = {"/actuator/env", "/actuator/heapdump", "/actuator/beans", "/actuator/configprops"})
     void sensitiveEndpointsDoNotExistEvenWhenExposed(String uri) {
-        client.get().uri(uri).exchange().expectStatus().isNotFound();
+        // Denied by the security chain (ADR-0023) even for an OPERATOR, before the (absent) endpoint is looked up.
+        client.get().uri(uri).exchange().expectStatus().isForbidden();
     }
 
     @ParameterizedTest

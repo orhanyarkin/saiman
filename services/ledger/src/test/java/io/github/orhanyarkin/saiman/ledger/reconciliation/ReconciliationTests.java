@@ -9,6 +9,7 @@ import io.github.orhanyarkin.saiman.evmrpc.UsdcTransfer;
 import io.github.orhanyarkin.saiman.ledger.FakeChain;
 import io.github.orhanyarkin.saiman.ledger.FakeSellerCreditNotes;
 import io.github.orhanyarkin.saiman.ledger.LedgerIntegrationTest;
+import io.github.orhanyarkin.saiman.ledger.Superuser;
 import io.github.orhanyarkin.saiman.ledger.api.LedgerApiGuardFilter;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentFact;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentLedgerService;
@@ -20,6 +21,7 @@ import io.github.orhanyarkin.saiman.shared.ledger.LedgerTopics;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.saiman.shared.payments.AuthorizationRef;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
+import io.github.orhanyarkin.saiman.testsupport.PostgresContainerConfiguration.SuperuserDatabase;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Connection;
@@ -102,6 +104,9 @@ class ReconciliationTests {
 
     @Autowired
     private RestTestClient client;
+
+    @Autowired
+    private SuperuserDatabase superuserDatabase;
 
     @Autowired
     private JsonMapper jsonMapper;
@@ -615,10 +620,10 @@ class ReconciliationTests {
         return "CREDIT".equals(report.suspenseSide()) ? -abs : abs;
     }
 
-    /** Runs the tamper script's transaction as a superuser would; returns the entry ids it touched. */
+    /** Runs the tamper script's transaction as the superuser (ADR-0024: ledger_app can't); returns touched ids. */
     private List<UUID> tamper() throws Exception {
         List<UUID> touched = new ArrayList<>();
-        try (Connection c = dataSource.getConnection()) {
+        try (Connection c = Superuser.dataSource(superuserDatabase).getConnection()) {
             c.setAutoCommit(false);
             try (var set = c.createStatement()) {
                 set.execute("SET LOCAL session_replication_role = replica");
