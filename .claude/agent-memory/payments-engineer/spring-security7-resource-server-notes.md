@@ -12,3 +12,5 @@ metadata:
 - `FilterChainProxy` DEBUG ("Securing GET /x?access_token=...") and authorization TRACE lines log the query string: a token in a URL leaks at DEBUG no matter what the resolver does.
 - `OAuth2ResourceServerConfigurer.bearerTokenResolver(...)` still exists in 7.1 alongside `authenticationConverter(...)`. `RoleHierarchyImpl.fromHierarchy` and `withDefaultRolePrefix()` builder both exist.
 - `MockMvcTester`/`MvcTestResult`: resolved exception via `result.getMvcResult().getResolvedException()`.
+- `@ConditionalOnProperty(havingValue="true")` compares strings, but a record binds `0/off/no` as false: use a `SpringBootCondition` that binds via `Binder.get(env).bind(name, Boolean.class)` (libs/api-security `@ConditionalOnSaimanAuth`, security audit 2026-10-05).
+- `BearerTokenAuthenticationToken.getName()`/`getPrincipal()` is the raw token; `OpaqueTokenAuthenticationProvider` reads only `getToken()`, so a subclass overriding principal/credentials/toString via `oauth2ResourceServer().authenticationConverter(...)` redacts it (cannot combine with `bearerTokenResolver`).
