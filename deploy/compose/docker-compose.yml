@@ -1,8 +1,10 @@
-# Local stack for Saiman (ADR-0001, ADR-0004, ADR-0006, ADR-0007).
-# Infra containers (postgres, kafka, redis, otel-collector, jaeger) run by default.
+# Local stack for Saiman (ADR-0001, ADR-0004, ADR-0006, ADR-0007, ADR-0023, ADR-0024).
+# Infra containers (postgres, kafka, redis, otel-collector, jaeger) and the one-shot `db-init`
+# (per-service Postgres roles) run by default.
 # App containers (orchestrator, seller-api, ledger, ingest) run under `--profile apps`;
 # they are built with Spring Boot Buildpacks (`./gradlew bootBuildImage`), not Dockerfiles.
-# All host ports are bound to 127.0.0.1 only. `evals` is a CLI, not a compose service.
+# `evals` is a one-shot CLI container under `--profile evals` (`make eval`, ADR-0025).
+# All host ports are bound to 127.0.0.1 only.
 
 name: saiman
 
@@ -17,9 +19,11 @@ x-app-common: &app-common
   # the orchestrator, from M3, through compose `secrets:` mounted at /run/secrets/ and
   # read with `spring.config.import=optional:configtree:/run/secrets/` — not before.
   environment: &app-common-env
+    # Each service sets SPRING_DATASOURCE_USERNAME=<svc>_app (runtime, DML only) and
+    # SPRING_FLYWAY_USER=<svc>_owner (migrations only); the passwords arrive as file secrets
+    # (spring.datasource.password / spring.flyway.password, ADR-0024). The `saiman` superuser
+    # belongs to db-init and psql only; scripts/check-compose-policy.sh enforces this.
     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/saiman
-    SPRING_DATASOURCE_USERNAME: saiman
-    SPRING_DATASOURCE_PASSWORD: saiman
     SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     SPRING_DATA_REDIS_URL: redis://redis:6379
     # Boot 4.1's spring-boot-starter-opentelemetry reads the standard OTEL_* env vars
@@ -35,6 +39,8 @@ x-app-common: &app-common
   depends_on: &app-common-depends-on
     otel-collector:
       condition: service_started
+    db-init:
+      condition: service_completed_successfully
   # Paketo "tiny" buildpack images have no shell, so compose cannot exec a healthcheck
   # here; the host polls /actuator/health instead (see scripts/wait-for-health.sh, ADR-0007).
 
@@ -56,6 +62,36 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+
+  # One-shot, idempotent bootstrap of the per-service roles, schemas and object ownership
+  # (ADR-0024). Runs as the superuser, the only container besides postgres that holds its
+  # password. Apps wait for it with service_completed_successfully. `make infra-up`/`make up`
+  # run it explicitly (docker compose run --rm db-init) in addition: `up --wait` treats a
+  # one-shot as a failure on some Compose versions.
+  db-init:
+    image: pgvector/pgvector:0.8.6-pg17-trixie
+    restart: "no"
+    pull_policy: missing
+    entrypoint: ["bash", "/bootstrap/bootstrap-roles.sh"]
+    environment:
+      PGHOST: postgres
+      PGDATABASE: saiman
+      PGUSER: saiman
+      PGPASSWORD: saiman
+    secrets:
+      - pg_orchestrator_owner_password
+      - pg_orchestrator_app_password
+      - pg_ledger_owner_password
+      - pg_ledger_app_password
+      - pg_seller_api_owner_password
+      - pg_seller_api_app_password
+      - pg_ingest_owner_password
+      - pg_ingest_app_password
+    volumes:
+      - ./postgres:/bootstrap:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   kafka:
     image: apache/kafka:4.3.1
@@ -155,8 +191,18 @@ services:
       - source: x402_buyer_private_key
         target: x402.client.private-key
       - openai_api_key
+      - source: pg_orchestrator_owner_password
+        target: spring.flyway.password
+      - source: pg_orchestrator_app_password
+        target: spring.datasource.password
     environment:
       <<: *app-common-env
+      SPRING_DATASOURCE_USERNAME: orchestrator_app
+      SPRING_FLYWAY_USER: orchestrator_owner
+      # SHA-256 digests (not secrets) of the human role tokens, computed from secrets/api_*_token by
+      # scripts/with-auth-digests.sh (`make up`). The raw tokens are never mounted (ADR-0023).
+      SAIMAN_AUTH_READER_TOKEN_SHA256: ${SAIMAN_AUTH_READER_TOKEN_SHA256:-}
+      SAIMAN_AUTH_OPERATOR_TOKEN_SHA256: ${SAIMAN_AUTH_OPERATOR_TOKEN_SHA256:-}
       # Same public payout address the seller uses (required by `make up`, see seller-api
       # below): the orchestrator only pays this payee (payee allowlist, rule 3).
       X402_CLIENT_ALLOWED_PAY_TO: ${X402_SELLER_PAYTO_ADDRESS:-}
@@ -199,8 +245,17 @@ services:
       - "127.0.0.1:8081:8081"
     secrets:
       - openai_api_key
+      - source: pg_seller_api_owner_password
+        target: spring.flyway.password
+      - source: pg_seller_api_app_password
+        target: spring.datasource.password
     environment:
       <<: *app-common-env
+      SPRING_DATASOURCE_USERNAME: seller_api_app
+      SPRING_FLYWAY_USER: seller_api_owner
+      # Digests of the per-caller service tokens that may use /internal/** (ADR-0023).
+      SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256: ${SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256:-}
+      SAIMAN_AUTH_SERVICE_TOKENS_EVALS_SHA256: ${SAIMAN_AUTH_SERVICE_TOKENS_EVALS_SHA256:-}
       # Where the RAG-backed disclosure endpoints reach ingest's internal API (M2).
       SELLER_INGEST_BASE_URL: http://ingest:8083
       SELLER_DISCLOSURES_SOURCE: rag
@@ -233,10 +288,22 @@ services:
     <<: *app-common
     image: ghcr.io/orhanyarkin/saiman-ledger:dev
     ports:
-      # The ledger API has no authentication until M6 (ADR-0018): keep it on loopback.
+      # Bearer-token authenticated since M6 (ADR-0023); still bound to loopback.
       - "127.0.0.1:8082:8082"
+    secrets:
+      - source: pg_ledger_owner_password
+        target: spring.flyway.password
+      - source: pg_ledger_app_password
+        target: spring.datasource.password
+      # The ledger's own service token for seller-api's /internal/credit-notes (ADR-0021, ADR-0023).
+      - source: seller_service_token_ledger
+        target: saiman.ledger.seller.service-token
     environment:
       <<: *app-common-env
+      SPRING_DATASOURCE_USERNAME: ledger_app
+      SPRING_FLYWAY_USER: ledger_owner
+      SAIMAN_AUTH_READER_TOKEN_SHA256: ${SAIMAN_AUTH_READER_TOKEN_SHA256:-}
+      SAIMAN_AUTH_OPERATOR_TOKEN_SHA256: ${SAIMAN_AUTH_OPERATOR_TOKEN_SHA256:-}
       # M4 (ADR-0018): chain reads go only to the public Base Sepolia RPC (not a secret; testnet
       # only). The allowlist is the exact host; scripts/check-compose-policy.sh pins both.
       SAIMAN_CHAIN_RPC_URL: https://sepolia.base.org
@@ -270,6 +337,14 @@ services:
     secrets:
       - mkk_credentials
       - openai_api_key
+      - source: pg_ingest_owner_password
+        target: spring.flyway.password
+      - source: pg_ingest_app_password
+        target: spring.datasource.password
+    environment:
+      <<: *app-common-env
+      SPRING_DATASOURCE_USERNAME: ingest_app
+      SPRING_FLYWAY_USER: ingest_owner
     depends_on:
       <<: *app-common-depends-on
       postgres:
@@ -301,9 +376,35 @@ services:
       retries: 5
       start_period: 5s
 
-# File-backed secrets under the ignored repo-root secrets/ dir. `make up` creates missing
-# ones as empty files (scripts/ensure-secret-files.sh); the apps fail closed on use. The
-# buyer key is created by the human only (never generated by tooling).
+  # Eval harness (M6, ADR-0025): a one-shot CLI, run by `make eval`. On the compose network so the
+  # Host allowlists of ingest and seller-api hold. Its only secret is its own service token; its
+  # only writable mount is build/evals (reports). scripts/check-compose-policy.sh pins both.
+  evals:
+    image: ghcr.io/orhanyarkin/saiman-evals:dev
+    profiles: ["evals"]
+    pull_policy: never
+    restart: "no"
+    mem_limit: 768m
+    environment:
+      SAIMAN_EVALS_INGEST_BASE_URL: http://ingest:8083
+      SAIMAN_EVALS_SELLER_BASE_URL: http://seller-api:8081
+      SAIMAN_EVALS_OUTPUT_DIR: /out
+      # `make eval EVAL_ANSWERS=1` turns the answer tier (real LLM spend, day-capped) on.
+      SAIMAN_EVALS_ANSWERS_ENABLED: ${SAIMAN_EVALS_ANSWERS_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: "true"
+      BPL_JVM_THREAD_COUNT: "50"
+    secrets:
+      - source: seller_service_token_evals
+        target: saiman.evals.seller.service-token
+    volumes:
+      - ../../build/evals:/out
+
+# File-backed secrets under the ignored repo-root secrets/ dir. `make up` creates the missing
+# ones (scripts/ensure-secret-files.sh): credentials as empty files (the apps fail closed on
+# use; the buyer key is created by the human only), the per-service DB passwords and the
+# service tokens as random values. The human role tokens api_reader_token / api_operator_token
+# are generated there too but are never mounted anywhere.
 secrets:
   x402_buyer_private_key:
     file: ../../secrets/x402_buyer_private_key
@@ -311,6 +412,26 @@ secrets:
     file: ../../secrets/mkk_credentials
   openai_api_key:
     file: ../../secrets/openai_api_key
+  pg_orchestrator_owner_password:
+    file: ../../secrets/pg_orchestrator_owner_password
+  pg_orchestrator_app_password:
+    file: ../../secrets/pg_orchestrator_app_password
+  pg_ledger_owner_password:
+    file: ../../secrets/pg_ledger_owner_password
+  pg_ledger_app_password:
+    file: ../../secrets/pg_ledger_app_password
+  pg_seller_api_owner_password:
+    file: ../../secrets/pg_seller_api_owner_password
+  pg_seller_api_app_password:
+    file: ../../secrets/pg_seller_api_app_password
+  pg_ingest_owner_password:
+    file: ../../secrets/pg_ingest_owner_password
+  pg_ingest_app_password:
+    file: ../../secrets/pg_ingest_app_password
+  seller_service_token_ledger:
+    file: ../../secrets/seller_service_token_ledger
+  seller_service_token_evals:
+    file: ../../secrets/seller_service_token_evals
 
 volumes:
   postgres_data:

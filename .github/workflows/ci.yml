@@ -117,12 +117,15 @@ jobs:
         with:
           persist-credentials: false
       - name: Validate compose config
-        run: docker compose -f deploy/compose/docker-compose.yml --profile apps config --quiet
+        run: |
+          docker compose -f deploy/compose/docker-compose.yml config --quiet
+          docker compose -f deploy/compose/docker-compose.yml --profile apps config --quiet
+          docker compose -f deploy/compose/docker-compose.yml --profile evals config --quiet
       - name: Check the dashboard nginx.conf
         run: scripts/check-nginx-conf.sh
       - name: Check compose policy
         run: scripts/check-compose-policy.sh
-      - name: Self-test compose/x402-env policy scripts
+      - name: Self-test compose/x402-env/nginx policy, secret generation and capture scrubber scripts
         run: scripts/test-check-compose-policy.sh
       - name: Self-test the agent usage-profile switch
         run: scripts/test-usage-profile.sh
