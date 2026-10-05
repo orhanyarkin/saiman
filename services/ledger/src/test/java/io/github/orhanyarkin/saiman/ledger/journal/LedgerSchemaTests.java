@@ -204,6 +204,50 @@ class LedgerSchemaTests {
         });
     }
 
+    /**
+     * V8 (audit L3): payments and runs are never deleted, and a payment's authorization facts are frozen; the
+     * projection and outcome columns the code writes stay writable (the rest of the suite exercises them).
+     */
+    @Test
+    void paymentsAndRunsCannotBeDeletedAndPaymentFactsAreFrozen() {
+        TestPayment payment = TestPayment.random(new SplittableRandom(11), 30_000);
+        ledger.record(PaymentFact.of(payment.authorized()), PaymentTopics.AUTHORIZED);
+
+        for (String sql : List.of(
+                "DELETE FROM payment WHERE payment_key = '" + payment.key() + "'",
+                "DELETE FROM reconciliation_run WHERE false",
+                "TRUNCATE payment",
+                "TRUNCATE reconciliation_run",
+                "UPDATE payment SET amount_atomic = amount_atomic + 1 WHERE payment_key = '" + payment.key() + "'",
+                "UPDATE payment SET payer = payer WHERE payment_key = '" + payment.key() + "'",
+                "UPDATE payment SET payment_key = payment_key WHERE payment_key = '" + payment.key() + "'",
+                "UPDATE reconciliation_run SET started_at = started_at WHERE false",
+                "UPDATE reconciliation_run SET network = network WHERE false")) {
+            assertRefused(sql);
+        }
+        assertThat(jdbc.sql("UPDATE payment SET last_checked_at = now() WHERE payment_key = :key")
+                        .param("key", payment.key())
+                        .update())
+                .isOne();
+        assertThat(jdbc.sql("SELECT amount_atomic FROM payment WHERE payment_key = :key")
+                        .param("key", payment.key())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(30_000L);
+    }
+
+    /** Fails when a migration hands ledger_app DELETE or TRUNCATE beyond what the code needs (Modulith's registry). */
+    @Test
+    void theRuntimeRoleMayDeleteOnlyFromTheEventPublicationRegistry() {
+        List<String> deletable = jdbc.sql("""
+                        SELECT table_name || ':' || privilege_type FROM information_schema.table_privileges
+                         WHERE grantee = 'ledger_app' AND table_schema = 'ledger'
+                           AND privilege_type IN ('DELETE', 'TRUNCATE')
+                         ORDER BY 1
+                        """).query(String.class).list();
+        assertThat(deletable).containsExactly("event_publication:DELETE");
+    }
+
     /** ADR-0024: the runtime role has DML only; no DDL anywhere, no sequence resets, no trigger or function changes. */
     @Test
     void theRuntimeRoleCannotChangeTheSchema() {
@@ -239,6 +283,9 @@ class LedgerSchemaTests {
                             .single())
                     .isOne();
             assertRefused("SELECT setval('" + sequence + "', 100)");
+            // V8: new tables are read/insert only until a migration grants more.
+            assertRefused("UPDATE " + table + " SET id = 2");
+            assertRefused("DELETE FROM " + table);
             assertRefused("SELECT count(*) FROM flyway_schema_history");
         } finally {
             owner.sql("DROP TABLE " + table).update();
