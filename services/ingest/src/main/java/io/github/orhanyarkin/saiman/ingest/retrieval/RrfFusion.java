@@ -50,6 +50,22 @@ public final class RrfFusion {
      */
     public static List<Fused> fuse(
             List<String> vectorLeg, List<String> lexicalLeg, List<String> recencyLeg, int k, int limit) {
+        return fuse(vectorLeg, lexicalLeg, recencyLeg, 1.0, k, limit);
+    }
+
+    /**
+     * Three-leg fusion where the recency leg's term {@code 1 / (k + rank)} is multiplied by {@code
+     * recencyWeight}. An explicit "latest ..." question is a strong signal; with weight 1 the recency leg
+     * (at most {@code 1/61}) cannot lift a disclosure that neither other leg ranks into the fused top 10
+     * (ADR-0025).
+     */
+    public static List<Fused> fuse(
+            List<String> vectorLeg,
+            List<String> lexicalLeg,
+            List<String> recencyLeg,
+            double recencyWeight,
+            int k,
+            int limit) {
         if (k < 1) {
             throw new IllegalArgumentException("k must be positive");
         }
@@ -68,7 +84,7 @@ public final class RrfFusion {
             Integer r = recency.get(id);
             double score = (v == null ? 0.0 : 1.0 / (k + v)) + (l == null ? 0.0 : 1.0 / (k + l));
             if (r != null) {
-                score += 1.0 / (k + r);
+                score += recencyWeight / (k + r);
             }
             fused.put(id, new Fused(id, score, v, l, r));
         }

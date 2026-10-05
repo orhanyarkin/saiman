@@ -92,6 +92,23 @@ class RrfFusionTests {
     }
 
     @Test
+    void recencyWeightScalesOnlyTheRecencyTerm() {
+        // "n" is recency rank 1 only: weight 3 gives 3/61, more than vector rank 1 (1/61) or a two-leg hit at 5 and 5
+        List<String> vector = List.of("a", "x", "y", "z", "c");
+        List<String> lexical = List.of("p", "q", "r", "s", "c");
+
+        List<Fused> weighted = RrfFusion.fuse(vector, lexical, List.of("n"), 3.0, 60, 10);
+
+        assertThat(weighted.get(0).id()).isEqualTo("n");
+        assertThat(weighted.get(0).score()).isCloseTo(3.0 / 61, within(1e-12));
+        Fused c = weighted.stream().filter(f -> f.id().equals("c")).findFirst().orElseThrow();
+        assertThat(c.score()).isCloseTo(2.0 / 65, within(1e-12)); // untouched by the weight
+        // weight 1 (the 5-argument overload) leaves "a" first
+        assertThat(RrfFusion.fuse(vector, lexical, List.of("n"), 60, 10).get(0).id())
+                .isNotEqualTo("n");
+    }
+
+    @Test
     void recencyOnlyItemsAreDeduplicated() {
         List<Fused> result = RrfFusion.fuse(List.of(), List.of(), List.of("z", "z", "y"), 60, 10);
         assertThat(result).extracting(Fused::id).containsExactly("z", "y");

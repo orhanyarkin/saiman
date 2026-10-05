@@ -25,6 +25,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class HybridRetriever {
 
+    /**
+     * Weight of the recency leg's RRF term. Chosen on the golden set's FRESHNESS items (docs/evals/README.md):
+     * an SQL replay of the legs gave mean recency@5 0.07 (no leg), 0.20 (weight 1), 0.73 (weight 3).
+     */
+    static final double RECENCY_WEIGHT = 3.0;
+
     private final ModelRouter router;
     private final RetrievalRepository repository;
     private final TransactionTemplate readOnly;
@@ -64,7 +70,8 @@ public class HybridRetriever {
             List<String> lexical = repository.lexicalLeg(request.query(), tickers);
             // Third leg only for "latest ..." questions scoped to tickers; otherwise exactly the two-leg result.
             List<String> recency = RecencyIntent.detect(request.query()) ? repository.recencyLeg(tickers) : List.of();
-            List<RrfFusion.Fused> fused = RrfFusion.fuse(vector, lexical, recency, RrfFusion.DEFAULT_K, request.topK());
+            List<RrfFusion.Fused> fused =
+                    RrfFusion.fuse(vector, lexical, recency, RECENCY_WEIGHT, RrfFusion.DEFAULT_K, request.topK());
             Map<String, RetrievedChunk> loaded =
                     repository.load(fused.stream().map(RrfFusion.Fused::id).toList());
             List<RetrievedChunk> chunks = new ArrayList<>(fused.size());
