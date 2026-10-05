@@ -4,6 +4,10 @@ spring:
   threads:
     virtual:
       enabled: true
+  config:
+    # Docker/compose secrets (ADR-0009): one file per secret under /run/secrets, named after the property it sets
+    # (spring.datasource.password, spring.flyway.password, saiman.ledger.seller.service-token).
+    import: "optional:configtree:${saiman.secrets-dir:/run/secrets/}"
   mvc:
     problemdetails:
       enabled: true
@@ -77,6 +81,8 @@ saiman:
       retry-attempts: 3
       retry-wait: 200ms
       circuit-open-wait: 30s
+      # The ledger's service token for seller-api's /internal/** (ADR-0023): configtree secret
+      # seller_service_token_ledger mounted as saiman.ledger.seller.service-token. No default: startup fails without it.
     # Dashboard reads (BoundedReads): a transaction-local statement_timeout and a bulkhead, so polling can neither
     # hold a connection long nor take the pool (Hikari default 10) from the Kafka inbox/posting path. Both refusals
     # are a fixed 503 with Retry-After: 5.

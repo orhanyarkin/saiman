@@ -13,14 +13,27 @@ import io.github.orhanyarkin.saiman.ledger.payment.PaymentProjection;
 import io.github.orhanyarkin.saiman.ledger.payment.TestPayment;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.SplittableRandom;
+import java.util.TreeSet;
 import java.util.UUID;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.test.context.TestPropertySource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * M4b audit (ADR-0021): a credit note touches no wallet, so the chain cannot expose a forged {@code CreditNoteIssued}.
@@ -50,6 +63,9 @@ class CreditNoteCorroborationTests {
 
     @Autowired
     private JdbcClient jdbc;
+
+    @Autowired
+    private ConsumerFactory<String, String> consumers;
 
     private final SplittableRandom random = new SplittableRandom();
 
@@ -154,7 +170,75 @@ class CreditNoteCorroborationTests {
         assertThat(sellers.calls(payment.key())).isZero();
     }
 
+    @Test
+    void aNewFindingIsPublishedOnceWithNullChainFieldsAndARerunPublishesNothing() throws IOException {
+        TestPayment payment = credited();
+        UUID paymentId = PaymentProjection.paymentId(payment.key());
+
+        ReconciliationReport first = runNow();
+        assertThat(item(first, payment).status()).isEqualTo("MISMATCH");
+        List<ConsumerRecord<String, String>> records = drain(paymentId.toString(), 1, Duration.ofSeconds(30));
+        assertThat(records).hasSize(1);
+
+        JsonNode event = JSON.readTree(records.getFirst().value());
+        JsonNode fixture = JSON.readTree(Files.readString(MISMATCH_FIXTURE, StandardCharsets.UTF_8));
+        assertThat(fieldNames(event)).isEqualTo(fieldNames(fixture));
+        assertThat(fieldNames(event.get("meta"))).isEqualTo(fieldNames(fixture.get("meta")));
+        assertThat(event.get("kind").asString()).isEqualTo(fixture.get("kind").asString());
+        assertThat(event.get("meta").get("producer"))
+                .isEqualTo(fixture.get("meta").get("producer"));
+        assertThat(event.get("paymentId").asString()).isEqualTo(paymentId.toString());
+        assertThat(event.get("reconciliationRunId").asString())
+                .isEqualTo(first.runId().toString());
+        String mismatchId = ReconciliationService.mismatchId(paymentId, "CREDIT_NOTE_UNCORROBORATED")
+                .toString();
+        assertThat(event.get("mismatchId").asString()).isEqualTo(mismatchId);
+        assertThat(event.get("meta").get("eventId").asString()).isEqualTo(mismatchId);
+        assertThat(event.get("ledgerAmount"))
+                .isEqualTo(JSON.readTree("{\"atomicUnits\":" + AMOUNT + ",\"asset\":\"USDC\",\"decimals\":6}"));
+        assertThat(event.get("reportedTxHash").asString()).isEqualToIgnoringCase(payment.txHash());
+        for (String field : List.of("chainAmount", "chainTxHash", "adjustmentEntryId")) {
+            assertThat(event.get(field).isNull()).as(field).isTrue();
+        }
+
+        ReconciliationReport second = runNow();
+        assertThat(item(second, payment).status()).isEqualTo("MISMATCH");
+        assertThat(mismatchKinds(payment)).containsExactly("CREDIT_NOTE_UNCORROBORATED");
+        // The second run found the row already there, so it published nothing (a fixed window: there is no sentinel
+        // whose arrival would prove the absence, records of other keys may sit on other partitions).
+        assertThat(drain(paymentId.toString(), 2, Duration.ofSeconds(5))).hasSize(1);
+    }
+
     // --- helpers ---
+
+    /** The contract's golden fixture (libs/shared), relative to this project's directory. */
+    private static final Path MISMATCH_FIXTURE = Path.of("../../libs/shared/src/test/resources/fixtures/events/"
+            + "ledger.reconciliation-mismatch.v1.CREDIT_NOTE_UNCORROBORATED.json");
+
+    private static final String MISMATCH_TOPIC = "ledger.reconciliation-mismatch.v1";
+
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+
+    private static Set<String> fieldNames(JsonNode node) {
+        return new TreeSet<>(node.propertyNames());
+    }
+
+    /** Reads the mismatch topic from the start until {@code expected} records with {@code key} arrived or time is up. */
+    private List<ConsumerRecord<String, String>> drain(String key, int expected, Duration timeout) {
+        List<ConsumerRecord<String, String>> found = new ArrayList<>();
+        try (Consumer<String, String> consumer = consumers.createConsumer("test-" + UUID.randomUUID(), "test")) {
+            consumer.subscribe(List.of(MISMATCH_TOPIC));
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (found.size() < expected && System.nanoTime() < deadline) {
+                consumer.poll(Duration.ofMillis(500)).forEach(r -> {
+                    if (key.equals(r.key())) {
+                        found.add(r);
+                    }
+                });
+            }
+        }
+        return found;
+    }
 
     /** Both books settled, the seller credited it in full, and the chain shows the matching transfer. */
     private TestPayment credited() {
