@@ -18,7 +18,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * Hybrid retrieval: a vector leg (query embedded through the router, {@link DataClass#INTERNAL}
  * because it derives from a buyer's question) and a Turkish full-text leg, each top 40, fused with
- * reciprocal rank fusion. The query embedding is a network call, so it happens before the read
+ * reciprocal rank fusion. A "latest ..." question (see {@link RecencyIntent}) about given tickers adds a
+ * third leg that ranks those tickers' documents by publication time (ADR-0025). The query embedding is a network call, so it happens before the read
  * transaction opens. Query text is never logged.
  */
 @Service
@@ -61,7 +62,9 @@ public class HybridRetriever {
             repository.enableIterativeScan();
             List<String> vector = repository.vectorLeg(embedding, tickers);
             List<String> lexical = repository.lexicalLeg(request.query(), tickers);
-            List<RrfFusion.Fused> fused = RrfFusion.fuse(vector, lexical, RrfFusion.DEFAULT_K, request.topK());
+            // Third leg only for "latest ..." questions scoped to tickers; otherwise exactly the two-leg result.
+            List<String> recency = RecencyIntent.detect(request.query()) ? repository.recencyLeg(tickers) : List.of();
+            List<RrfFusion.Fused> fused = RrfFusion.fuse(vector, lexical, recency, RrfFusion.DEFAULT_K, request.topK());
             Map<String, RetrievedChunk> loaded =
                     repository.load(fused.stream().map(RrfFusion.Fused::id).toList());
             List<RetrievedChunk> chunks = new ArrayList<>(fused.size());

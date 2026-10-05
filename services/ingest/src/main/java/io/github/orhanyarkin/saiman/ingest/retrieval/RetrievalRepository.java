@@ -90,6 +90,28 @@ public class RetrievalRepository {
         return spec.query((rs, n) -> rs.getString(1)).list();
     }
 
+    /**
+     * Recency leg: one chunk per document (its first chunk), the documents ordered newest first, so the leg
+     * ranks <em>documents</em> by recency. Needs a ticker filter (the caller gates on it): the newest documents
+     * of the whole corpus would say nothing about a question.
+     */
+    public List<String> recencyLeg(List<String> tickers) {
+        if (tickers.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("""
+                        SELECT id FROM (
+                            SELECT DISTINCT ON (d.id) c.id, d.published_at, d.id AS document_id
+                            FROM chunk c JOIN source_document d ON d.id = c.document_id
+                            WHERE d.status = 'INDEXED' AND c.ticker IN (:tickers)
+                            ORDER BY d.id, c.id) newest
+                        ORDER BY published_at DESC, document_id
+                        LIMIT\s""" + LEG_SIZE)
+                .param("tickers", tickers)
+                .query((rs, n) -> rs.getString(1))
+                .list();
+    }
+
     /** Loads chunks by id (only from {@code INDEXED} documents). */
     public Map<String, RetrievedChunk> load(List<String> ids) {
         if (ids.isEmpty()) {

@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.ingest.retrieval;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.orhanyarkin.saiman.ingest.IngestIntegrationTests;
+import io.github.orhanyarkin.saiman.ingest.RecordingEmbeddingModel;
 import io.github.orhanyarkin.saiman.ingest.pipeline.IngestJob;
 import io.github.orhanyarkin.saiman.shared.retrieval.RetrieveResponse;
 import io.github.orhanyarkin.saiman.shared.retrieval.RetrievedChunk;
@@ -189,6 +190,69 @@ class RetrievalTests extends IngestIntegrationTests {
         retrieve("MAHREM-ARAMA-ZZQ", List.of(), 3);
 
         assertThat(output.getAll()).doesNotContain("MAHREM-ARAMA-ZZQ");
+    }
+
+    // --- recency leg (ADR-0025) ----------------------------------------------------------------
+
+    @Test
+    void recencyLegRanksIndexedDocumentsNewestFirstWithOneChunkEach() {
+        List<String> newestFirst = jdbc.sql("""
+                        SELECT id FROM source_document
+                        WHERE status = 'INDEXED' AND ticker = 'THYAO'
+                        ORDER BY published_at DESC, id
+                        """).query(String.class).list();
+
+        List<String> leg = repository.recencyLeg(List.of("THYAO"));
+
+        assertThat(newestFirst).hasSizeGreaterThan(1);
+        assertThat(leg)
+                .containsExactlyElementsOf(
+                        newestFirst.stream().map(id -> id + ":0000").toList());
+        assertThat(repository.recencyLeg(List.of())).isEmpty();
+        assertThat(repository.recencyLeg(List.of("NOSUCH"))).isEmpty();
+    }
+
+    @Test
+    void recencyIntentWithTickersFusesThreeLegs() {
+        String query = "THYAO son açıklamalar";
+        List<String> tickers = List.of("THYAO");
+        float[] embedding = RecordingEmbeddingModel.vector(query);
+        List<String> expected = RrfFusion.fuse(
+                        repository.vectorLeg(embedding, tickers),
+                        repository.lexicalLeg(query, tickers),
+                        repository.recencyLeg(tickers),
+                        RrfFusion.DEFAULT_K,
+                        20)
+                .stream()
+                .map(RrfFusion.Fused::id)
+                .toList();
+
+        RetrieveResponse response = retrieve(query, tickers, 20);
+
+        assertThat(response.chunks()).extracting(RetrievedChunk::chunkId).containsExactlyElementsOf(expected);
+    }
+
+    @Test
+    void withoutRecencyIntentOrWithoutTickersTheResultIsTheTwoLegResult() {
+        for (var request : List.of(
+                Map.entry("THYAO açıklamaları sonuç", List.of("THYAO")), // "sonuç" is not "son"
+                Map.entry("THYAO son açıklamalar", List.<String>of()))) { // intent, but no ticker scope
+            String query = request.getKey();
+            List<String> tickers = request.getValue();
+            float[] embedding = RecordingEmbeddingModel.vector(query);
+            List<String> twoLeg = RrfFusion.fuse(
+                            repository.vectorLeg(embedding, tickers),
+                            repository.lexicalLeg(query, tickers),
+                            RrfFusion.DEFAULT_K,
+                            20)
+                    .stream()
+                    .map(RrfFusion.Fused::id)
+                    .toList();
+
+            RetrieveResponse response = retrieve(query, tickers, 20);
+
+            assertThat(response.chunks()).extracting(RetrievedChunk::chunkId).containsExactlyElementsOf(twoLeg);
+        }
     }
 
     // --- request validation --------------------------------------------------------------------
