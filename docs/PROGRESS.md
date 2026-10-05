@@ -1,7 +1,7 @@
 # Progress
 
 ## Current milestone
-M6 — Hardening, evals, replay: **built and live-verified** on branch `m6-hardening` (not pushed). Per-task audits done (T1+T4, T7+T5a, T2, T3 ledger, T3b seller-api; all Critical/High/Medium fixed except the documented owner-credential residual); milestone audit next, then push/PR (needs the human's go). Out of this plan (human-only): Terraform demo-lite + Infracost, AWS capture session, Cloudflare deploy, blog, video; cross-provider route comparison and LLM judge (needs new provider keys). Design `docs/design/m6-hardening.md`; ADRs 0023-0026.
+M6 — Hardening, evals, replay: **built, audited and live-verified** on branch `m6-hardening` (not pushed). Per-task audits (T1+T4, T7+T5a, T2, T3 ledger, T3b seller-api) and the milestone audit (no Critical/High/Medium; six Lows fixed) are done. Next: push and PR (needs the human's go). Out of this plan (human-only): Terraform demo-lite + Infracost, AWS capture session, Cloudflare deploy, blog, video; cross-provider route comparison and LLM judge (needs new provider keys). Design `docs/design/m6-hardening.md`; ADRs 0023-0026.
 M5 (dashboard), M4b, the Redis/Kafka swap and M4 are done and merged.
 
 ## Log
