@@ -11,6 +11,7 @@ web3j = "6.0.0"                    # crypto module only (secp256k1, EIP-712); Ja
 bouncycastle = "1.86"               # pinned above web3j's 1.80 (CVE fixes in >= 1.85); published in the starter POM
 jsoup = "1.23.2"                   # HTML -> text for KAP disclosure bodies (ADR-0010)
 resilience4j = "2.4.0"             # core modules only; wired programmatically, no Spring integration module
+springdoc = "3.1.1"                # OpenAPI document for the dashboard contract (ADR-0022): api-docs only, no UI, disabled at runtime
 spring-modulith = "2.1.1"          # built against Boot 4.1.1 / Spring Kafka 4.1.1; event publication registry + Kafka externalization (ADR-0016)
 
 [libraries]
@@ -21,6 +22,7 @@ spring-modulith-events-kafka = { module = "org.springframework.modulith:spring-m
 spring-modulith-events-api = { module = "org.springframework.modulith:spring-modulith-events-api" }
 spring-boot-starter-kafka = { module = "org.springframework.boot:spring-boot-starter-kafka" }
 spring-boot-starter-kafka-test = { module = "org.springframework.boot:spring-boot-starter-kafka-test" }
+springdoc-openapi-webmvc-api = { module = "org.springdoc:springdoc-openapi-starter-webmvc-api", version.ref = "springdoc" }
 spring-ai-bom = { module = "org.springframework.ai:spring-ai-bom", version.ref = "spring-ai" }
 # Versions managed by the Spring AI BOM (apply `platform(libs.spring.ai.bom)` in the module)
 spring-ai-client-chat = { module = "org.springframework.ai:spring-ai-client-chat" }

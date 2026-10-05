@@ -1,0 +1,19 @@
+{
+  "eventId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:11",
+  "runId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+  "seq" : 11,
+  "type" : "MODEL_CALL_COMPLETED",
+  "occurredAt" : "2026-10-01T10:00:11Z",
+  "data" : {
+    "step" : "SYNTHESIS",
+    "tier" : "tier1",
+    "model" : "gpt-5.6-luna",
+    "inputTokens" : 1200,
+    "outputTokens" : 340,
+    "costUsd" : {
+      "atomicUnits" : 1850,
+      "asset" : "USD",
+      "decimals" : 6
+    }
+  }
+}

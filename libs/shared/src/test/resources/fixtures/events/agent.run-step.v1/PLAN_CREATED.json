@@ -1,0 +1,11 @@
+{
+  "eventId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:3",
+  "runId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+  "seq" : 3,
+  "type" : "PLAN_CREATED",
+  "occurredAt" : "2026-10-01T10:00:03Z",
+  "data" : {
+    "tickers" : [ "THYAO" ],
+    "tasks" : [ "Summarise the latest disclosures" ]
+  }
+}

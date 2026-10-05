@@ -1,0 +1,27 @@
+{
+  "eventId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:14",
+  "runId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+  "seq" : 14,
+  "type" : "RUN_FAILED",
+  "occurredAt" : "2026-10-01T10:00:14Z",
+  "data" : {
+    "failureCode" : "RUN_DEADLINE",
+    "costSoFar" : {
+      "paymentsUsdc" : {
+        "atomicUnits" : 30000,
+        "asset" : "USDC",
+        "decimals" : 6
+      },
+      "llmUsd" : {
+        "atomicUnits" : 6923,
+        "asset" : "USD",
+        "decimals" : 6
+      },
+      "totalUsd" : {
+        "atomicUnits" : 36923,
+        "asset" : "USD",
+        "decimals" : 6
+      }
+    }
+  }
+}

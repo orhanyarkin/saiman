@@ -1,0 +1,15 @@
+{
+  "eventId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:7",
+  "runId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+  "seq" : 7,
+  "type" : "PAYMENT_DENIED",
+  "occurredAt" : "2026-10-01T10:00:07Z",
+  "data" : {
+    "reason" : "RUN_BUDGET",
+    "amount" : {
+      "atomicUnits" : 20000,
+      "asset" : "USDC",
+      "decimals" : 6
+    }
+  }
+}
