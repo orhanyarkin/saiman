@@ -5,6 +5,7 @@
 #     backends' CSRF protection relies on a cross-site JSON POST having nothing to preflight against;
 #   - pin or rewrite the Host header (only `proxy_set_header Host $http_host;`): the backends'
 #     DNS-rebinding guards must see the Host the browser sent.
+# Also: no `proxy_set_header Authorization`, no /internal anywhere, no seller-api/ingest upstream (ADR-0023, ADR-0025).
 # It must keep a default server that answers 444 and a named server for localhost/127.0.0.1, set
 # server_tokens off at http level and keep regex locations under /api/ nested in `location ^~ /api/`.
 # Override the file with NGINX_CONF=<path> (used by the self-test fixtures).
@@ -36,6 +37,23 @@ if grep -qiE 'add_header[^;]*origin' <<<"${conf}"; then
 fi
 if grep -qE '\bOPTIONS\b' <<<"${conf}"; then
   fail_check "OPTIONS handling found: nothing may answer a preflight (ADR-0022)"
+  violations=1
+fi
+
+# ADR-0023/0025: nginx injects no credentials (a token in the proxy would authenticate anyone who
+# reaches the dashboard port), and nothing under /internal is ever routed (the eval endpoint
+# /internal/v1/eval/** lives on seller-api and must stay unreachable from the browser origin);
+# seller-api and ingest are not proxy targets at all.
+if grep -qiE 'proxy_set_header[[:space:]]+Authorization' <<<"${conf}"; then
+  fail_check "proxy_set_header Authorization found: nginx must not inject credentials (ADR-0023)"
+  violations=1
+fi
+if grep -qiE '/internal' <<<"${conf}"; then
+  fail_check "/internal found: no location, rewrite or proxy_pass may mention /internal (eval endpoint must never be reachable through nginx, ADR-0025)"
+  violations=1
+fi
+if grep -qiE '(seller-api|ingest)(:[0-9]+)?' <<<"${conf}"; then
+  fail_check "seller-api/ingest referenced: nginx may only proxy to orchestrator, ledger and the otel collector"
   violations=1
 fi
 
