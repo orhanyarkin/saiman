@@ -17,6 +17,7 @@
     "e2e": "playwright test",
     "e2e:fixture": "node e2e/fixture-server.ts",
     "gen:api": "node scripts/gen-api.mjs",
+    "demo:sample": "node scripts/make-sample-capture.ts",
     "e2e:live": "playwright test -c playwright.live.config.ts",
     "lighthouse": "pnpm build && node scripts/lighthouse.mjs"
   },

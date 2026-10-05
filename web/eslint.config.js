@@ -12,6 +12,7 @@ export default tseslint.config([
     // Never hand-edited or linted (it also self-excludes via its own generated header).
     ignores: [
       "dist",
+      "dist-replay",
       "src/routeTree.gen.ts",
       "src/lib/api/generated",
       "playwright-report",

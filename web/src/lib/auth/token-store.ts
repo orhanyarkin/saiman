@@ -155,7 +155,8 @@ export function connect(value: string, keepForTab: boolean): string | null {
 export function disconnect(): void {
   token = null;
   writeKept(null);
-  dismissed = false;
+  // The user chose this: the 401s the next refetches get must not pop the dialog up again.
+  dismissed = true;
   set({ connected: false, keptForTab: false, authRequired: false, rejected: false });
   tokenChanged();
 }
