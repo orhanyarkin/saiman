@@ -185,6 +185,21 @@ function notInRecording(path: string): ApiError {
   );
 }
 
+/**
+ * The request key with its `limit` parameter removed, for matching a first page captured with a
+ * different page size. Null for a cursor request (`before`), which must match exactly.
+ */
+function withoutLimit(path: string): string | null {
+  const [bare = path, query = ""] = path.split("?");
+  const params = new URLSearchParams(query);
+  if (params.has("before")) {
+    return null;
+  }
+  params.delete("limit");
+  const rest = params.toString();
+  return rest === "" ? bare : `${bare}?${rest}`;
+}
+
 /** Resolves a GET from the capture: exact path+query, then path alone, then the run event export. */
 export async function replayGet<T>(path: string): Promise<T> {
   const bare = path.split("?")[0] ?? path;
@@ -206,6 +221,14 @@ export async function replayGet<T>(path: string): Promise<T> {
   const hit = Object.hasOwn(responses, path) ? path : Object.hasOwn(responses, bare) ? bare : null;
   if (hit !== null) {
     return structuredClone(responses[hit]) as T;
+  }
+  const sameLimitless = withoutLimit(path);
+  if (sameLimitless !== null) {
+    // A first page captured with another page size still answers (the recording is a snapshot).
+    const key = Object.keys(responses).find((k) => withoutLimit(k) === sameLimitless);
+    if (key !== undefined) {
+      return structuredClone(responses[key]) as T;
+    }
   }
   const events = /^\/api\/v1\/runs\/([^/]+)\/events$/.exec(bare);
   if (events?.[1] !== undefined) {

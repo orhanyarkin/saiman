@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { expect, test } from "@playwright/test";
 
 import { expectNoSeriousA11yViolations } from "./helpers";
@@ -6,6 +9,16 @@ import { expectNoSeriousA11yViolations } from "./helpers";
  * The static replay build (ADR-0026), served as files with no API behind it: VITE_DEMO_MODE=replay,
  * reading the bundled sample at /demo/capture.json. Runs in the `replay` Playwright project.
  */
+// This spec asserts the SAMPLE data: the published recording (public/demo/capture.json) is real
+// and is covered by replay-real.spec.ts, so the sample is served in its place here.
+const SAMPLE = readFileSync(resolve(import.meta.dirname, "fixtures/replay-capture.sample.json"));
+
+test.beforeEach(async ({ page }) => {
+  await page.route("**/demo/capture.json", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: SAMPLE }),
+  );
+});
+
 const RUN = "6ad4354c-8e79-4b49-b5d9-d45eb9689b41";
 const PAYMENT = "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52";
 const RECON = "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61";

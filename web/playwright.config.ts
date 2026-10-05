@@ -45,7 +45,7 @@ export default defineConfig({
     },
     {
       // The static replay build (ADR-0026): built with VITE_DEMO_MODE=replay and served as files,
-      // no API behind it. It reads the bundled sample at /demo/capture.json.
+      // no API behind it. replay.spec.ts feeds it the SAMPLE fixture; replay-real.spec.ts reads the real /demo/capture.json.
       command: `pnpm exec vite build --outDir dist-replay --emptyOutDir --logLevel warn && pnpm exec vite preview --outDir dist-replay --port ${String(REPLAY_PORT)} --strictPort`,
       url: `http://localhost:${String(REPLAY_PORT)}`,
       env: { VITE_DEMO_MODE: "replay", VITE_OTEL_ENABLED: "false" },
@@ -57,12 +57,12 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: ["**/live/**", "**/replay.spec.ts"],
+      testIgnore: ["**/live/**", "**/replay*.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "replay",
-      testMatch: "**/replay.spec.ts",
+      testMatch: "**/replay*.spec.ts",
       use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${String(REPLAY_PORT)}` },
     },
   ],

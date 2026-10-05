@@ -9,7 +9,7 @@
  * (`pnpm exec playwright install chromium`), or from `CHROME_PATH` when set.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -89,6 +89,9 @@ async function main() {
     if (built.status !== 0) {
         throw new Error("replay build failed");
     }
+
+    // The route ids above belong to the SAMPLE recording; the published capture is a real one.
+    copyFileSync("e2e/fixtures/replay-capture.sample.json", "dist-replay/demo/capture.json");
 
     // Auth off for the live build (a cold, protected API would only show the Connect dialog on
     // every page); the dialog itself is audited through /connect.
