@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.evals;
 
 import java.time.Duration;
+import java.util.regex.Pattern;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -38,10 +39,44 @@ public record EvalsProperties(
             @DefaultValue("3") int retryAttempts,
             @DefaultValue("500ms") Duration retryWait) {}
 
-    /** Tier A (T6b): seller-api base URL and the evals service token (a secret; never logged). */
+    /**
+     * Tier A: seller-api base URL and the evals service token (a secret; never logged).
+     *
+     * @param baseUrl seller-api, e.g. {@code http://seller-api:8081}; required when the answer tier is on
+     * @param serviceToken from the configtree secret {@code saiman.evals.seller.service-token}; surrounding
+     *     whitespace (a trailing newline) is stripped; {@link #requireServiceToken()} checks it
+     * @param connectTimeout TCP connect timeout
+     * @param readTimeout per-question timeout (one LLM call)
+     * @param retryAttempts total attempts per question (connect failures and 5xx only, never 4xx or a read timeout)
+     * @param retryWait first back-off, doubled with jitter
+     */
     public record Seller(
             @DefaultValue("") String baseUrl,
-            @DefaultValue("") String serviceToken) {
+            @DefaultValue("") String serviceToken,
+            @DefaultValue("5s") Duration connectTimeout,
+            @DefaultValue("90s") Duration readTimeout,
+            @DefaultValue("2") int retryAttempts,
+            @DefaultValue("1s") Duration retryWait) {
+
+        /** The shape every API token has (libs/api-security {@code StaticTokenIntrospector}). */
+        private static final Pattern TOKEN = Pattern.compile("[A-Za-z0-9_-]{32,128}");
+
+        public Seller {
+            serviceToken = serviceToken.strip();
+        }
+
+        /** The token; throws with a message that never quotes it. */
+        public String requireServiceToken() {
+            if (serviceToken.isEmpty()) {
+                throw new IllegalStateException("saiman.evals.answers.enabled=true needs"
+                        + " saiman.evals.seller.service-token (secret seller_service_token_evals)");
+            }
+            if (!TOKEN.matcher(serviceToken).matches()) {
+                throw new IllegalStateException("saiman.evals.seller.service-token is malformed"
+                        + " (expected 32-128 characters of [A-Za-z0-9_-])");
+            }
+            return serviceToken;
+        }
 
         @Override
         public String toString() {

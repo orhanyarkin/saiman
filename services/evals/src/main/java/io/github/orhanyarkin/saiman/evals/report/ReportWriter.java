@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.evals.report;
 
+import io.github.orhanyarkin.saiman.evals.answers.AnswerScoring;
 import io.github.orhanyarkin.saiman.evals.golden.Kind;
 import io.github.orhanyarkin.saiman.evals.report.EvalReport.ItemResult;
 import java.io.IOException;
@@ -158,8 +159,107 @@ public class ReportWriter {
                             .append(count)
                             .append(" item(s) loaded and validated (answer tier)\n"));
         }
+        tierA(md, r.answers());
         md.append("\n## Cost\n\n").append(r.costNote()).append('\n');
         return md.toString();
+    }
+
+    private static void tierA(StringBuilder md, @Nullable AnswerReport a) {
+        md.append("\n## Tier A: answers\n\n");
+        if (a == null) {
+            md.append(
+                    "Tier A not run (`saiman.evals.answers.enabled=false`; `make eval EVAL_ANSWERS=1` turns it on).\n");
+            return;
+        }
+        md.append("Deterministic scoring only, no LLM judge (ADR-0003, ADR-0025). Questions sent: ")
+                .append(a.attempted())
+                .append(".\n");
+        if (a.abortReason() != null) {
+            md.append("\n> **Tier A aborted:** ").append(a.abortReason()).append('\n');
+        }
+        if (a.stoppedOnCap()) {
+            md.append("\n> **Stopped early: the router daily USD cap was reached.** Remaining items are `NOT_RUN`.\n");
+        }
+        md.append("\n> **Date caveat:** a required fact that is a publication date is answerable only because the "
+                + "answer service gives the model each excerpt's `published` timestamp from the document metadata "
+                + "(Europe/Istanbul offset); it does not test reading the date out of the disclosure text.\n");
+
+        md.append("\n### Summary by kind\n\n| Kind | n | scored | metric | value |\n|---|---:|---:|---|---:|\n");
+        for (Kind kind : List.of(Kind.ANSWER, Kind.UNANSWERABLE)) {
+            Map<String, Double> row = a.summary().get(kind);
+            if (row == null) {
+                continue;
+            }
+            for (String metric :
+                    List.of("taskSuccess", "factRecall", "citationRecall", "refusalCorrect", "citationValidity")) {
+                if (row.containsKey(metric)) {
+                    md.append("| ")
+                            .append(kind)
+                            .append(" | ")
+                            .append(whole(row.get("n")))
+                            .append(" | ")
+                            .append(whole(row.get("scored")))
+                            .append(" | ")
+                            .append(metric)
+                            .append(" | ")
+                            .append(number(row.get(metric)))
+                            .append(" |\n");
+                }
+            }
+        }
+
+        md.append("\n### Outcomes\n\n| Outcome | count |\n|---|---:|\n");
+        a.outcomes()
+                .forEach((outcome, n) ->
+                        md.append("| ").append(outcome).append(" | ").append(n).append(" |\n"));
+        long notRun =
+                a.items().stream().filter(i -> i.status().equals("NOT_RUN")).count();
+        if (notRun > 0) {
+            md.append("| NOT_RUN | ").append(notRun).append(" |\n");
+        }
+
+        md.append("\n### Cost and latency\n\n")
+                .append("- Total model cost: ")
+                .append(AnswerScoring.formatUsd(a.totalCostUsdMicros()))
+                .append(" (")
+                .append(a.totalCostUsdMicros())
+                .append(" micro-USD)\n")
+                .append("- USD per question (mean over answered calls): ")
+                .append(AnswerScoring.formatUsd(a.meanCostUsdMicros()))
+                .append('\n')
+                .append("- p95 latency: ")
+                .append(a.latencyP95Ms())
+                .append(" ms\n");
+
+        md.append("\n### Items\n\n| id | ticker | status | outcome | citations (valid/total) | basis | citation recall "
+                + "| fact recall | correct | USD | ms |\n|---|---|---|---|---:|---|---:|---:|---|---:|---:|\n");
+        for (AnswerReport.AnswerItem i : a.items()) {
+            md.append("| ")
+                    .append(i.id())
+                    .append(" | ")
+                    .append(i.ticker())
+                    .append(" | ")
+                    .append(i.status())
+                    .append(" | ")
+                    .append(i.outcome() == null ? "-" : i.outcome())
+                    .append(" | ")
+                    .append(i.validCitations())
+                    .append('/')
+                    .append(i.citations())
+                    .append(" | ")
+                    .append(i.citationBasis() == null ? "-" : i.citationBasis())
+                    .append(" | ")
+                    .append(number(i.citationRecall()))
+                    .append(" | ")
+                    .append(number(i.factRecall()))
+                    .append(" | ")
+                    .append(i.correct() == null ? "-" : i.correct().toString())
+                    .append(" | ")
+                    .append(AnswerScoring.formatUsd(i.costUsdMicros()))
+                    .append(" | ")
+                    .append(i.latencyMs())
+                    .append(" |\n");
+        }
     }
 
     private static String number(@Nullable Double value) {

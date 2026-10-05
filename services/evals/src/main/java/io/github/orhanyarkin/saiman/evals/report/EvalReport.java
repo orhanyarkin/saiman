@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.evals.report;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.github.orhanyarkin.saiman.evals.golden.Kind;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +23,7 @@ import org.jspecify.annotations.Nullable;
  * @param skipped items loaded and validated but not scored in this tier, per kind
  * @param queries number of retrieval calls made (the only cost driver of Tier R)
  * @param costNote what the run cost and why
+ * @param answers Tier A results; null (and absent from the JSON) when the tier did not run
  */
 public record EvalReport(
         String generatedAt,
@@ -36,7 +38,8 @@ public record EvalReport(
         List<ItemResult> items,
         Map<Kind, Integer> skipped,
         int queries,
-        String costNote) {
+        String costNote,
+        @JsonInclude(JsonInclude.Include.NON_NULL) @Nullable AnswerReport answers) {
 
     /**
      * @param ranking disclosure indexes in rank order (chunks deduplicated, first rank kept)
@@ -55,6 +58,7 @@ public record EvalReport(
             @Nullable String error) {}
 
     public int errors() {
-        return (int) items.stream().filter(item -> item.error() != null).count();
+        return (int) items.stream().filter(item -> item.error() != null).count()
+                + (answers == null ? 0 : answers.errors());
     }
 }

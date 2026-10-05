@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.evals.run;
 
 import io.github.orhanyarkin.saiman.evals.EvalsProperties;
+import io.github.orhanyarkin.saiman.evals.answers.AnswerRunner;
 import io.github.orhanyarkin.saiman.evals.golden.GoldenSet;
 import io.github.orhanyarkin.saiman.evals.golden.GoldenSet.GoldenItem;
 import io.github.orhanyarkin.saiman.evals.golden.GoldenSetLoader;
@@ -9,6 +10,7 @@ import io.github.orhanyarkin.saiman.evals.ingest.IngestClient;
 import io.github.orhanyarkin.saiman.evals.metrics.Disclosures;
 import io.github.orhanyarkin.saiman.evals.metrics.Percentile;
 import io.github.orhanyarkin.saiman.evals.metrics.RankingMetrics;
+import io.github.orhanyarkin.saiman.evals.report.AnswerReport;
 import io.github.orhanyarkin.saiman.evals.report.EvalReport;
 import io.github.orhanyarkin.saiman.evals.report.EvalReport.ItemResult;
 import io.github.orhanyarkin.saiman.evals.report.ReportWriter;
@@ -26,12 +28,13 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 /**
  * Tier R of the eval harness (ADR-0025): sends every RETRIEVAL and FRESHNESS question of the golden set to
- * ingest, scores the disclosure-level ranking and writes the report. ANSWER and UNANSWERABLE items are only
- * counted here (they are scored by the answer tier). The runner is always a bean; the thin command line
+ * ingest, scores the disclosure-level ranking and writes the report. ANSWER and UNANSWERABLE items are scored by
+ * the answer tier (Tier A, optional) and only counted here when it is off. The runner is always a bean; the thin command line
  * entry point that calls it is conditional ({@code saiman.evals.run-on-startup}).
  */
 @Service
@@ -46,8 +49,11 @@ public class EvalRunner {
     private final IngestClient ingest;
     private final ReportWriter writer;
     private final Clock clock;
+    private final ObjectProvider<AnswerRunner> answers;
 
-    public EvalRunner(EvalsProperties properties, IngestClient ingest, Clock clock) {
+    public EvalRunner(
+            EvalsProperties properties, IngestClient ingest, Clock clock, ObjectProvider<AnswerRunner> answers) {
+        this.answers = answers;
         this.properties = properties;
         this.ingest = ingest;
         this.writer = new ReportWriter();
@@ -79,10 +85,12 @@ public class EvalRunner {
                     liveVersion,
                     golden.corpus().corpusVersion());
         }
+        AnswerRunner answerRunner = answers.getIfAvailable();
+        AnswerReport answerReport = answerRunner == null ? null : answerRunner.run(golden);
         Map<Kind, Integer> skipped = new EnumMap<>(Kind.class);
         for (Kind kind : List.of(Kind.ANSWER, Kind.UNANSWERABLE)) {
             int n = golden.items(kind).size();
-            if (n > 0) {
+            if (n > 0 && answerReport == null) {
                 skipped.put(kind, n);
             }
         }
@@ -99,7 +107,8 @@ public class EvalRunner {
                 results,
                 skipped,
                 results.size(),
-                costNote(results.size()));
+                costNote(results.size()),
+                answerReport);
         Path markdown = writer.write(report, Path.of(properties.outputDir()));
         log.info("eval report written: {} ({} items, {} failed)", markdown, results.size(), report.errors());
         return report;
@@ -192,7 +201,7 @@ public class EvalRunner {
         return "Tier R makes %d retrieval calls; each embeds one short query through ingest's model-router route "
                         .formatted(queries)
                 + "(embeddings only, no generation, no x402 payment), about $0.00002 per run (ADR-0025). "
-                + "USD per task for the answer tier arrives with T6b.";
+                + "The answer tier's cost, when it ran, is in its own section.";
     }
 
     /** The corpus version and watermark ingest reported on the first successful response. */
