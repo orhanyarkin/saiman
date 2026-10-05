@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.net.URI;
+import java.time.Clock;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
@@ -33,14 +34,17 @@ class RunController {
 
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 100;
+    private static final URI RUNS_ROUTE = URI.create("/api/v1/runs");
 
     private final RunService runs;
 
     private final BoundedReads reads;
+    private final Clock clock;
 
-    RunController(RunService runs, BoundedReads reads) {
+    RunController(RunService runs, BoundedReads reads, Clock clock) {
         this.runs = runs;
         this.reads = reads;
+        this.clock = clock;
     }
 
     @Operation(operationId = "startRun", summary = "Start a research run")
@@ -128,7 +132,7 @@ class RunController {
         }
         RunCursor cursor = null;
         if (before != null) {
-            cursor = RunCursor.decode(before);
+            cursor = RunCursor.decode(before, clock.instant());
             if (cursor == null) {
                 throw problem(HttpStatus.BAD_REQUEST, "before must be a cursor returned by this endpoint");
             }
@@ -150,7 +154,10 @@ class RunController {
         if (status == HttpStatus.TOO_MANY_REQUESTS || status == HttpStatus.SERVICE_UNAVAILABLE) {
             response.header("Retry-After", "5");
         }
-        return response.body(ProblemDetail.forStatusAndDetail(status, e.reason().detail()));
+        ProblemDetail problem =
+                ProblemDetail.forStatusAndDetail(status, e.reason().detail());
+        problem.setInstance(RUNS_ROUTE); // a local handler bypasses the advice, which would set the template
+        return response.body(problem);
     }
 
     private static ErrorResponseException problem(HttpStatus status, String detail) {

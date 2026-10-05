@@ -11,6 +11,11 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,7 +40,7 @@ class BoundedReadsTests extends RunTestSupport {
 
     @Test
     void aSlowQueryIsCancelledAndSurfacesAsAReadTimeout() {
-        BoundedReads reads = new BoundedReads(transactions, jdbc, Duration.ofMillis(100));
+        BoundedReads reads = new BoundedReads(transactions, jdbc, Duration.ofMillis(100), 4);
         long started = System.nanoTime();
         assertThatThrownBy(() ->
                         reads.read(() -> jdbc.sql("SELECT pg_sleep(5)").query().listOfRows()))
@@ -46,7 +51,7 @@ class BoundedReadsTests extends RunTestSupport {
 
     @Test
     void theTimeoutIsLocalToTheTransactionAndTheDefaultIsAppliedWhenConfigured() {
-        BoundedReads reads = new BoundedReads(transactions, jdbc, Duration.ofMillis(1234));
+        BoundedReads reads = new BoundedReads(transactions, jdbc, Duration.ofMillis(1234), 4);
         assertThat(reads.read(() ->
                         jdbc.sql("SHOW statement_timeout").query(String.class).single()))
                 .isEqualTo("1234ms");
@@ -80,6 +85,43 @@ class BoundedReadsTests extends RunTestSupport {
         assertThat(problem).isNotNull();
         assertThat(problem.getDetail()).isEqualTo("the read took too long; retry");
         assertThat(problem.getInstance()).hasToString("/unmatched");
+    }
+
+    @Test
+    void aSecondReadIsRefusedAtOnceWhileTheOnlyPermitIsInUse() throws Exception {
+        BoundedReads reads = new BoundedReads(transactions, jdbc, Duration.ofSeconds(5), 1);
+        CountDownLatch inFlight = new CountDownLatch(1);
+        try (ExecutorService pool = Executors.newSingleThreadExecutor()) {
+            Future<Object> slow = pool.submit(() -> reads.read(() -> {
+                inFlight.countDown();
+                return jdbc.sql("SELECT pg_sleep(2)").query().listOfRows();
+            }));
+            assertThat(inFlight.await(5, TimeUnit.SECONDS)).isTrue();
+
+            long started = System.nanoTime();
+            assertThatThrownBy(() -> reads.read(() -> "never runs")).isInstanceOf(ReadSaturatedException.class);
+            assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofMillis(500));
+
+            slow.get(10, TimeUnit.SECONDS);
+            assertThat(reads.read(() -> "again")).isEqualTo("again"); // released after success
+        }
+    }
+
+    @Test
+    void permitsAreReleasedAfterATimeoutAndAfterAnyException() {
+        BoundedReads reads = new BoundedReads(transactions, jdbc, Duration.ofMillis(100), 1);
+        assertThatThrownBy(() ->
+                        reads.read(() -> jdbc.sql("SELECT pg_sleep(5)").query().listOfRows()))
+                .isInstanceOf(ReadTimeoutException.class);
+        assertThat(reads.read(() -> "after timeout")).isEqualTo("after timeout");
+
+        assertThatThrownBy(() -> reads.read(() -> jdbc.sql("DELETE FROM run").update()))
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> reads.read(() -> {
+                    throw new IllegalStateException("boom");
+                }))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(reads.read(() -> "after failures")).isEqualTo("after failures");
     }
 
     // The planner is told not to scan sequentially: the point is that an index exists that serves the
