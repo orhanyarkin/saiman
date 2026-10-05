@@ -9,7 +9,28 @@ Golden-set evaluation of the RAG stack (ADR-0025). A Spring Boot CLI (no web ser
 | RETRIEVAL | Recall@10, MRR@10, graded nDCG@10 (grade 3 = the disclosure asked for, 2 = same subject) |
 | FRESHNESS | with L = the 5 newest indexed disclosures of the ticker: recency@5 = \|top5 ∩ L\| / 5, latestHit@5, nDCG@10 with gain 6 − rank for members of L |
 
-ANSWER and UNANSWERABLE items are loaded and validated but scored by the answer tier (T6b).
+ANSWER and UNANSWERABLE items are scored by Tier A (below) when it is switched on; otherwise they are only loaded and validated, and the report says "Tier A not run".
+
+## Tier A: answers (optional, spends model money)
+
+`make eval EVAL_ANSWERS=1` (compose one-shot) or `SAIMAN_EVALS_ANSWERS_ENABLED=true` with `bootRun`. For each ANSWER and UNANSWERABLE item (file order, at most `answers.max-questions`, default 30; the set has 7) the runner calls, one at a time, `POST seller-api /internal/v1/eval/questions` with `{ticker, question}` and the evals service token as `Authorization: Bearer`. The endpoint runs the real answer service (prompt, parser, citation rebuild) without x402 and never settles; its run guard allows 1 call in flight and 60 per hour, and the router day cap applies. **No LLM judge** (ADR-0003/0025): every score is a pure function (`AnswerScoring`, hand-computed unit tests).
+
+| Number | Definition |
+|---|---|
+| outcome counts | ANSWERED (>= 2 valid citations), NO_VALID_CITATIONS (model ran, fewer than 2), REFUSED (before any model call), LLM_CAP, ERROR, plus CALL_FAILED for an HTTP-level failure of one question |
+| citation validity | share of returned citations whose chunk id is `kap:<index>:<nnnn>` **and** whose disclosure index is among the disclosures `POST ingest /internal/v1/retrieve` returns for the same question and ticker (top-k as configured; basis `RETRIEVAL`). If that retrieval fails, the fallback basis `GOLDEN_INDEXES` accepts any index that appears anywhere in the golden set (basis shown per item) |
+| citation recall (ANSWER) | cited disclosures that are in `expected.sources`, over `expected.sources` |
+| fact recall (ANSWER) | `requiredFacts` entries with at least one accepted spelling in the answer, over all entries. Both sides are normalised: Turkish-locale lower-casing, diacritics folded, dates to `yyyy-MM-dd` (`15.11.2023`, `15/11/2023`, `15 Kasım 2023`, ISO timestamps), percentages to `12.5%` (`%12,5`, `yüzde 12,5`); digits must not match inside longer numbers |
+| task success (ANSWER) | outcome ANSWERED and all facts and all expected sources found and every citation valid; LLM_CAP/ERROR items are not scored |
+| refusal correct (UNANSWERABLE) | REFUSED or NO_VALID_CITATIONS is correct; ANSWERED is wrong; LLM_CAP/ERROR not scored |
+| cost | sum of the seller-reported `modelCostUsdMicros` (integer micro-USD) and the mean per question that got a response; formatted as USD only in the report |
+| p95 latency | nearest rank over per-question wall time, retries included |
+
+Expect about **$0.06 for 30 questions** (about 9 % of the $0.70 router day cap); the golden set has 7 such items, so a full Tier A run costs a few cents.
+
+**Caveat for the date questions.** The ANSWER items ask for publication dates. The answer service puts each excerpt's `published` timestamp (document metadata, Europe/Istanbul offset) into the model context, so the model reads the date from metadata, not from the disclosure text. The report repeats this next to the table.
+
+Failure handling: 401/403 (bad service token) abort the tier with a clear message and no retry; 429 (run guard limit) and 503 (guard undecidable) abort and are not recorded as outcomes; LLM_CAP ends the tier early when `answers.stop-on-cap` (the remaining items are `NOT_RUN`); other 4xx are recorded per item without retry; connect failures and 5xx are retried (bounded, jittered), a read timeout is not (the seller may still be running the model). Redirects are never followed, so the token cannot leave the configured host. An aborted tier or any ERROR/CALL_FAILED item makes the process exit non-zero after the report is written. With `answers.enabled=true`, a blank or malformed token, or a missing/invalid `seller.base-url`, stops the application at start; the token is stripped of whitespace, checked against `[A-Za-z0-9_-]{32,128}`, redacted in `toString` and never logged or written to the report.
 
 ## Run
 
@@ -31,8 +52,9 @@ Output: `latest.md`, `latest.json` and `runs/<date>-<sha>[-<label>].json` in `sa
 | `saiman.evals.ingest.base-url` | `http://localhost:8083` | ingest |
 | `saiman.evals.ingest.read-timeout` / `retry-attempts` / `retry-wait` | `20s` / `3` / `500ms` | per-attempt timeout; retries on transport errors and 5xx |
 | `saiman.evals.retrieval.top-k` | `10` | chunks requested per query |
-| `saiman.evals.seller.base-url`, `seller.service-token` | empty | answer tier (T6b); the token comes from the file secret `saiman.evals.seller.service-token` through `configtree` |
-| `saiman.evals.answers.enabled` / `max-questions` / `stop-on-cap` | `false` / `30` / `true` | answer tier (T6b) |
+| `saiman.evals.seller.base-url`, `seller.service-token` | empty | Tier A; the token comes from the file secret `saiman.evals.seller.service-token` through `configtree` |
+| `saiman.evals.seller.connect-timeout` / `read-timeout` / `retry-attempts` / `retry-wait` | `5s` / `90s` / `2` / `1s` | Tier A HTTP behaviour |
+| `saiman.evals.answers.enabled` / `max-questions` / `stop-on-cap` | `false` / `30` / `true` | Tier A on/off, question limit, stop at the day cap |
 
 Cost of a Tier R run: one short embedding per query, 19 queries, about $0.00002.
 

@@ -46,3 +46,16 @@ SAIMAN_EVALS_LABEL=after GIT_SHA=$(git rev-parse --short HEAD) ./gradlew :servic
 ```
 
 Diff `build/evals/latest.json` against the baseline run file; RETRIEVAL must be identical.
+
+## Tier A: answers (how to run and read it)
+
+Off by default; `make eval` stays a free retrieval run and its `latest.md` says "Tier A not run". To score answers:
+
+```bash
+make up                 # apps healthy, incl. seller-api and the evals service token secret
+make eval EVAL_ANSWERS=1
+```
+
+This calls the seller's internal eval endpoint once per ANSWER/UNANSWERABLE item (7 in golden set v1, sequentially, at most 30), spends model money through the router (about $0.06 per 30 questions, bounded by the $0.70 day cap), and adds a "Tier A: answers" section to `latest.md`/`latest.json`: outcome counts, per-kind task success / fact recall / citation recall / citation validity / refusal correctness, per-item rows, total and per-question USD, p95 latency. Scoring is deterministic (no LLM judge); definitions are in `services/evals/README.md`.
+
+Reading the numbers: *task success* needs the right fact, every expected source cited and every citation valid, so one missed source fails the item; fact recall and citation recall show which half failed. *Citation validity* below 1.0 means the model cited a disclosure that retrieval does not return for that question. The ANSWER items are publication-date questions and the model receives each excerpt's publication timestamp from document metadata, so a high fact recall shows the metadata is used, not that dates are read from the disclosure text. If `stoppedOnCap` is set, the day cap ended the run: rerun after the cap resets.
