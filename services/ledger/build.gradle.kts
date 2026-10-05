@@ -14,6 +14,7 @@ dependencies {
     implementation(libs.spring.boot.starter.kafka)
     implementation(libs.spring.boot.starter.webmvc)
     implementation(libs.spring.boot.starter.restclient) // seller-api credit-note corroboration (ADR-0021)
+    implementation(libs.springdoc.openapi.webmvc.api) // OpenAPI contract for the dashboard (ADR-0022); off at runtime
     implementation(libs.resilience4j.retry)
     implementation(libs.resilience4j.circuitbreaker)
     implementation(libs.spring.boot.starter.jdbc)
@@ -32,6 +33,12 @@ tasks.withType<Test>().configureEach {
     for (name in listOf("saiman.pbt.seed", "saiman.pbt.tries")) {
         providers.systemProperty(name).orNull?.let { systemProperty(name, it) }
     }
+}
+
+// OpenAPI snapshot (ADR-0022): the checked-in contract is a test input, and SAIMAN_OPENAPI_UPDATE=1 rewrites it.
+tasks.named<Test>("test") {
+    inputs.files(rootProject.file("docs/api/ledger.openapi.json")).withPropertyName("openApiContract")
+    inputs.property("openApiUpdate", providers.environmentVariable("SAIMAN_OPENAPI_UPDATE").orElse(""))
 }
 
 // Live reconciliation against the public Base Sepolia RPC (free, no key): `./gradlew :services:ledger:testnetTest`.

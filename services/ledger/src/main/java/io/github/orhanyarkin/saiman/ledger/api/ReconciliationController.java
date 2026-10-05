@@ -4,6 +4,10 @@ import io.github.orhanyarkin.saiman.ledger.reconciliation.ReconciliationReport;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.ReconciliationReports;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.ReconciliationRunList;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.ReconciliationService;
+import io.swagger.v3.oas.annotations.headers.Header;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.util.UUID;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -42,6 +46,24 @@ public class ReconciliationController {
      * chain client.
      */
     @PostMapping
+    @ApiResponse(responseCode = "202", description = "The run started in the background", useReturnTypeSchema = true)
+    @ApiResponse(
+            responseCode = "409",
+            description = "A run is in progress",
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
+    @ApiResponse(
+            responseCode = "429",
+            description = "The previous manual run started too recently",
+            headers =
+                    @Header(
+                            name = HttpHeaders.RETRY_AFTER,
+                            description = "Seconds to wait",
+                            schema = @Schema(type = "integer")),
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
+    @ApiResponse(
+            responseCode = "503",
+            description = "No Base Sepolia client is configured",
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     public ResponseEntity<ReconciliationStarted> start() {
         UUID runId = service.start()
                 .orElseThrow(
@@ -51,6 +73,11 @@ public class ReconciliationController {
 
     /** The most recently started runs, newest first, without items. */
     @GetMapping
+    @ApiResponse(responseCode = "200", description = "Runs, newest first", useReturnTypeSchema = true)
+    @ApiResponse(
+            responseCode = "400",
+            description = "limit outside 1..100",
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     public ReconciliationRunList runs(@RequestParam(defaultValue = "20") int limit) {
         if (limit < 1 || limit > MAX_LIMIT) {
             throw ApiProblems.badRequest("limit must be between 1 and " + MAX_LIMIT);
@@ -60,11 +87,20 @@ public class ReconciliationController {
 
     /** The most recently started run's report (it may still be RUNNING). */
     @GetMapping("/latest")
+    @ApiResponse(responseCode = "200", description = "The latest run's report", useReturnTypeSchema = true)
+    @ApiResponse(responseCode = "404", description = "No run yet (empty body)", content = @Content)
     public ResponseEntity<ReconciliationReport> latest() {
         return ResponseEntity.of(reports.latest());
     }
 
+    /** One run's report. */
     @GetMapping("/{id}")
+    @ApiResponse(responseCode = "200", description = "The run's report", useReturnTypeSchema = true)
+    @ApiResponse(
+            responseCode = "400",
+            description = "id is not a UUID",
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
+    @ApiResponse(responseCode = "404", description = "No such run (empty body)", content = @Content)
     public ResponseEntity<ReconciliationReport> report(@PathVariable UUID id) {
         return ResponseEntity.of(reports.report(id));
     }

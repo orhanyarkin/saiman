@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.ledger.reconciliation;
 
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -32,6 +33,7 @@ public record ReconciliationReport(
     }
 
     /** Counters of the run. */
+    @Schema(name = "ReconciliationCounters")
     public record Summary(
             int checked, int matched, int pending, int resolvedUsed, int resolvedUnused, int mismatches) {}
 
@@ -41,6 +43,7 @@ public record ReconciliationReport(
      * @param runId the agent run that paid (from the payment events), not the reconciliation run
      * @param status MATCHED, PENDING, MISMATCH or TX_UNKNOWN
      */
+    @Schema(name = "ReconciliationItem")
     public record Item(
             UUID paymentId,
             @Nullable UUID paymentIntentId,
@@ -62,6 +65,7 @@ public record ReconciliationReport(
      * @param chainValue what the chain says (absolute)
      * @param adjustmentEntryId the ADJUSTMENT entry posted for it in this run, if any
      */
+    @Schema(name = "ReconciliationMismatch")
     public record Mismatch(
             String kind,
             @Nullable Money ledgerValue,

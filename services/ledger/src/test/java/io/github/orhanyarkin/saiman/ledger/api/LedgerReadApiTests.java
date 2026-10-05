@@ -459,6 +459,12 @@ class LedgerReadApiTests {
                 .isNotNull();
     }
 
+    /** The OpenAPI document is a build-time contract (OpenApiContractTests), not a runtime endpoint. */
+    @Test
+    void openApiDocumentIsOffAtRuntime() {
+        client.get().uri("/v3/api-docs").exchange().expectStatus().isNotFound();
+    }
+
     // --- helpers ---
 
     private static TestPayment inRun(TestPayment p, UUID runId) {

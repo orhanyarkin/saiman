@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.ledger.query;
 
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -24,6 +25,7 @@ public record PaymentDetail(PaymentSummary payment, List<Entry> entries, List<Fi
      * @param kind ENCUMBER, SETTLE, RELEASE, SALE, CREDIT_NOTE, ADJUSTMENT or REVERSAL
      * @param reversesEntryId set for REVERSAL entries only
      */
+    @Schema(name = "PaymentEntry")
     public record Entry(
             UUID entryId,
             String book,
@@ -43,6 +45,7 @@ public record PaymentDetail(PaymentSummary payment, List<Entry> entries, List<Fi
      *
      * @param side DEBIT or CREDIT
      */
+    @Schema(name = "PaymentPosting")
     public record Line(String accountCode, String side, Money amount) {}
 
     /**
@@ -54,6 +57,7 @@ public record PaymentDetail(PaymentSummary payment, List<Entry> entries, List<Fi
      * @param ledgerValue what the books said, if the finding is about an amount
      * @param chainValue what the chain said, if the finding is about an amount
      */
+    @Schema(name = "PaymentFinding")
     public record Finding(
             String kind,
             String status,

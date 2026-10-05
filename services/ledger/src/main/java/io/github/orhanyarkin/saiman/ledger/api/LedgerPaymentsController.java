@@ -4,8 +4,12 @@ import io.github.orhanyarkin.saiman.ledger.query.BookFilter;
 import io.github.orhanyarkin.saiman.ledger.query.LedgerQueries;
 import io.github.orhanyarkin.saiman.ledger.query.PaymentDetail;
 import io.github.orhanyarkin.saiman.ledger.query.PaymentPage;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
+import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -36,6 +40,11 @@ public class LedgerPaymentsController {
      * @param before the previous page's {@code nextCursor}
      */
     @GetMapping
+    @ApiResponse(responseCode = "200", description = "A page of payments", useReturnTypeSchema = true)
+    @ApiResponse(
+            responseCode = "400",
+            description = "Malformed runId, book, limit or before",
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     public PaymentPage payments(
             @RequestParam(required = false) @Nullable UUID runId,
             @RequestParam(required = false) @Nullable BookFilter book,
@@ -53,6 +62,15 @@ public class LedgerPaymentsController {
 
     /** One payment with its journal entries, postings and reconciliation findings. */
     @GetMapping("/{paymentId}")
+    @ApiResponse(responseCode = "200", description = "The payment", useReturnTypeSchema = true)
+    @ApiResponse(
+            responseCode = "400",
+            description = "paymentId is not a UUID",
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "No such payment",
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     public PaymentDetail payment(@PathVariable UUID paymentId) {
         return queries.payment(paymentId).orElseThrow(() -> ApiProblems.notFound("No such payment"));
     }
