@@ -47,6 +47,17 @@ export interface FixtureOptions {
   /** SSE `retry:` value and heartbeat comment interval. */
   retryMs?: number;
   heartbeatMs?: number;
+  /** How long after PAYMENT_SETTLED the ledger "consumes Kafka" and shows the payment. */
+  ledgerLagMs?: number;
+  /** A scripted reconciliation run stays RUNNING this long. */
+  reconRunMs?: number;
+  /** POST /reconciliation/runs answers 429 this long after the previous start. */
+  reconCooldownMs?: number;
+}
+
+interface ReconRun {
+  id: string;
+  startedAt: number;
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -160,9 +171,13 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
   const stepMs = options.stepMs ?? 150;
   const retryMs = options.retryMs ?? 1000;
   const heartbeatMs = options.heartbeatMs ?? 15_000;
+  const ledgerLagMs = options.ledgerLagMs ?? 800;
+  const reconRunMs = options.reconRunMs ?? 1500;
+  const reconCooldownMs = options.reconCooldownMs ?? 4000;
   const capture = options.capture ?? {};
   const fixtures = loadFixtures();
   const runs = new Map<string, Run>();
+  const reconRuns: ReconRun[] = [];
 
   for (const [runId, events] of Object.entries(capture.runEvents ?? {})) {
     runs.set(runId, {
@@ -367,6 +382,138 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
     return out;
   }
 
+  // ---- ledger stand-in: payments of the stateful runs, and a scripted reconciliation ----------
+
+  const PAYEE = "0x1111111111111111111111111111111111111111";
+  const PAYER = "0x2222222222222222222222222222222222222222";
+
+  /** A run's settled payments as the ledger shows them once it has consumed the events. */
+  function ledgerPayments(run: Run): Json[] {
+    const out: Json[] = [];
+    for (const settled of run.events.filter((e) => e.type === "PAYMENT_SETTLED")) {
+      if (Date.now() - Date.parse(settled.occurredAt) < ledgerLagMs) {
+        continue; // Kafka is asynchronous: the ledger is a little behind the orchestrator.
+      }
+      const intentId = String(settled.data.paymentIntentId);
+      const required = run.events.find(
+        (e) => e.type === "PAYMENT_APPROVAL_REQUIRED" && e.data.paymentIntentId === intentId,
+      );
+      out.push({
+        paymentId: intentId,
+        runId: run.id,
+        payTo: required?.data.payTo ?? PAYEE,
+        amount: settled.data.amount,
+        buyerState: "SETTLED",
+        sellerState: "SETTLED",
+        chainState: "UNKNOWN",
+        buyerTxHash: settled.data.txHash ?? null,
+        sellerTxHash: settled.data.txHash ?? null,
+        chainTxHash: null,
+        createdAt: required?.occurredAt ?? settled.occurredAt,
+        updatedAt: settled.occurredAt,
+      });
+    }
+    return out;
+  }
+
+  function ledgerPaymentDetail(paymentId: string): Json | null {
+    for (const run of runs.values()) {
+      const payment = ledgerPayments(run).find((p) => p.paymentId === paymentId);
+      if (!payment) {
+        continue;
+      }
+      const amount = payment.amount;
+      const entry = (n: number, book: string, kind: string, description: string, p: Json[]) => ({
+        entryId: `e0000000-0000-4000-8000-0000000000${String(n).padStart(2, "0")}`,
+        book,
+        kind,
+        description,
+        effectiveAt: payment.updatedAt,
+        reversesEntryId: null,
+        postings: p,
+      });
+      const posting = (accountCode: string, side: string) => ({ accountCode, side, amount });
+      const buyer = `buyer:${PAYER}`;
+      const seller = `seller:${String(payment.payTo)}`;
+      return {
+        payment,
+        entries: [
+          entry(1, "BUYER", "ENCUMBER", "Authorization signed", [
+            posting(`${buyer}:wallet:encumbered`, "DEBIT"),
+            posting(`${buyer}:wallet:available`, "CREDIT"),
+          ]),
+          entry(2, "BUYER", "SETTLE", "Payment settled", [
+            posting(`${buyer}:expense:data`, "DEBIT"),
+            posting(`${buyer}:wallet:encumbered`, "CREDIT"),
+          ]),
+          entry(3, "SELLER", "SALE", "Payment received", [
+            posting(`${seller}:wallet`, "DEBIT"),
+            posting(`${seller}:revenue:data`, "CREDIT"),
+          ]),
+        ],
+        mismatches: [],
+      };
+    }
+    return null;
+  }
+
+  const reconDone = (r: ReconRun) => Date.now() - r.startedAt >= reconRunMs;
+  const capturedLatest = (): Json =>
+    (capture.responses?.["/api/v1/reconciliation/runs/latest"] as Json | undefined) ?? {};
+
+  function reconReport(r: ReconRun): Json {
+    const done = reconDone(r);
+    const base = structuredClone(capturedLatest());
+    return {
+      ...base,
+      runId: r.id,
+      status: done ? "COMPLETED" : "RUNNING",
+      startedAt: new Date(r.startedAt).toISOString(),
+      finishedAt: done ? new Date(r.startedAt + reconRunMs).toISOString() : null,
+      ...(done
+        ? {}
+        : {
+            items: [],
+            summary: {
+              checked: 0,
+              matched: 0,
+              pending: 0,
+              mismatches: 0,
+              resolvedUsed: 0,
+              resolvedUnused: 0,
+            },
+          }),
+    };
+  }
+
+  function reconSummary(r: ReconRun): Json {
+    const report = reconReport(r);
+    return {
+      runId: report.runId,
+      status: report.status,
+      startedAt: report.startedAt,
+      finishedAt: report.finishedAt,
+      safeBlock: report.safeBlock ?? null,
+      summary: report.summary,
+    };
+  }
+
+  function startReconciliation(res: ServerResponse) {
+    const last = reconRuns.at(-1);
+    if (last && !reconDone(last)) {
+      problem(res, 409, "a reconciliation run is already in progress");
+      return;
+    }
+    if (last && Date.now() - last.startedAt < reconCooldownMs) {
+      const wait = Math.max(1, Math.ceil((last.startedAt + reconCooldownMs - Date.now()) / 1000));
+      problem(res, 429, "reconciliation was started too recently", { "Retry-After": String(wait) });
+      return;
+    }
+    const run = { id: randomUUID(), startedAt: Date.now() };
+    reconRuns.push(run);
+    json(res, 202, { runId: run.id });
+  }
+
   function streamEvents(req: IncomingMessage, res: ServerResponse, run: Run) {
     const rawLast = req.headers["last-event-id"];
     const last = typeof rawLast === "string" && /^\d{1,9}$/.test(rawLast) ? Number(rawLast) : 0;
@@ -457,6 +604,48 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
       res.setHeader("Location", `/api/v1/runs/${run.id}`);
       json(res, 202, { runId: run.id, eventsUrl: `/api/v1/runs/${run.id}/events`, traceId: null });
       return;
+    }
+
+    if (method === "POST" && path === "/api/v1/reconciliation/runs") {
+      startReconciliation(res);
+      return;
+    }
+
+    if (method === "GET" && path.startsWith("/api/v1/reconciliation/runs")) {
+      const reconMatch = /^\/api\/v1\/reconciliation\/runs\/([^/]+)$/.exec(path);
+      const latest = reconRuns.at(-1);
+      if (reconMatch?.[1] === "latest" && latest) {
+        json(res, 200, reconReport(latest));
+        return;
+      }
+      const own = reconRuns.find((r) => r.id === reconMatch?.[1]);
+      if (own) {
+        json(res, 200, reconReport(own));
+        return;
+      }
+      if (path === "/api/v1/reconciliation/runs" && reconRuns.length > 0) {
+        const captured = capture.responses?.[path + url.search] ?? capture.responses?.[path];
+        const older = (captured as { items?: Json[] } | undefined)?.items ?? [];
+        json(res, 200, { items: [...reconRuns.toReversed().map(reconSummary), ...older] });
+        return;
+      }
+    }
+
+    const ledgerRun = url.searchParams.get("runId");
+    if (method === "GET" && path === "/api/v1/ledger/payments" && ledgerRun) {
+      const run = runs.get(ledgerRun);
+      if (run && capture.responses?.[path + url.search] === undefined) {
+        json(res, 200, { items: ledgerPayments(run), nextCursor: null });
+        return;
+      }
+    }
+    const ledgerPaymentMatch = /^\/api\/v1\/ledger\/payments\/([^/]+)$/.exec(path);
+    if (method === "GET" && ledgerPaymentMatch) {
+      const detail = ledgerPaymentDetail(ledgerPaymentMatch[1] ?? "");
+      if (detail) {
+        json(res, 200, detail);
+        return;
+      }
     }
 
     const approvalMatch = /^\/api\/v1\/runs\/([^/]+)\/approvals\/([^/]+)$/.exec(path);
@@ -553,9 +742,15 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
 function main() {
   const port = Number(process.env.SAIMAN_FIXTURE_PORT ?? 4010);
   const capturePath = process.env.SAIMAN_CAPTURE;
+  const read = (path: string) => JSON.parse(readFileSync(path, "utf8")) as Capture;
+  // A real capture holds both services' responses; the examples are split per service.
   const capture = capturePath
-    ? (JSON.parse(readFileSync(capturePath, "utf8")) as Capture)
-    : (JSON.parse(readFileSync(resolve(HERE, "fixtures/capture.example.json"), "utf8")) as Capture);
+    ? read(capturePath)
+    : (() => {
+        const orchestrator = read(resolve(HERE, "fixtures/capture.example.json"));
+        const ledger = read(resolve(HERE, "fixtures/capture.ledger.example.json"));
+        return { ...orchestrator, responses: { ...orchestrator.responses, ...ledger.responses } };
+      })();
   const stepMs = process.env.SAIMAN_STEP_MS ? Number(process.env.SAIMAN_STEP_MS) : undefined;
   const server = createFixtureServer({
     port,

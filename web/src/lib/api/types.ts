@@ -6,6 +6,8 @@
  */
 import type { components } from "@/lib/api/generated/orchestrator";
 
+import type { components as LedgerComponents } from "@/lib/api/generated/ledger";
+
 type Schemas = components["schemas"];
 
 export type Money = Schemas["Money"];
@@ -28,6 +30,28 @@ export type SpendOverview = Schemas["SpendOverview"];
 export type SpendLimits = Schemas["SpendLimits"];
 export type SpendByTool = Schemas["SpendByTool"];
 export type ProblemDetail = Schemas["ProblemDetail"];
+
+// Ledger API (docs/api/ledger.openapi.json). `Money` and `ProblemDetail` stay the orchestrator's:
+// the shapes are identical and screens use one name.
+type LedgerSchemas = LedgerComponents["schemas"];
+
+export type TrialBalanceRow = LedgerSchemas["TrialBalanceRow"];
+export type PaymentSummary = LedgerSchemas["PaymentSummary"];
+export type PaymentPage = LedgerSchemas["PaymentPage"];
+export type PaymentDetail = LedgerSchemas["PaymentDetail"];
+export type PaymentEntry = LedgerSchemas["PaymentEntry"];
+export type PaymentPosting = LedgerSchemas["PaymentPosting"];
+export type PaymentFinding = LedgerSchemas["PaymentFinding"];
+export type RevenueReport = LedgerSchemas["RevenueReport"];
+export type SellerRevenue = LedgerSchemas["SellerRevenue"];
+export type SignedAmount = LedgerSchemas["SignedAmount"];
+export type ReconciliationReport = LedgerSchemas["ReconciliationReport"];
+export type ReconciliationItem = LedgerSchemas["ReconciliationItem"];
+export type ReconciliationCounters = LedgerSchemas["ReconciliationCounters"];
+export type ReconciliationRunList = LedgerSchemas["ReconciliationRunList"];
+export type ReconciliationRunSummary = LedgerSchemas["ReconciliationRunSummary"];
+export type ReconciliationStarted = LedgerSchemas["ReconciliationStarted"];
+export type LedgerBook = "BUYER" | "SELLER";
 
 export function isTerminalStatus(status: RunStatus): boolean {
   return status === "SUCCEEDED" || status === "FAILED";

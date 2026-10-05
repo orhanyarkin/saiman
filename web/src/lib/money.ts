@@ -28,7 +28,11 @@ function isRenderable(money: MoneyLike): boolean {
 }
 
 /** Splits atomic units into a sign, whole part and zero-padded fraction (all strings). */
-function split(money: MoneyLike): { negative: boolean; whole: string; fraction: string } {
+function split(money: {
+  readonly atomicUnits: number | bigint;
+  readonly asset?: string;
+  readonly decimals: number;
+}): { negative: boolean; whole: string; fraction: string } {
   const value = BigInt(money.atomicUnits);
   const negative = value < 0n;
   const digits = (negative ? -value : value).toString().padStart(money.decimals + 1, "0");
@@ -61,6 +65,25 @@ export function formatMoney(money: MoneyLike): string {
   if (!isRenderable(money)) {
     return UNAVAILABLE;
   }
+  return render(money);
+}
+
+/**
+ * Same text for an exact BigInt amount, e.g. a trial-balance total summed from safe integers.
+ * Unlike `formatMoney` there is nothing to refuse: the value is exact by construction.
+ */
+export function formatBigMoney(atomicUnits: bigint, asset: string, decimals: number): string {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) {
+    return UNAVAILABLE;
+  }
+  return render({ atomicUnits, asset, decimals });
+}
+
+function render(money: {
+  readonly atomicUnits: number | bigint;
+  readonly asset: string;
+  readonly decimals: number;
+}): string {
   const { negative, whole, fraction } = split(money);
   const sign = negative ? "-" : "";
   if (money.asset === "USD") {

@@ -198,4 +198,78 @@ describe("fixture server", () => {
     expect(payments.items.map((i) => i.status)).toEqual(["AWAITING_APPROVAL"]);
     expect((await fetch(`${base}/api/v1/runs/nope/payments`)).status).toBe(404);
   });
+
+  it("shows a settled payment in the ledger a moment after the settled event", async () => {
+    const lagged = createFixtureServer({ stepMs: 5, heartbeatMs: 60_000, ledgerLagMs: 150 });
+    await new Promise<void>((done) => lagged.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${String((lagged.address() as AddressInfo).port)}`;
+    const headers = { "Content-Type": "application/json", "X-Saiman-Csrf": "1" };
+    const { runId } = (await (
+      await fetch(`${url}/api/v1/runs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ question: "THYAO son açıklamalar?" }),
+      })
+    ).json()) as { runId: string };
+    let approval = "";
+    for (let i = 0; i < 100 && approval === ""; i++) {
+      const list = (await (await fetch(`${url}/api/v1/approvals?status=PENDING`)).json()) as {
+        id: string;
+        runId: string;
+      }[];
+      approval = list.find((a) => a.runId === runId)?.id ?? "";
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await fetch(`${url}/api/v1/runs/${runId}/approvals/${approval}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ decision: "APPROVE" }),
+    });
+    const poll = async () =>
+      (await (await fetch(`${url}/api/v1/ledger/payments?runId=${runId}&limit=50`)).json()) as {
+        items: { paymentId: string; buyerState: string }[];
+      };
+    expect((await poll()).items).toHaveLength(0); // not consumed yet
+    let items: { paymentId: string; buyerState: string }[] = [];
+    for (let i = 0; i < 100 && items.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      items = (await poll()).items;
+    }
+    expect(items[0]?.buyerState).toBe("SETTLED");
+    const detail = (await (
+      await fetch(`${url}/api/v1/ledger/payments/${items[0]?.paymentId ?? ""}`)
+    ).json()) as { entries: { kind: string }[] };
+    expect(detail.entries.map((e) => e.kind)).toEqual(["ENCUMBER", "SETTLE", "SALE"]);
+    lagged.closeAllConnections();
+    lagged.close();
+  });
+
+  it("scripts the reconciliation start: 202, 409 while running, 429 right after, 202 again", async () => {
+    const recon = createFixtureServer({ reconRunMs: 100, reconCooldownMs: 1500 });
+    await new Promise<void>((done) => recon.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${String((recon.address() as AddressInfo).port)}`;
+    const start = () =>
+      fetch(`${url}/api/v1/reconciliation/runs`, {
+        method: "POST",
+        headers: POST_HEADERS,
+        body: "{}",
+      });
+    const first = await start();
+    expect(first.status).toBe(202);
+    const { runId } = (await first.json()) as { runId: string };
+    expect((await start()).status).toBe(409);
+    const running = (await (await fetch(`${url}/api/v1/reconciliation/runs/latest`)).json()) as {
+      runId: string;
+      status: string;
+    };
+    expect(running).toMatchObject({ runId, status: "RUNNING" });
+    await new Promise((r) => setTimeout(r, 150));
+    const limited = await start();
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toMatch(/^\d+$/);
+    await new Promise((r) => setTimeout(r, 1500));
+    expect((await start()).status).toBe(202);
+    recon.closeAllConnections();
+    recon.close();
+  });
 });

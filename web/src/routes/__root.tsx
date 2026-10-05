@@ -28,7 +28,10 @@ function RootComponent() {
           Testnet only {"—"} local demo. No real money moves.
           {isReplayMode ? " Recorded run: actions are disabled." : ""}
         </div>
-        <nav aria-label="Main" className="flex items-center gap-4 border-b px-4 py-3">
+        <nav
+          aria-label="Main"
+          className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-4 py-3"
+        >
           <Link to="/" className="font-semibold">
             Saiman
           </Link>
@@ -54,6 +57,15 @@ function RootComponent() {
           </Link>
           <Link to="/spend" className={navLink} activeProps={{ "aria-current": "page" }}>
             Spend
+          </Link>
+          <Link to="/ledger" className={navLink} activeProps={{ "aria-current": "page" }}>
+            Ledger
+          </Link>
+          <Link to="/reconciliation" className={navLink} activeProps={{ "aria-current": "page" }}>
+            Reconciliation
+          </Link>
+          <Link to="/revenue" className={navLink} activeProps={{ "aria-current": "page" }}>
+            Revenue
           </Link>
         </nav>
       </header>

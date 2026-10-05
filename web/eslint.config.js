@@ -15,6 +15,7 @@ export default tseslint.config([
       "src/routeTree.gen.ts",
       "src/lib/api/generated",
       "playwright-report",
+      "reports",
       "test-results",
     ],
   },

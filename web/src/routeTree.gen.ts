@@ -11,10 +11,15 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApprovalsRouteImport } from './routes/approvals'
+import { Route as RevenueRouteImport } from './routes/revenue'
 import { Route as SpendRouteImport } from './routes/spend'
+import { Route as LedgerIndexRouteImport } from './routes/ledger.index'
+import { Route as ReconciliationIndexRouteImport } from './routes/reconciliation.index'
+import { Route as ReconciliationReconRunIdRouteImport } from './routes/reconciliation.$reconRunId'
 import { Route as RunsIndexRouteImport } from './routes/runs.index'
 import { Route as RunsRunIdRouteImport } from './routes/runs.$runId'
 import { Route as RunsNewRouteImport } from './routes/runs.new'
+import { Route as LedgerPaymentsPaymentIdRouteImport } from './routes/ledger.payments.$paymentId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -26,11 +31,32 @@ const ApprovalsRoute = ApprovalsRouteImport.update({
   path: '/approvals',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RevenueRoute = RevenueRouteImport.update({
+  id: '/revenue',
+  path: '/revenue',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SpendRoute = SpendRouteImport.update({
   id: '/spend',
   path: '/spend',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LedgerIndexRoute = LedgerIndexRouteImport.update({
+  id: '/ledger/',
+  path: '/ledger/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReconciliationIndexRoute = ReconciliationIndexRouteImport.update({
+  id: '/reconciliation/',
+  path: '/reconciliation/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReconciliationReconRunIdRoute =
+  ReconciliationReconRunIdRouteImport.update({
+    id: '/reconciliation/$reconRunId',
+    path: '/reconciliation/$reconRunId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
   id: '/runs/',
   path: '/runs/',
@@ -46,55 +72,106 @@ const RunsNewRoute = RunsNewRouteImport.update({
   path: '/runs/new',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LedgerPaymentsPaymentIdRoute = LedgerPaymentsPaymentIdRouteImport.update({
+  id: '/ledger/payments/$paymentId',
+  path: '/ledger/payments/$paymentId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/approvals': typeof ApprovalsRoute
+  '/revenue': typeof RevenueRoute
   '/spend': typeof SpendRoute
+  '/reconciliation/$reconRunId': typeof ReconciliationReconRunIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/runs/new': typeof RunsNewRoute
+  '/ledger/': typeof LedgerIndexRoute
+  '/reconciliation/': typeof ReconciliationIndexRoute
   '/runs/': typeof RunsIndexRoute
+  '/ledger/payments/$paymentId': typeof LedgerPaymentsPaymentIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/approvals': typeof ApprovalsRoute
+  '/revenue': typeof RevenueRoute
   '/spend': typeof SpendRoute
+  '/reconciliation/$reconRunId': typeof ReconciliationReconRunIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/runs/new': typeof RunsNewRoute
+  '/ledger': typeof LedgerIndexRoute
+  '/reconciliation': typeof ReconciliationIndexRoute
   '/runs': typeof RunsIndexRoute
+  '/ledger/payments/$paymentId': typeof LedgerPaymentsPaymentIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/approvals': typeof ApprovalsRoute
+  '/revenue': typeof RevenueRoute
   '/spend': typeof SpendRoute
+  '/reconciliation/$reconRunId': typeof ReconciliationReconRunIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/runs/new': typeof RunsNewRoute
+  '/ledger/': typeof LedgerIndexRoute
+  '/reconciliation/': typeof ReconciliationIndexRoute
   '/runs/': typeof RunsIndexRoute
+  '/ledger/payments/$paymentId': typeof LedgerPaymentsPaymentIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/approvals' | '/spend' | '/runs/$runId' | '/runs/new' | '/runs/'
+    | '/'
+    | '/approvals'
+    | '/revenue'
+    | '/spend'
+    | '/reconciliation/$reconRunId'
+    | '/runs/$runId'
+    | '/runs/new'
+    | '/ledger/'
+    | '/reconciliation/'
+    | '/runs/'
+    | '/ledger/payments/$paymentId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/approvals' | '/spend' | '/runs/$runId' | '/runs/new' | '/runs'
+  to:
+    | '/'
+    | '/approvals'
+    | '/revenue'
+    | '/spend'
+    | '/reconciliation/$reconRunId'
+    | '/runs/$runId'
+    | '/runs/new'
+    | '/ledger'
+    | '/reconciliation'
+    | '/runs'
+    | '/ledger/payments/$paymentId'
   id:
     | '__root__'
     | '/'
     | '/approvals'
+    | '/revenue'
     | '/spend'
+    | '/reconciliation/$reconRunId'
     | '/runs/$runId'
     | '/runs/new'
+    | '/ledger/'
+    | '/reconciliation/'
     | '/runs/'
+    | '/ledger/payments/$paymentId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApprovalsRoute: typeof ApprovalsRoute
+  RevenueRoute: typeof RevenueRoute
   SpendRoute: typeof SpendRoute
+  ReconciliationReconRunIdRoute: typeof ReconciliationReconRunIdRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
   RunsNewRoute: typeof RunsNewRoute
+  LedgerIndexRoute: typeof LedgerIndexRoute
+  ReconciliationIndexRoute: typeof ReconciliationIndexRoute
   RunsIndexRoute: typeof RunsIndexRoute
+  LedgerPaymentsPaymentIdRoute: typeof LedgerPaymentsPaymentIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -113,11 +190,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApprovalsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/revenue': {
+      id: '/revenue'
+      path: '/revenue'
+      fullPath: '/revenue'
+      preLoaderRoute: typeof RevenueRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/spend': {
       id: '/spend'
       path: '/spend'
       fullPath: '/spend'
       preLoaderRoute: typeof SpendRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ledger/': {
+      id: '/ledger/'
+      path: '/ledger'
+      fullPath: '/ledger/'
+      preLoaderRoute: typeof LedgerIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reconciliation/': {
+      id: '/reconciliation/'
+      path: '/reconciliation'
+      fullPath: '/reconciliation/'
+      preLoaderRoute: typeof ReconciliationIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reconciliation/$reconRunId': {
+      id: '/reconciliation/$reconRunId'
+      path: '/reconciliation/$reconRunId'
+      fullPath: '/reconciliation/$reconRunId'
+      preLoaderRoute: typeof ReconciliationReconRunIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/runs/': {
@@ -141,16 +246,28 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RunsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ledger/payments/$paymentId': {
+      id: '/ledger/payments/$paymentId'
+      path: '/ledger/payments/$paymentId'
+      fullPath: '/ledger/payments/$paymentId'
+      preLoaderRoute: typeof LedgerPaymentsPaymentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApprovalsRoute: ApprovalsRoute,
+  RevenueRoute: RevenueRoute,
   SpendRoute: SpendRoute,
+  ReconciliationReconRunIdRoute: ReconciliationReconRunIdRoute,
   RunsRunIdRoute: RunsRunIdRoute,
   RunsNewRoute: RunsNewRoute,
+  LedgerIndexRoute: LedgerIndexRoute,
+  ReconciliationIndexRoute: ReconciliationIndexRoute,
   RunsIndexRoute: RunsIndexRoute,
+  LedgerPaymentsPaymentIdRoute: LedgerPaymentsPaymentIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
