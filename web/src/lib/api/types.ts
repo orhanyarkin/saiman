@@ -26,7 +26,22 @@ export type PaymentIntentStatus = RunPaymentItem["status"];
 export type ApprovalView = Schemas["ApprovalView"];
 export type ApprovalResponse = Schemas["ApprovalResponse"];
 export type DecisionRequest = Schemas["DecisionRequest"];
-export type SpendOverview = Schemas["SpendOverview"];
+/**
+ * Hand-typed until T5b regenerates the OpenAPI types (ADR-0026): the global daily LLM cap, in USD
+ * micros. Optional, because older backends and recordings do not have it.
+ */
+export interface LlmDay {
+  spentUsdMicros: number;
+  capUsdMicros: number;
+}
+export type SpendOverview = Schemas["SpendOverview"] & { llmDay?: LlmDay };
+
+/** `GET /api/v1/me` (ADR-0023), hand-typed until T5b regenerates the OpenAPI types. */
+export type Role = "READER" | "OPERATOR";
+export interface Me {
+  name: string;
+  roles: Role[];
+}
 export type SpendLimits = Schemas["SpendLimits"];
 export type SpendByTool = Schemas["SpendByTool"];
 export type ProblemDetail = Schemas["ProblemDetail"];

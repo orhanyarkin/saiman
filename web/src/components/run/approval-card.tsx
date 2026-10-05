@@ -8,10 +8,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { isReplayMode } from "@/lib/api/source";
 import { useNow } from "@/lib/hooks";
 import { formatMoney, moneyTitle } from "@/lib/money";
 import { useApprovalDecision } from "@/lib/use-approval-decision";
+import { useCapabilities } from "@/lib/use-capabilities";
+import { isReplayMode } from "@/lib/mode";
 import type { ApprovalRequest } from "@/lib/run-view-model";
 
 function countdown(msLeft: number): string {
@@ -40,6 +41,7 @@ export function ApprovalCard({ runId, approval, onSettled }: Props) {
   const expired = now >= expiresAt;
 
   const { decision, conflict } = useApprovalDecision(runId, approval.approvalId, onSettled);
+  const { canOperate } = useCapabilities();
   const locked = expired || decision.isPending || decision.isSuccess || conflict;
   const expiresText = new Date(expiresAt).toLocaleTimeString();
 
@@ -95,9 +97,11 @@ export function ApprovalCard({ runId, approval, onSettled }: Props) {
         ) : null}
       </CardContent>
       <CardFooter className="gap-3">
-        {isReplayMode ? (
+        {!canOperate ? (
           <p className="text-muted-foreground text-sm">
-            Recorded demo: approvals are disabled because nothing here can change state.
+            {isReplayMode
+              ? "Recorded demo: approvals are disabled because nothing here can change state."
+              : "Read-only: deciding approvals needs an operator token."}
           </p>
         ) : (
           <>

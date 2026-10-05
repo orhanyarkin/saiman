@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ErrorNotice } from "@/components/error-notice";
 import { Button } from "@/components/ui/button";
 import { startReconciliation } from "@/lib/api/queries";
-import { ApiError, isReplayMode } from "@/lib/api/source";
+import { ApiError } from "@/lib/api/source";
 import type {
   ReconciliationCounters,
   ReconciliationReport,
@@ -20,6 +20,8 @@ import {
 } from "@/lib/ledger-model";
 import { formatMoney, moneyTitle } from "@/lib/money";
 import { basescanTxUrl } from "@/lib/run-view-model";
+import { isReplayMode } from "@/lib/mode";
+import { useCapabilities } from "@/lib/use-capabilities";
 
 const when = (iso: string) => new Date(iso).toLocaleString();
 
@@ -43,6 +45,7 @@ function RetryCountdown({ retryAt, seconds }: { retryAt: number; seconds: number
 
 /** "Run now": starts a reconciliation and handles 409 (running), 429 (Retry-After) and 503. */
 export function RunNowControl() {
+  const { canOperate } = useCapabilities();
   const queryClient = useQueryClient();
   const [retry, setRetry] = useState<{ at: number; seconds: number } | null>(null);
   const [started, setStarted] = useState(false);
@@ -84,15 +87,21 @@ export function RunNowControl() {
   }, [retry]);
 
   const error = mutation.error;
-  const disabled = isReplayMode || mutation.isPending || retry !== null;
+  const disabled = mutation.isPending || retry !== null;
+  if (!canOperate) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        {isReplayMode
+          ? "Disabled in the recorded demo: nothing can be started here."
+          : "Read-only: running reconciliation needs an operator token."}
+      </p>
+    );
+  }
   return (
     <div className="space-y-2">
       <Button
         disabled={disabled}
         aria-describedby="run-now-note"
-        title={
-          isReplayMode ? "Disabled: this is a recorded demo, nothing can be started." : undefined
-        }
         onClick={() => {
           mutation.mutate();
         }}
@@ -100,11 +109,6 @@ export function RunNowControl() {
         {mutation.isPending ? "Starting…" : "Run now"}
       </Button>
       <div id="run-now-note" className="space-y-1">
-        {isReplayMode ? (
-          <p className="text-muted-foreground text-sm">
-            Disabled in the recorded demo: nothing can be started here.
-          </p>
-        ) : null}
         {started ? (
           <p role="status">Reconciliation started. The report below updates itself.</p>
         ) : null}

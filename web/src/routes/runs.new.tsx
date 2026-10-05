@@ -5,8 +5,11 @@ import { useState, type SyntheticEvent } from "react";
 import { ErrorNotice } from "@/components/error-notice";
 import { Button } from "@/components/ui/button";
 import { spendQuery, startRun } from "@/lib/api/queries";
-import { isReplayMode } from "@/lib/api/source";
+import { ReplayOffer } from "@/components/replay/replay-offer";
+import { isDailyCapError } from "@/lib/api/errors";
 import { useDocumentTitle } from "@/lib/hooks";
+import { isReplayMode } from "@/lib/mode";
+import { useCapabilities } from "@/lib/use-capabilities";
 import { todayUtc } from "@/lib/day";
 import { EXAMPLE_QUESTION, QUESTION_MAX, QUESTION_MIN } from "@/lib/limits";
 import { formatMoney, parseUsdcInput, usdcInputValue } from "@/lib/money";
@@ -21,6 +24,7 @@ const inputClass =
 function NewRun() {
   useDocumentTitle("New run");
   const navigate = useNavigate();
+  const { canOperate, pending } = useCapabilities();
   const [question, setQuestion] = useState("");
   // Limits come from the server (display hints; the server enforces them). Until the user types,
   // the budget field shows the server's default run budget.
@@ -60,6 +64,21 @@ function NewRun() {
       return;
     }
     start.mutate({ question: trimmed, ...(budgetAtomic === null ? {} : { budgetAtomic }) });
+  }
+
+  if (!canOperate) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-semibold">Start a research run</h1>
+        <p role="status" className="text-muted-foreground text-sm">
+          {pending
+            ? "Checking what this token may do…"
+            : isReplayMode
+              ? "This is a recorded demo, so starting a run is disabled here."
+              : "Read-only: starting a run needs an operator token. Use Connect to enter one."}
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -137,13 +156,11 @@ function NewRun() {
         </div>
 
         {start.isError ? <ErrorNotice error={start.error} /> : null}
-
-        {isReplayMode ? (
-          <p className="text-muted-foreground text-sm">
-            This is a recorded demo, so starting a run is disabled here.
-          </p>
+        {isDailyCapError(start.error) ? (
+          <ReplayOffer text="Live runs are paused until the daily model budget resets. You can still watch a recorded run." />
         ) : null}
-        <Button type="submit" disabled={start.isPending || isReplayMode}>
+
+        <Button type="submit" disabled={start.isPending}>
           {start.isPending ? "Starting…" : "Start run"}
         </Button>
       </form>

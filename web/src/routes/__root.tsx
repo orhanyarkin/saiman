@@ -1,7 +1,10 @@
 import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
 
-import { isReplayMode } from "@/lib/api/source";
+import { AuthStatus } from "@/components/auth/auth-status";
+import { ReplayBanner } from "@/components/replay/replay-banner";
 import { usePendingApprovalCount } from "@/lib/hooks";
+import { isReplayMode } from "@/lib/mode";
+import { useCapabilities } from "@/lib/use-capabilities";
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -12,6 +15,7 @@ const navLink =
 
 function RootComponent() {
   const pending = usePendingApprovalCount();
+  const { canOperate } = useCapabilities();
   return (
     <div className="bg-background min-h-screen">
       <a
@@ -21,13 +25,16 @@ function RootComponent() {
         Skip to main content
       </a>
       <header>
-        <div
-          role="note"
-          className="bg-amber-100 px-4 py-2 text-center text-sm font-medium text-amber-950"
-        >
-          Testnet only {"—"} local demo. No real money moves.
-          {isReplayMode ? " Recorded run: actions are disabled." : ""}
-        </div>
+        {isReplayMode ? (
+          <ReplayBanner />
+        ) : (
+          <div
+            role="note"
+            className="bg-amber-100 px-4 py-2 text-center text-sm font-medium text-amber-950"
+          >
+            Testnet only {"—"} local demo. No real money moves.
+          </div>
+        )}
         <nav
           aria-label="Main"
           className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-4 py-3"
@@ -43,9 +50,11 @@ function RootComponent() {
           >
             Runs
           </Link>
-          <Link to="/runs/new" className={navLink} activeProps={{ "aria-current": "page" }}>
-            New run
-          </Link>
+          {canOperate ? (
+            <Link to="/runs/new" className={navLink} activeProps={{ "aria-current": "page" }}>
+              New run
+            </Link>
+          ) : null}
           <Link to="/approvals" className={navLink} activeProps={{ "aria-current": "page" }}>
             Approvals
             {pending !== null && pending > 0 ? (
@@ -67,6 +76,7 @@ function RootComponent() {
           <Link to="/revenue" className={navLink} activeProps={{ "aria-current": "page" }}>
             Revenue
           </Link>
+          <AuthStatus />
         </nav>
       </header>
       <main id="main" tabIndex={-1} className="mx-auto max-w-4xl p-4 outline-none sm:p-8">

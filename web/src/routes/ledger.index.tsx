@@ -7,7 +7,7 @@ import { PaymentsTable } from "@/components/ledger/payments-table";
 import { TrialBalanceView } from "@/components/ledger/trial-balance";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ledgerPaymentsQuery, trialBalanceQuery } from "@/lib/api/queries";
-import { isReplayMode } from "@/lib/api/source";
+import { useCapabilities } from "@/lib/use-capabilities";
 import type { LedgerBook } from "@/lib/api/types";
 import { useDocumentTitle } from "@/lib/hooks";
 
@@ -24,6 +24,7 @@ const BOOK_OPTIONS: readonly { value: "" | LedgerBook; label: string }[] = [
 function LedgerPage() {
   useDocumentTitle("Ledger");
   const [book, setBook] = useState<"" | LedgerBook>("");
+  const { canOperate } = useCapabilities();
   const balance = useQuery(trialBalanceQuery());
   const payments = useInfiniteQuery(ledgerPaymentsQuery({ book: book === "" ? null : book }));
   const pageError: unknown = payments.isFetchNextPageError ? payments.error : null;
@@ -50,11 +51,11 @@ function LedgerPage() {
         ) : balance.data.length === 0 ? (
           <div className="space-y-3">
             <p className="text-muted-foreground">No accounts yet: nothing has been booked.</p>
-            {isReplayMode ? null : (
+            {canOperate ? (
               <Link to="/runs/new" className={buttonVariants()}>
                 Start a research run
               </Link>
-            )}
+            ) : null}
           </div>
         ) : (
           <TrialBalanceView rows={balance.data} />
@@ -103,11 +104,11 @@ function LedgerPage() {
         ) : items.length === 0 ? (
           <div className="space-y-3">
             <p className="text-muted-foreground">No payments in the ledger yet.</p>
-            {isReplayMode ? null : (
+            {canOperate ? (
               <Link to="/runs/new" className={buttonVariants()}>
                 Start a research run
               </Link>
-            )}
+            ) : null}
           </div>
         ) : (
           <>
