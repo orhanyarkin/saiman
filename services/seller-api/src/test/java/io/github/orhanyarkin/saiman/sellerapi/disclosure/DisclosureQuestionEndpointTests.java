@@ -145,6 +145,20 @@ class DisclosureQuestionEndpointTests extends RagTestBase {
     }
 
     @Test
+    void thePromptForbidsRelativeTimeAndStatesTheSnapshotDate() {
+        postPaid(URI, PRICE, BODY).expectStatus().isOk();
+
+        String system = textOf(router.chatModel().lastPrompt().getInstructions(), MessageType.SYSTEM);
+        system = system.replaceAll("\\s+", " ");
+        assertThat(system)
+                .contains("frozen snapshot of KAP disclosures up to 2023-12-29")
+                .contains("Never use relative time expressions")
+                .contains("son N günde")
+                .contains("absolute dates taken from the")
+                .contains("absence of newer disclosures");
+    }
+
+    @Test
     void anInjectedChunkCanNotIntroduceACitationThatWasNotRetrieved() {
         RetrievedChunk poisoned = FakeIngestServer.chunk(
                 "kap:5:0002",

@@ -56,6 +56,9 @@ class GoldenSetLoaderTests {
         assertThat(set.items(Kind.FRESHNESS)).hasSize(3);
         assertThat(set.items(Kind.ANSWER)).hasSize(5);
         assertThat(set.items(Kind.UNANSWERABLE)).hasSize(2);
+        assertThat(set.items(Kind.TEMPORAL))
+                .extracting(GoldenSet.GoldenItem::question)
+                .containsExactly("SISE güncel bildirimlerinde neler var?", "KCHOL en son açıklamaları neler?");
         // the answer service needs >= 2 valid citations, so a single-source question can only fail
         assertThat(set.items(Kind.ANSWER)).allSatisfy(item -> {
             assertThat(item.expected().sources()).hasSize(2).doesNotHaveDuplicates();

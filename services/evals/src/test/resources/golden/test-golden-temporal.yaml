@@ -1,0 +1,30 @@
+# Hermetic fixture for AnswerTierTemporalTests: not a real corpus (all indexes are made up).
+version: 1
+corpus:
+  watermark: 2023-12-29T20:46:52Z
+  corpusVersion: "v-golden"
+items:
+  - id: T-1
+    kind: TEMPORAL
+    ticker: SISE
+    question: "Güncel neler var?"
+    expected: {}
+  - id: T-2
+    kind: TEMPORAL
+    ticker: KCHOL
+    question: "En son neler var?"
+    expected: {}
+  - id: T-3
+    kind: TEMPORAL
+    ticker: AKBNK
+    question: "Yeni bir şey var mı?"
+    expected: {}
+  - id: A-1
+    kind: ANSWER
+    ticker: THYAO
+    question: "Ne zaman?"
+    expected:
+      sources: [100, 200]
+      requiredFacts:
+        - anyOf: ["18.10.2023"]
+        - anyOf: ["18.05.2023"]

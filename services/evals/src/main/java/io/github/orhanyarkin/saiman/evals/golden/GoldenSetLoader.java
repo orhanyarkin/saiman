@@ -142,8 +142,8 @@ public final class GoldenSetLoader {
         try {
             kind = Kind.valueOf(String.valueOf(map.get("kind")));
         } catch (IllegalArgumentException e) {
-            problems.add(
-                    where + ".kind: must be one of RETRIEVAL, FRESHNESS, ANSWER, UNANSWERABLE, was " + map.get("kind"));
+            problems.add(where + ".kind: must be one of RETRIEVAL, FRESHNESS, ANSWER, UNANSWERABLE, TEMPORAL, was "
+                    + map.get("kind"));
         }
         String ticker = text(map.get("ticker"));
         if (ticker == null || !TICKER.matcher(ticker).matches()) {
@@ -187,6 +187,7 @@ public final class GoldenSetLoader {
                 facts = facts(map.get("requiredFacts"), where + ".requiredFacts", problems);
                 require(map, Set.of("sources", "requiredFacts"), where, problems);
             }
+            case TEMPORAL -> require(map, Set.of(), where, problems); // nothing to label: the check is on the answer
             case UNANSWERABLE -> {
                 if (reason == null || reason.isBlank()) {
                     problems.add(where + ".reason: must not be blank");

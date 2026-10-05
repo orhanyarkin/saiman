@@ -92,6 +92,12 @@ class GroundedGenerator {
     private static final DateTimeFormatter PUBLISHED =
             DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneId.of("Europe/Istanbul"));
 
+    /**
+     * Newest disclosure of the frozen KAP snapshot (ADR-0010; the ingest corpus watermark is 2023-12-29). The
+     * answer prompt states it so that the model cannot talk about "recent" events.
+     */
+    static final String CORPUS_SNAPSHOT_DATE = "2023-12-29";
+
     private static final String RULES = """
             You are a research assistant for public Turkish capital-markets (KAP) disclosures.
             The user message contains excerpts, each delimited by <<<EXCERPT id=...>>> and <<<END EXCERPT>>>,
@@ -103,8 +109,13 @@ class GroundedGenerator {
                in <<<EXCERPT id=...>>> headers.
             4. Write in Turkish unless the question is in another language.
             5. Keep the text under 1500 characters: summarise the most important points instead of listing everything.
-            6. Reply with one JSON object and nothing else, exactly of the form:
-            """;
+            6. The excerpts are a frozen snapshot of KAP disclosures up to %s. Never use relative time
+               expressions (today, yesterday, this week, last N days, recently, currently, bugün, dün, bu hafta,
+               geçen ay, son N günde, yakın zamanda, şu anda); always give absolute dates taken from the
+               excerpts' published: lines. Do not claim anything about events after %s or about the absence
+               of newer disclosures.
+            7. Reply with one JSON object and nothing else, exactly of the form:
+            """.formatted(CORPUS_SNAPSHOT_DATE, CORPUS_SNAPSHOT_DATE);
 
     private final ModelRouter router;
     private final JsonMapper jsonMapper;

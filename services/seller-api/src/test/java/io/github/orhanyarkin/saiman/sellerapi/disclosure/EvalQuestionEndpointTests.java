@@ -113,6 +113,22 @@ class EvalQuestionEndpointTests extends RagTestBase {
     }
 
     @Test
+    void theEvalPromptForbidsRelativeTimeAndStatesTheSnapshotDate() {
+        router.replyWith(CITING_BOTH);
+        post(BODY, TestTokens.SERVICE_EVALS, HOST, null);
+
+        String system = router.chatModel().lastPrompt().getInstructions().stream()
+                .filter(m -> m.getMessageType() == MessageType.SYSTEM)
+                .map(m -> m.getText())
+                .findFirst()
+                .orElseThrow();
+        system = system.replaceAll("\\s+", " ");
+        assertThat(system)
+                .contains("frozen snapshot of KAP disclosures up to 2023-12-29")
+                .contains("Never use relative time expressions");
+    }
+
+    @Test
     void thePaidEndpointGetsTheSameDatedPrompt() {
         router.replyWith(CITING_BOTH);
 
