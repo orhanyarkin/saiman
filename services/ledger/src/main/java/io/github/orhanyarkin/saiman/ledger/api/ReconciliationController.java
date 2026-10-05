@@ -13,7 +13,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,10 +34,12 @@ public class ReconciliationController {
 
     private final ReconciliationService service;
     private final ReconciliationReports reports;
+    private final BoundedReads reads;
 
-    public ReconciliationController(ReconciliationService service, ReconciliationReports reports) {
+    ReconciliationController(ReconciliationService service, ReconciliationReports reports, BoundedReads reads) {
         this.service = service;
         this.reports = reports;
+        this.reads = reads;
     }
 
     /**
@@ -65,9 +67,16 @@ public class ReconciliationController {
             description = "No Base Sepolia client is configured",
             content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     public ResponseEntity<ReconciliationStarted> start() {
-        UUID runId = service.start()
-                .orElseThrow(
-                        () -> ApiProblems.problem(HttpStatus.CONFLICT, "A reconciliation run is already in progress"));
+        UUID runId;
+        try {
+            runId = service.start()
+                    .orElseThrow(() ->
+                            ApiProblems.problem(HttpStatus.CONFLICT, "A reconciliation run is already in progress"));
+        } catch (ReconciliationService.TooSoonException e) {
+            throw tooSoon(e);
+        } catch (ReconciliationService.ChainNotConfiguredException e) {
+            throw ApiProblems.problem(HttpStatus.SERVICE_UNAVAILABLE, "No Base Sepolia client is configured");
+        }
         return ResponseEntity.accepted().body(new ReconciliationStarted(runId));
     }
 
@@ -78,19 +87,37 @@ public class ReconciliationController {
             responseCode = "400",
             description = "limit outside 1..100",
             content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
+    @ApiResponse(
+            responseCode = "503",
+            description = "The read timed out or too many reads are running; retry after Retry-After seconds",
+            headers =
+                    @Header(
+                            name = HttpHeaders.RETRY_AFTER,
+                            description = "Seconds to wait",
+                            schema = @Schema(type = "integer")),
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     public ReconciliationRunList runs(@RequestParam(defaultValue = "20") int limit) {
         if (limit < 1 || limit > MAX_LIMIT) {
             throw ApiProblems.badRequest("limit must be between 1 and " + MAX_LIMIT);
         }
-        return reports.history(limit);
+        return reads.read(() -> reports.history(limit));
     }
 
     /** The most recently started run's report (it may still be RUNNING). */
     @GetMapping("/latest")
     @ApiResponse(responseCode = "200", description = "The latest run's report", useReturnTypeSchema = true)
     @ApiResponse(responseCode = "404", description = "No run yet (empty body)", content = @Content)
+    @ApiResponse(
+            responseCode = "503",
+            description = "The read timed out or too many reads are running; retry after Retry-After seconds",
+            headers =
+                    @Header(
+                            name = HttpHeaders.RETRY_AFTER,
+                            description = "Seconds to wait",
+                            schema = @Schema(type = "integer")),
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     public ResponseEntity<ReconciliationReport> latest() {
-        return ResponseEntity.of(reports.latest());
+        return ResponseEntity.of(reads.read(reports::latest));
     }
 
     /** One run's report. */
@@ -101,23 +128,28 @@ public class ReconciliationController {
             description = "id is not a UUID",
             content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     @ApiResponse(responseCode = "404", description = "No such run (empty body)", content = @Content)
+    @ApiResponse(
+            responseCode = "503",
+            description = "The read timed out or too many reads are running; retry after Retry-After seconds",
+            headers =
+                    @Header(
+                            name = HttpHeaders.RETRY_AFTER,
+                            description = "Seconds to wait",
+                            schema = @Schema(type = "integer")),
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     public ResponseEntity<ReconciliationReport> report(@PathVariable UUID id) {
-        return ResponseEntity.of(reports.report(id));
+        return ResponseEntity.of(reads.read(() -> reports.report(id)));
     }
 
-    @ExceptionHandler(ReconciliationService.TooSoonException.class)
-    ResponseEntity<ProblemDetail> tooSoon(ReconciliationService.TooSoonException e) {
+    /**
+     * 429 with {@code Retry-After}, thrown (not returned) so {@link ApiExceptionHandler} renders it like every other
+     * problem: fixed detail, route-template {@code instance}.
+     */
+    private static ErrorResponseException tooSoon(ReconciliationService.TooSoonException e) {
         long seconds = Math.max(1, (e.retryAfter().toMillis() + 999) / 1000);
-        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                .header(HttpHeaders.RETRY_AFTER, Long.toString(seconds))
-                .body(ProblemDetail.forStatusAndDetail(
-                        HttpStatus.TOO_MANY_REQUESTS, "A reconciliation run was started recently; retry later"));
-    }
-
-    @ExceptionHandler(ReconciliationService.ChainNotConfiguredException.class)
-    ResponseEntity<ProblemDetail> chainNotConfigured(ReconciliationService.ChainNotConfiguredException e) {
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                .body(ProblemDetail.forStatusAndDetail(
-                        HttpStatus.SERVICE_UNAVAILABLE, "No Base Sepolia client is configured"));
+        ErrorResponseException problem = ApiProblems.problem(
+                HttpStatus.TOO_MANY_REQUESTS, "A reconciliation run was started recently; retry later");
+        problem.getHeaders().set(HttpHeaders.RETRY_AFTER, Long.toString(seconds));
+        return problem;
     }
 }

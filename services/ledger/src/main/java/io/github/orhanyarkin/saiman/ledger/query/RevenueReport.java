@@ -42,7 +42,8 @@ public record RevenueReport(List<Seller> items, boolean truncated) {
      * @param chainVerified the same figures from verified payments only
      * @param unverifiedGrossSales {@code grossSales - chainVerified.grossSales}, never negative: sales Base Sepolia has
      *     not confirmed (yet, or ever)
-     * @param openFindings number of this seller's payments with at least one reconciliation finding
+     * @param openFindings number of this seller's payments with at least one unresolved reconciliation finding (one
+     *     without an adjustment entry; a finding reconciliation already moved to suspense is not counted)
      * @param saturated true when any figure in this row was clamped
      */
     @Schema(
@@ -51,7 +52,8 @@ public record RevenueReport(List<Seller> items, boolean truncated) {
                     + " NOT CHAIN-VERIFIED: forged seller events (unauthenticated Kafka until M6) stay in them even"
                     + " after reconciliation flags them. chainVerified is the part Base Sepolia confirms;"
                     + " unverifiedGrossSales = grossSales - chainVerified.grossSales (never negative); openFindings"
-                    + " counts this seller's payments with a reconciliation finding. Amounts are clamped to"
+                    + " counts this seller's payments with an unresolved reconciliation finding (one reconciliation"
+                    + " did not adjust; adjusted findings are not counted). Amounts are clamped to"
                     + " [0, 2^53-1] (netRevenue: +-(2^53-1)) and saturated says a clamp happened.")
     public record Seller(
             String payTo,
@@ -67,8 +69,9 @@ public record RevenueReport(List<Seller> items, boolean truncated) {
             boolean saturated) {}
 
     /**
-     * Revenue Base Sepolia confirms. A sale counts when reconciliation saw its transfer on chain ({@code chainState}
-     * USED) and recorded no finding against the payment other than buyer-side or bookkeeping ones
+     * Revenue Base Sepolia confirms. A sale counts when reconciliation matched its canonical receipt on chain
+     * ({@code chainState} USED with a {@code chainTxHash}; a used authorization whose transaction was never found does
+     * not count) and recorded no finding against the payment other than buyer-side or bookkeeping ones
      * ({@code ENCUMBRANCE_NOT_CLEARED}, {@code BOOKS_OPEN}) or an uncorroborated credit note. A credit note counts
      * when its sale counts and seller-api corroborated it with the ledger's tx hash and amount (ADR-0021).
      *
@@ -78,7 +81,8 @@ public record RevenueReport(List<Seller> items, boolean truncated) {
      */
     @Schema(
             name = "ChainVerifiedRevenue",
-            description = "Revenue Base Sepolia confirms: sales seen on chain (chainState USED) without a chain"
-                    + " finding, and credit notes of those sales that seller-api corroborated.")
+            description = "Revenue Base Sepolia confirms: sales whose canonical on-chain receipt was matched"
+                    + " (chainState USED with a chainTxHash) without a chain finding, and credit notes of those sales"
+                    + " that seller-api corroborated with the same tx hash and amount.")
     public record Verified(Money grossSales, Money creditNotes, SignedAmount netRevenue) {}
 }

@@ -2,12 +2,14 @@ package io.github.orhanyarkin.saiman.ledger.api;
 
 import io.github.orhanyarkin.saiman.ledger.query.LedgerQueries;
 import io.github.orhanyarkin.saiman.ledger.query.RevenueReport;
+import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.util.Locale;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,9 +27,11 @@ public class RevenueController {
     private static final Pattern ADDRESS = Pattern.compile("0x[0-9a-fA-F]{40}");
 
     private final LedgerQueries queries;
+    private final BoundedReads reads;
 
-    public RevenueController(LedgerQueries queries) {
+    RevenueController(LedgerQueries queries, BoundedReads reads) {
         this.queries = queries;
+        this.reads = reads;
     }
 
     /**
@@ -42,10 +46,20 @@ public class RevenueController {
             responseCode = "400",
             description = "payTo is not an address",
             content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
+    @ApiResponse(
+            responseCode = "503",
+            description = "The read timed out or too many reads are running; retry after Retry-After seconds",
+            headers =
+                    @Header(
+                            name = HttpHeaders.RETRY_AFTER,
+                            description = "Seconds to wait",
+                            schema = @Schema(type = "integer")),
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     public RevenueReport revenue(@RequestParam(required = false) @Nullable String payTo) {
         if (payTo != null && !ADDRESS.matcher(payTo).matches()) {
             throw ApiProblems.badRequest("payTo is invalid");
         }
-        return queries.revenue(payTo == null ? null : payTo.toLowerCase(Locale.ROOT));
+        String seller = payTo == null ? null : payTo.toLowerCase(Locale.ROOT);
+        return reads.read(() -> queries.revenue(seller));
     }
 }

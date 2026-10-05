@@ -4,11 +4,13 @@ import io.github.orhanyarkin.saiman.ledger.query.BookFilter;
 import io.github.orhanyarkin.saiman.ledger.query.LedgerQueries;
 import io.github.orhanyarkin.saiman.ledger.query.PaymentDetail;
 import io.github.orhanyarkin.saiman.ledger.query.PaymentPage;
+import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,9 +29,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class LedgerPaymentsController {
 
     private final LedgerQueries queries;
+    private final BoundedReads reads;
 
-    public LedgerPaymentsController(LedgerQueries queries) {
+    LedgerPaymentsController(LedgerQueries queries, BoundedReads reads) {
         this.queries = queries;
+        this.reads = reads;
     }
 
     /**
@@ -46,6 +50,15 @@ public class LedgerPaymentsController {
             responseCode = "400",
             description = "Malformed runId, book, limit or before",
             content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
+    @ApiResponse(
+            responseCode = "503",
+            description = "The read timed out or too many reads are running; retry after Retry-After seconds",
+            headers =
+                    @Header(
+                            name = HttpHeaders.RETRY_AFTER,
+                            description = "Seconds to wait",
+                            schema = @Schema(type = "integer")),
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     public PaymentPage payments(
             @RequestParam(required = false) @Nullable UUID runId,
             @RequestParam(required = false) @Nullable BookFilter book,
@@ -55,7 +68,7 @@ public class LedgerPaymentsController {
             throw ApiProblems.badRequest("limit must be between 1 and " + LedgerQueries.MAX_LIMIT);
         }
         try {
-            return queries.payments(runId, book, limit, before);
+            return reads.read(() -> queries.payments(runId, book, limit, before));
         } catch (LedgerQueries.InvalidCursorException e) {
             throw ApiProblems.badRequest("before is invalid");
         }
@@ -72,7 +85,16 @@ public class LedgerPaymentsController {
             responseCode = "404",
             description = "No such payment",
             content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
+    @ApiResponse(
+            responseCode = "503",
+            description = "The read timed out or too many reads are running; retry after Retry-After seconds",
+            headers =
+                    @Header(
+                            name = HttpHeaders.RETRY_AFTER,
+                            description = "Seconds to wait",
+                            schema = @Schema(type = "integer")),
+            content = @Content(mediaType = ApiDocs.PROBLEM, schema = @Schema(implementation = ProblemDetail.class)))
     public PaymentDetail payment(@PathVariable UUID paymentId) {
-        return queries.payment(paymentId).orElseThrow(() -> ApiProblems.notFound("No such payment"));
+        return reads.read(() -> queries.payment(paymentId)).orElseThrow(() -> ApiProblems.notFound("No such payment"));
     }
 }

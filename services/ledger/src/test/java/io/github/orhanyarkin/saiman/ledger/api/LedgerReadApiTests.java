@@ -425,6 +425,50 @@ class LedgerReadApiTests {
     }
 
     /**
+     * M5 audit: chain USED alone is not verification. A used authorization whose transaction reconciliation never
+     * matched (TX_UNKNOWN: no {@code chain_tx_hash}, no finding) stays per books only.
+     */
+    @Test
+    void usedWithoutACanonicalReceiptIsNotVerified() {
+        String payTo = TestPayment.address(random);
+        TestPayment p = TestPayment.of(random, TestPayment.address(random), payTo, 17_000);
+        settle(p);
+        jdbc.sql("UPDATE payment SET chain_state = 'USED', chain_tx_hash = NULL WHERE payment_key = :key")
+                .param("key", p.key())
+                .update();
+
+        RevenueReport.Seller s = revenueOf(payTo);
+
+        assertThat(s.grossSales().atomicUnits()).isEqualTo(17_000);
+        assertThat(s.chainVerified().grossSales().atomicUnits()).isZero();
+        assertThat(s.chainVerified().netRevenue().atomicUnits()).isZero();
+        assertThat(s.unverifiedGrossSales().atomicUnits()).isEqualTo(17_000);
+        assertThat(s.openFindings()).isZero();
+    }
+
+    /**
+     * openFindings counts unresolved findings only: one reconciliation already moved to suspense (it has an
+     * adjustment entry) is not open, though the sale stays unverified.
+     */
+    @Test
+    void adjustedFindingIsNotOpenButStillBlocksVerification() {
+        String payTo = TestPayment.address(random);
+        TestPayment p = TestPayment.of(random, TestPayment.address(random), payTo, 11_000);
+        settle(p);
+        chainUsed(p);
+        adjustedFinding(p, "AMOUNT_MISMATCH");
+
+        RevenueReport.Seller s = revenueOf(payTo);
+
+        assertThat(s.openFindings()).isZero();
+        assertThat(s.chainVerified().grossSales().atomicUnits()).isZero();
+        assertThat(s.unverifiedGrossSales().atomicUnits()).isEqualTo(11_000);
+
+        finding(p, "TX_NOT_FOUND");
+        assertThat(revenueOf(payTo).openFindings()).isEqualTo(1);
+    }
+
+    /**
      * A credit note seller-api never confirmed (CREDIT_NOTE_UNCORROBORATED) lowers the per-books net but not the
      * chain-verified one; a corroborated credit note lowers both.
      */
@@ -826,9 +870,12 @@ class LedgerReadApiTests {
                 .single();
     }
 
-    /** What a reconciliation run leaves behind for a payment it saw on chain (state only; no findings). */
+    /**
+     * What a reconciliation run leaves behind for a payment whose canonical receipt it matched: chain USED and the
+     * receipt's hash (here the reported one), no findings.
+     */
     private void chainUsed(TestPayment p) {
-        jdbc.sql("UPDATE payment SET chain_state = 'USED' WHERE payment_key = :key")
+        jdbc.sql("UPDATE payment SET chain_state = 'USED', chain_tx_hash = seller_tx_hash WHERE payment_key = :key")
                 .param("key", p.key())
                 .update();
     }
@@ -845,6 +892,19 @@ class LedgerReadApiTests {
         jdbc.sql("""
                         INSERT INTO reconciliation_mismatch (id, payment_id, kind)
                         SELECT :id, id, :kind FROM payment WHERE payment_key = :key
+                        """)
+                .param("id", UUID.randomUUID())
+                .param("kind", kind)
+                .param("key", p.key())
+                .update();
+    }
+
+    /** A finding reconciliation resolved with an adjustment entry (here any entry of the payment, for the FK). */
+    private void adjustedFinding(TestPayment p, String kind) {
+        jdbc.sql("""
+                        INSERT INTO reconciliation_mismatch (id, payment_id, kind, adjustment_entry_id)
+                        SELECT :id, p.id, :kind, (SELECT e.id FROM journal_entry e WHERE e.payment_id = p.id LIMIT 1)
+                          FROM payment p WHERE p.payment_key = :key
                         """)
                 .param("id", UUID.randomUUID())
                 .param("kind", kind)

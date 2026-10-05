@@ -94,6 +94,14 @@ public class FakeChain implements BaseSepoliaUsdc {
         }
     }
 
+    /**
+     * Marks an authorization used without any receipt or log the search can find: what a used authorization looks
+     * like when its transaction lies outside the searched block window (TX_UNKNOWN).
+     */
+    public void markUsedWithoutLog(String authorizer, String nonce) {
+        used.add(key(authorizer, nonce));
+    }
+
     /** The RPC fails for this tx hash only. */
     public void failReceipt(String txHash) {
         unavailableTx.add(txHash.toLowerCase(Locale.ROOT));
