@@ -67,9 +67,14 @@ final class FacilitatorTelemetry {
 
     /** Starts {@code name} as a child of {@code parent}, so the span nests under the payment span. */
     Observation start(String name, @Nullable Observation parent) {
-        return Observation.createNotStarted(name, registry)
-                .parentObservation(parent)
-                .start();
+        try {
+            return Observation.createNotStarted(name, registry)
+                    .parentObservation(parent)
+                    .start();
+        } catch (RuntimeException brokenHandler) {
+            // A throwing ObservationHandler.onStart must never change a payment outcome.
+            return Observation.NOOP;
+        }
     }
 
     /** Tags and stops {@code observation}. Never throws into the payment path. */

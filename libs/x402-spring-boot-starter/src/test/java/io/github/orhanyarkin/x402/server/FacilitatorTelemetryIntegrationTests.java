@@ -6,6 +6,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.sun.net.httpserver.HttpServer;
 import io.github.orhanyarkin.x402.core.Eip3009Authorization;
 import io.github.orhanyarkin.x402.core.PaymentFlow;
 import io.github.orhanyarkin.x402.core.PaymentPayload;
@@ -25,11 +26,16 @@ import io.github.orhanyarkin.x402.testing.TestWallets;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationHandler;
 import io.micrometer.observation.tck.TestObservationRegistry;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -42,6 +48,7 @@ import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTe
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.event.EventListener;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.client.RestTestClient;
@@ -67,6 +74,34 @@ class FacilitatorTelemetryIntegrationTests {
     private static final AtomicReference<RuntimeException> SETTLE_THROWS = new AtomicReference<>();
     private static final AtomicReference<RuntimeException> VERIFY_THROWS = new AtomicReference<>();
 
+    /** When non-null, verify and settle are answered by a raw server with this 200 body. */
+    private static final AtomicReference<String> GARBAGE_BODY = new AtomicReference<>();
+
+    private static final AtomicReference<String> SETTLE_GARBAGE = new AtomicReference<>();
+    private static final AtomicInteger GARBAGE_HITS = new AtomicInteger();
+    private static final AtomicBoolean THROW_ON_START = new AtomicBoolean();
+    private static final List<X402PaymentFailedEvent> FAILED_EVENTS = new CopyOnWriteArrayList<>();
+    private static final HttpServer GARBAGE_SERVER = startGarbageServer();
+
+    private static HttpServer startGarbageServer() {
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+            server.createContext("/", exchange -> {
+                GARBAGE_HITS.incrementAndGet();
+                byte[] body = String.valueOf(GARBAGE_BODY.get()).getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                try (var out = exchange.getResponseBody()) {
+                    out.write(body);
+                }
+            });
+            server.start();
+            return server;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     @DynamicPropertySource
     static void x402Properties(DynamicPropertyRegistry registry) {
         registry.add("x402.server.pay-to", () -> PAY_TO);
@@ -75,6 +110,7 @@ class FacilitatorTelemetryIntegrationTests {
 
     @AfterAll
     static void stopFacilitator() {
+        GARBAGE_SERVER.stop(0);
         FACILITATOR.close();
     }
 
@@ -101,9 +137,26 @@ class FacilitatorTelemetryIntegrationTests {
         FACILITATOR.resetCallCounts();
         SETTLE_THROWS.set(null);
         VERIFY_THROWS.set(null);
+        GARBAGE_BODY.set(null);
+        SETTLE_GARBAGE.set(null);
+        GARBAGE_HITS.set(0);
+        THROW_ON_START.set(false);
+        FAILED_EVENTS.clear();
         observations.clear();
         STOPPED_CONTEXTS.clear();
         if (HANDLER_REGISTERED.compareAndSet(false, true)) {
+            observations.observationConfig().observationHandler(new ObservationHandler<Observation.Context>() {
+                @Override
+                public boolean supportsContext(Observation.Context context) {
+                    String name = context.getName();
+                    return THROW_ON_START.get() && name != null && name.startsWith("x402.facilitator.");
+                }
+
+                @Override
+                public void onStart(Observation.Context context) {
+                    throw new IllegalStateException("handler onStart blew up");
+                }
+            });
             observations.observationConfig().observationHandler(new ObservationHandler<Observation.Context>() {
                 @Override
                 public boolean supportsContext(Observation.Context context) {
@@ -327,6 +380,81 @@ class FacilitatorTelemetryIntegrationTests {
         assertObservation("x402.facilitator.verify", "rejected", "none");
     }
 
+    private long stoppedCount(String name) {
+        return STOPPED_CONTEXTS.stream().filter(c -> c.startsWith(name + " ")).count();
+    }
+
+    @Test
+    void nullSettleBodyIsMalformedAndFailsSafeInBothFlows() {
+        for (String[] flow : new String[][] {{"/upfront/ok", "upfront"}, {"/default/ok", "authorization"}}) {
+            observations.clear();
+            STOPPED_CONTEXTS.clear();
+            logs.list.clear();
+            FAILED_EVENTS.clear();
+            GARBAGE_HITS.set(0);
+            PaymentFlow paymentFlow = flow[1].equals("upfront") ? PaymentFlow.UPFRONT : PaymentFlow.AUTHORIZATION;
+            PaymentPayload payload = newPayload(paymentFlow);
+            // verify must pass for real; only settle gets the garbage answer
+            GARBAGE_BODY.set(null);
+            SETTLE_GARBAGE.set("null");
+
+            assertThat(pay(flow[0], payload)).isEqualTo(402);
+
+            assertObservation("x402.facilitator.settle", "malformed", "none");
+            assertThat(stoppedCount("x402.facilitator.settle")).isEqualTo(1);
+            assertThat(settleFailureWarnLines()).hasSize(1);
+            assertThat(settleFailureWarnLines().getFirst()).contains("facilitatorStatus=200");
+            assertThat(FAILED_EVENTS).hasSize(1);
+            int hits = GARBAGE_HITS.get();
+            // claim held: the same payload is a replay and never reaches the facilitator again
+            assertThat(pay(flow[0], payload)).isEqualTo(402);
+            assertThat(GARBAGE_HITS.get()).isEqualTo(hits);
+            SETTLE_GARBAGE.set(null);
+        }
+    }
+
+    @Test
+    void oversizedSettleBodyIsMalformedWithRealStatus() {
+        SETTLE_GARBAGE.set("x".repeat(HttpFacilitatorClient.MAX_RESPONSE_BYTES + 10));
+
+        assertThat(pay("/upfront/ok", newPayload(PaymentFlow.UPFRONT))).isEqualTo(402);
+
+        assertObservation("x402.facilitator.settle", "malformed", "none");
+        assertThat(settleFailureWarnLines()).hasSize(1);
+        assertThat(settleFailureWarnLines().getFirst()).contains("facilitatorStatus=200");
+        assertThat(FAILED_EVENTS).hasSize(1);
+    }
+
+    @Test
+    void nullVerifyBodyIsMalformedAndReleasesTheClaim() {
+        PaymentPayload payload = newPayload(PaymentFlow.UPFRONT);
+        GARBAGE_BODY.set("null");
+
+        assertThat(pay("/upfront/ok", payload)).isEqualTo(402);
+
+        assertObservation("x402.facilitator.verify", "malformed", "none");
+        assertThat(FACILITATOR.settleCallCount()).isZero();
+        // Documented rule: a verify that never produced an answer released the claim (nothing was
+        // or will be settled under it), so the same authorization can be retried.
+        GARBAGE_BODY.set(null);
+        assertThat(pay("/upfront/ok", payload)).isEqualTo(200);
+    }
+
+    @Test
+    void throwingObservationStartNeverChangesAnOutcome() {
+        THROW_ON_START.set(true);
+
+        assertThat(pay("/upfront/ok", newPayload(PaymentFlow.UPFRONT))).isEqualTo(200);
+        assertThat(pay("/default/ok", newPayload(PaymentFlow.AUTHORIZATION))).isEqualTo(200);
+
+        FACILITATOR.injectSettleFailure("invalid_exact_evm_transaction_failed");
+        assertThat(pay("/upfront/ok", newPayload(PaymentFlow.UPFRONT))).isEqualTo(402);
+        assertThat(settleFailureWarnLines()).hasSize(1);
+        FACILITATOR.resetInjectedFailures();
+        FACILITATOR.injectVerifyInvalid("insufficient_funds");
+        assertThat(pay("/upfront/ok", newPayload(PaymentFlow.UPFRONT))).isEqualTo(402);
+    }
+
     @Test
     void signatureNonceAndFacilitatorMessageNeverReachLogsOrObservations() {
         FACILITATOR.injectSettleFailure("invalid_exact_evm_transaction_failed");
@@ -367,6 +495,17 @@ class FacilitatorTelemetryIntegrationTests {
         }
 
         @Bean
+        Object failedEventRecorder() {
+            return new Object() {
+                @EventListener
+                @SuppressWarnings("unused")
+                void on(X402PaymentFailedEvent event) {
+                    FAILED_EVENTS.add(event);
+                }
+            };
+        }
+
+        @Bean
         TestObservationRegistry testObservationRegistry() {
             return TestObservationRegistry.create();
         }
@@ -381,6 +520,12 @@ class FacilitatorTelemetryIntegrationTests {
         FacilitatorClient facilitatorClient(X402Codec codec) {
             HttpFacilitatorClient delegate = new HttpFacilitatorClient(
                     RestClient.builder(), FACILITATOR.url(), Duration.ofSeconds(3), Duration.ofSeconds(5), codec);
+            HttpFacilitatorClient garbage = new HttpFacilitatorClient(
+                    RestClient.builder(),
+                    "http://127.0.0.1:" + GARBAGE_SERVER.getAddress().getPort(),
+                    Duration.ofSeconds(3),
+                    Duration.ofSeconds(5),
+                    codec);
             return new FacilitatorClient() {
                 @Override
                 public VerifyResponse verify(PaymentPayload payload, PaymentRequirements requirements) {
@@ -388,7 +533,8 @@ class FacilitatorTelemetryIntegrationTests {
                     if (failure != null) {
                         throw failure;
                     }
-                    VerifyResponse real = delegate.verify(payload, requirements);
+                    VerifyResponse real =
+                            (GARBAGE_BODY.get() != null ? garbage : delegate).verify(payload, requirements);
                     return new VerifyResponse(
                             real.isValid(), real.invalidReason(), HOSTILE_TEXT, real.payer(), null, null, null);
                 }
@@ -399,7 +545,11 @@ class FacilitatorTelemetryIntegrationTests {
                     if (failure != null) {
                         throw failure;
                     }
-                    SettlementResponse real = delegate.settle(payload, requirements);
+                    if (SETTLE_GARBAGE.get() != null) {
+                        GARBAGE_BODY.set(SETTLE_GARBAGE.get());
+                    }
+                    SettlementResponse real =
+                            (SETTLE_GARBAGE.get() != null ? garbage : delegate).settle(payload, requirements);
                     return new SettlementResponse(
                             real.success(),
                             real.errorReason(),
