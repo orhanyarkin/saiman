@@ -133,7 +133,8 @@ public final class X402SettlementFilter extends OncePerRequestFilter {
         this.codec = codec;
         this.observationRegistry = observationRegistry;
         this.clock = clock;
-        this.settler = new PaymentSettler(facilitatorClient, codec, properties, eventPublisher, clock);
+        this.settler =
+                new PaymentSettler(facilitatorClient, codec, properties, eventPublisher, clock, observationRegistry);
     }
 
     @Override

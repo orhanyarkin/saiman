@@ -96,9 +96,10 @@ public class X402ServerAutoConfiguration {
             PaymentNonceStore nonceStore,
             X402ServerProperties properties,
             ApplicationEventPublisher eventPublisher,
-            Clock clock) {
+            Clock clock,
+            ObservationRegistry observationRegistry) {
         return new RequiresPaymentInterceptor(
-                registry, codec, facilitatorClient, nonceStore, properties, eventPublisher, clock);
+                registry, codec, facilitatorClient, nonceStore, properties, eventPublisher, clock, observationRegistry);
     }
 
     /**

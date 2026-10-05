@@ -135,7 +135,8 @@ public final class HttpFacilitatorClient implements FacilitatorClient {
         try {
             return call.get();
         } catch (CallNotPermittedException circuitOpen) {
-            throw new FacilitatorException("the x402 facilitator circuit breaker is open");
+            throw new FacilitatorException(
+                    "the x402 facilitator circuit breaker is open", FacilitatorException.Failure.CIRCUIT_OPEN, 0);
         } catch (FacilitatorException alreadyTranslated) {
             throw alreadyTranslated;
         } catch (RuntimeException other) {
@@ -162,15 +163,23 @@ public final class HttpFacilitatorClient implements FacilitatorClient {
             throws IOException {
         byte[] bytes = readBounded(response.getBody(), MAX_RESPONSE_BYTES);
         if (response.getStatusCode().is4xxClientError()) {
-            throw new FacilitatorClientErrorException("the x402 facilitator rejected the request");
+            throw new FacilitatorClientErrorException(
+                    "the x402 facilitator rejected the request",
+                    response.getStatusCode().value());
         }
         if (!response.getStatusCode().is2xxSuccessful()) {
-            throw new FacilitatorException("the x402 facilitator responded with an error status");
+            throw new FacilitatorException(
+                    "the x402 facilitator responded with an error status",
+                    FacilitatorException.Failure.TRANSPORT,
+                    response.getStatusCode().value());
         }
         try {
             return codec.readJson(new String(bytes, StandardCharsets.UTF_8), responseType);
         } catch (X402CodecException undecodable) {
-            throw new FacilitatorException("the x402 facilitator response could not be decoded");
+            throw new FacilitatorException(
+                    "the x402 facilitator response could not be decoded",
+                    FacilitatorException.Failure.MALFORMED,
+                    response.getStatusCode().value());
         }
     }
 
