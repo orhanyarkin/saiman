@@ -9,6 +9,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.net.URI;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
@@ -35,6 +38,7 @@ class RunController {
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 100;
     private static final URI RUNS_ROUTE = URI.create("/api/v1/runs");
+    private static final URI DAILY_CAP_TYPE = URI.create("urn:saiman:problem:llm-daily-cap");
 
     private final RunService runs;
 
@@ -68,7 +72,8 @@ class RunController {
                             schema = @Schema(implementation = ProblemDetailSchema.class)))
     @ApiResponse(
             responseCode = "503",
-            description = "The service is not ready; Retry-After says when to try again",
+            description = "The service is not ready, or the daily model budget is used up (code"
+                    + " LLM_DAILY_CAP_REACHED, replayAvailable true); Retry-After says when to try again",
             content =
                     @Content(
                             mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
@@ -147,8 +152,11 @@ class RunController {
         HttpStatus status = switch (e.reason()) {
             case INVALID_QUESTION, INVALID_BUDGET -> HttpStatus.BAD_REQUEST;
             case TOO_MANY_RUNS -> HttpStatus.TOO_MANY_REQUESTS;
-            case NOT_READY -> HttpStatus.SERVICE_UNAVAILABLE;
+            case NOT_READY, LLM_DAILY_CAP -> HttpStatus.SERVICE_UNAVAILABLE;
         };
+        if (e.reason() == RunAdmissionException.Reason.LLM_DAILY_CAP) {
+            return dailyCapReached(e);
+        }
         ResponseEntity.BodyBuilder response =
                 ResponseEntity.status(status).contentType(MediaType.APPLICATION_PROBLEM_JSON);
         if (status == HttpStatus.TOO_MANY_REQUESTS || status == HttpStatus.SERVICE_UNAVAILABLE) {
@@ -158,6 +166,35 @@ class RunController {
                 ProblemDetail.forStatusAndDetail(status, e.reason().detail());
         problem.setInstance(RUNS_ROUTE); // a local handler bypasses the advice, which would set the template
         return response.body(problem);
+    }
+
+    /**
+     * ADR-0026: 503 {@code urn:saiman:problem:llm-daily-cap} with {@code code LLM_DAILY_CAP_REACHED} and {@code
+     * replayAvailable: true}; {@code Retry-After} is the number of seconds until 00:00 UTC, when the cap rolls over.
+     */
+    private ResponseEntity<ProblemDetail> dailyCapReached(RunAdmissionException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, e.reason().detail());
+        problem.setType(DAILY_CAP_TYPE);
+        problem.setTitle("Daily model budget reached");
+        problem.setInstance(RUNS_ROUTE);
+        problem.setProperty("code", "LLM_DAILY_CAP_REACHED");
+        problem.setProperty("replayAvailable", true);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .header("Retry-After", Long.toString(secondsUntilMidnightUtc()))
+                .body(problem);
+    }
+
+    /** Seconds until the next 00:00 UTC (at least 1). */
+    long secondsUntilMidnightUtc() {
+        Instant now = clock.instant();
+        Instant midnight = now.atZone(ZoneOffset.UTC)
+                .toLocalDate()
+                .plusDays(1)
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant();
+        return Math.max(1, Duration.between(now, midnight).toSeconds());
     }
 
     private static ErrorResponseException problem(HttpStatus status, String detail) {

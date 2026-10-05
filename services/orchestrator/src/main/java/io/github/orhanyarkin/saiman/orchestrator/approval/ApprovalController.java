@@ -13,6 +13,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,7 +24,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * {@code POST /api/v1/runs/{runId}/approvals/{approvalId}}: a human approves or rejects one payment
- * above the approval threshold. {@link ApiRequestGuardFilter} requires {@code application/json},
+ * above the approval threshold. The caller needs the OPERATOR role; the authenticated principal name is recorded as
+ * {@code decided_by}. {@link ApiRequestGuardFilter} requires {@code application/json},
  * the {@code X-Saiman-Csrf} header and an allowed {@code Host} first.
  *
  * <p>There is deliberately no endpoint that changes a budget: an approval opens the threshold gate
@@ -73,12 +75,16 @@ class ApprovalController {
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     ApprovalResponse decide(
-            @PathVariable UUID runId, @PathVariable UUID approvalId, @RequestBody DecisionRequest request) {
+            @PathVariable UUID runId,
+            @PathVariable UUID approvalId,
+            @RequestBody DecisionRequest request,
+            Authentication authentication) {
         ApprovalDecision decision = request.decision();
         if (decision == null) {
             throw problem(HttpStatus.BAD_REQUEST, "decision must be APPROVE or REJECT");
         }
-        ApprovalService.DecisionOutcome outcome = approvals.decide(runId, approvalId, decision);
+        ApprovalService.DecisionOutcome outcome =
+                approvals.decide(runId, approvalId, decision, authentication.getName());
         if (!outcome.applied()) {
             throw problem(
                     HttpStatus.CONFLICT,

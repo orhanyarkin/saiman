@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.orchestrator.run;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import io.github.orhanyarkin.saiman.apisecurity.testfixtures.TestTokens;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.DashboardSeed;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.RunTestSupport;
 import java.io.IOException;
@@ -84,9 +85,10 @@ class DashboardReadsSafetyTests extends RunTestSupport {
     @Test
     void theOpenApiDocumentIsNotReachableWhenSpringdocIsDisabled() {
         // the default configuration (springdoc.api-docs.enabled=false): nothing serves the contract
-        http.get().uri("/v3/api-docs").exchange().expectStatus().isNotFound();
-        http.get().uri("/v3/api-docs.yaml").exchange().expectStatus().isNotFound();
-        http.get().uri("/swagger-ui/index.html").exchange().expectStatus().isNotFound();
+        // and the security chain denies the paths anyway (403 for an authenticated caller)
+        http.get().uri("/v3/api-docs").exchange().expectStatus().isForbidden();
+        http.get().uri("/v3/api-docs.yaml").exchange().expectStatus().isForbidden();
+        http.get().uri("/swagger-ui/index.html").exchange().expectStatus().isForbidden();
     }
 
     @Test
@@ -112,7 +114,8 @@ class DashboardReadsSafetyTests extends RunTestSupport {
         try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(10_000);
             socket.getOutputStream()
-                    .write(("GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n")
+                    .write(("GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nAuthorization: "
+                                    + TestTokens.bearer(TestTokens.OPERATOR) + "\r\nConnection: close\r\n\r\n")
                             .getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
             String statusLine = new String(socket.getInputStream().readNBytes(32), StandardCharsets.US_ASCII);

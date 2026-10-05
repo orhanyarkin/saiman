@@ -1,5 +1,7 @@
 package io.github.orhanyarkin.saiman.orchestrator.budget;
 
+import io.github.orhanyarkin.saiman.modelrouter.DailyCapStatus;
+import io.github.orhanyarkin.saiman.modelrouter.ModelRouter;
 import io.github.orhanyarkin.saiman.orchestrator.dashboard.BoundedReads;
 import io.github.orhanyarkin.saiman.orchestrator.openapi.ProblemDetailSchema;
 import io.github.orhanyarkin.saiman.shared.money.Money;
@@ -41,9 +43,12 @@ class SpendController {
     private final SpendProperties spend;
     private final @Nullable Long perRequestMax;
     private final BoundedReads reads;
+    private final ModelRouter router;
     private final Clock clock;
 
-    SpendController(JdbcClient jdbc, SpendProperties spend, SpendLimitsView limits, BoundedReads reads) {
+    SpendController(
+            JdbcClient jdbc, SpendProperties spend, SpendLimitsView limits, BoundedReads reads, ModelRouter router) {
+        this.router = router;
         this.jdbc = jdbc;
         this.spend = spend;
         this.perRequestMax = limits.perRequestMaxAtomic();
@@ -104,7 +109,15 @@ class SpendController {
                         Money.usdc(spend.maxRunBudgetAtomic()),
                         Money.usdc(spend.approvalThresholdAtomic()),
                         perRequestMax == null ? null : Money.usdc(perRequestMax)),
-                byTool);
+                byTool,
+                llmDay());
+    }
+
+    /** Fails closed like {@link ModelRouter#dailyCap()}: an unreadable counter shows as fully spent. */
+    private SpendOverview.LlmDay llmDay() {
+        DailyCapStatus status = router.dailyCap();
+        return new SpendOverview.LlmDay(
+                status.spent().atomicUnits(), status.cap().atomicUnits());
     }
 
     private LocalDate parse(@Nullable String day) {

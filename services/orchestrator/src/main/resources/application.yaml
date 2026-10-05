@@ -20,12 +20,19 @@ spring:
     schemas: orchestrator
     default-schema: orchestrator
     create-schemas: true
+    # V10 grants DML to this role (ADR-0024). Flyway runs as orchestrator_owner and the pool as orchestrator_app
+    # (spring.flyway.user / spring.datasource.username, set by the compose environment from per-service secrets).
+    placeholders:
+      app_role: orchestrator_app
   # Transactional outbox (ADR-0016). libs/eventing sets the registry defaults (only @ApplicationModuleListener
   # publications are persisted, republish on restart, completed rows deleted); V6 owns the table.
   modulith:
     events:
       jdbc:
         schema: orchestrator
+        # V6 owns event_publication; the runtime role (ADR-0024) cannot CREATE SCHEMA/TABLE, so Modulith must not try.
+        schema-initialization:
+          enabled: false
       kafka:
         # OutboxConfiguration's StringJacksonJsonMessageConverter writes the documented JSON as a String value
         # with no __TypeId__ header (as in the ledger); Modulith's byte-array converter is off.

@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.orchestrator.run;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.orhanyarkin.saiman.apisecurity.testfixtures.TestTokens;
 import io.github.orhanyarkin.saiman.orchestrator.approval.ApiRequestGuardFilter;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.RunTestSupport;
 import io.github.orhanyarkin.x402.client.X402ClientProperties;
@@ -228,7 +229,8 @@ class DashboardInputHardeningTests extends RunTestSupport {
         try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(10_000);
             socket.getOutputStream()
-                    .write((method + " " + path + " HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n")
+                    .write((method + " " + path + " HTTP/1.1\r\nHost: " + host + "\r\nAuthorization: "
+                                    + TestTokens.bearer(TestTokens.OPERATOR) + "\r\nConnection: close\r\n\r\n")
                             .getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
             String statusLine = new String(socket.getInputStream().readNBytes(32), StandardCharsets.US_ASCII);
