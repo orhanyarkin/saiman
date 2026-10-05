@@ -4,8 +4,29 @@
 GRANT USAGE ON SCHEMA ${flyway:defaultSchema} TO ${app_role};
 
 -- settlement: the seller's book of reported settlements. Inserted, and upgraded in place from SETTLE_FAILED to
--- SETTLED (SettlementRecorder's ON CONFLICT DO UPDATE); never deleted by the service.
-GRANT SELECT, INSERT, UPDATE ON ${flyway:defaultSchema}.settlement TO ${app_role};
+-- SETTLED (SettlementRecorder's ON CONFLICT DO UPDATE sets exactly these three columns); never deleted by the service.
+-- UPDATE is granted per column, so the amount, payer, payee, key and timestamp can not be rewritten.
+GRANT SELECT, INSERT ON ${flyway:defaultSchema}.settlement TO ${app_role};
+REVOKE UPDATE ON ${flyway:defaultSchema}.settlement FROM ${app_role};
+GRANT UPDATE (tx_hash, outcome, reason_code) ON ${flyway:defaultSchema}.settlement TO ${app_role};
+
+-- And the only update the book knows is the upgrade SETTLE_FAILED -> SETTLED (owner-owned trigger; only a superuser
+-- can switch it off).
+CREATE FUNCTION ${flyway:defaultSchema}.settlement_upgrade_only() RETURNS trigger
+    LANGUAGE plpgsql AS
+$$
+BEGIN
+    IF OLD.outcome = 'SETTLE_FAILED' AND NEW.outcome = 'SETTLED' THEN
+        RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'settlement rows only change from SETTLE_FAILED to SETTLED' USING ERRCODE = '42501';
+END;
+$$;
+
+CREATE TRIGGER settlement_upgrade_only
+    BEFORE UPDATE ON ${flyway:defaultSchema}.settlement
+    FOR EACH ROW
+EXECUTE FUNCTION ${flyway:defaultSchema}.settlement_upgrade_only();
 
 -- credit_note: what the seller owes buyers (ADR-0021), the evidence the ledger corroborates credit notes against.
 -- Append-only for the service (ON CONFLICT DO NOTHING needs INSERT only): no UPDATE, no DELETE.

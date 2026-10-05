@@ -91,7 +91,8 @@ class DisclosureAnswerService {
     }
 
     private <T> T withCallerSlot(Supplier<T> work) {
-        guard.tryStartCaller(EVAL_CALLER, evalLimits.maxInFlight(), evalLimits.maxRunsPerHour());
+        guard.tryStartCaller(
+                EVAL_CALLER, evalLimits.maxInFlight(), evalLimits.maxRunsPerHour(), evalLimits.maxRunsPerDay());
         try {
             return work.get();
         } finally {

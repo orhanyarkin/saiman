@@ -48,33 +48,56 @@ class CallerRunGuardTests {
 
     @Test
     void oneInFlightThenFreedByFinish() {
-        guard.tryStartCaller("evals", 1, 60);
-        assertThatThrownBy(() -> guard.tryStartCaller("evals", 1, 60)).isInstanceOf(RunLimitExceededException.class);
+        guard.tryStartCaller("evals", 1, 60, 100);
+        assertThatThrownBy(() -> guard.tryStartCaller("evals", 1, 60, 100))
+                .isInstanceOf(RunLimitExceededException.class);
         guard.finishCaller("evals");
-        guard.tryStartCaller("evals", 1, 60);
+        guard.tryStartCaller("evals", 1, 60, 100);
     }
 
     @Test
     void theHourlyLimitHolds() {
         for (int i = 0; i < 3; i++) {
-            guard.tryStartCaller("evals", 1, 3);
+            guard.tryStartCaller("evals", 1, 3, 100);
             guard.finishCaller("evals");
         }
-        assertThatThrownBy(() -> guard.tryStartCaller("evals", 1, 3)).isInstanceOf(RunLimitExceededException.class);
+        assertThatThrownBy(() -> guard.tryStartCaller("evals", 1, 3, 100))
+                .isInstanceOf(RunLimitExceededException.class);
     }
 
     @Test
     void callerRunsUseTheirOwnKeysAndNeverTheDayBudget() {
-        guard.tryStartCaller("evals", 1, 60);
+        guard.tryStartCaller("evals", 1, 60, 100);
 
         assertThat(redis.keys("seller:runs:*"))
-                .containsExactlyInAnyOrder("seller:runs:caller:inflight:evals", "seller:runs:caller:hourly:evals");
+                .containsExactlyInAnyOrder(
+                        "seller:runs:caller:inflight:evals",
+                        "seller:runs:caller:hourly:evals",
+                        "seller:runs:caller:day:evals:" + java.time.LocalDate.now(java.time.ZoneOffset.UTC));
+    }
+
+    @Test
+    void theDayLimitHoldsAndLeavesThePayersBudgetAlone() {
+        for (int i = 0; i < 3; i++) {
+            guard.tryStartCaller("evals", 1, 60, 3);
+            guard.finishCaller("evals");
+        }
+        assertThatThrownBy(() -> guard.tryStartCaller("evals", 1, 60, 3)).isInstanceOf(RunLimitExceededException.class);
+        assertThat(redis.opsForValue()
+                        .get("seller:runs:caller:day:evals:" + java.time.LocalDate.now(java.time.ZoneOffset.UTC)))
+                .isEqualTo("3");
+
+        // A payer's settled run is unaffected and nothing of the payers' unsettled day budget was used.
+        String payer = "0xabcdef0000000000000000000000000000000001";
+        guard.tryStart(payer, true);
+        guard.finish(payer);
+        assertThat(redis.keys("seller:runs:unsettled:*")).isEmpty();
     }
 
     @Test
     void malformedCallersAreRejected() {
         for (String caller : new String[] {"Evals", "0xabc", "evals:x", "", "a".repeat(33)}) {
-            assertThatThrownBy(() -> guard.tryStartCaller(caller, 1, 60))
+            assertThatThrownBy(() -> guard.tryStartCaller(caller, 1, 60, 100))
                     .as(caller)
                     .isInstanceOf(IllegalArgumentException.class);
         }
@@ -87,7 +110,7 @@ class CallerRunGuardTests {
         StringRedisTemplate template = new StringRedisTemplate(dead);
         template.afterPropertiesSet();
         try {
-            assertThatThrownBy(() -> guardOn(template).tryStartCaller("evals", 1, 60))
+            assertThatThrownBy(() -> guardOn(template).tryStartCaller("evals", 1, 60, 100))
                     .isInstanceOf(RunGuardUnavailableException.class);
         } finally {
             dead.destroy();

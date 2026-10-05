@@ -14,7 +14,9 @@ import io.github.orhanyarkin.saiman.sellerapi.llm.UnsettledRunGuard;
 import io.github.orhanyarkin.saiman.shared.retrieval.RetrievedChunk;
 import io.github.orhanyarkin.x402.server.X402PaymentContext;
 import jakarta.servlet.http.HttpServletRequest;
+import java.time.DateTimeException;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -372,7 +374,23 @@ class GroundedGenerator {
                 .filter(chunk -> CHUNK_ID.matcher(chunk.chunkId()).matches())
                 .filter(chunk -> KAP_URL.matcher(chunk.sourceUrl()).matches())
                 .filter(chunk -> ticker.equals(chunk.ticker()))
+                .filter(chunk -> datable(chunk.publishedAt()))
                 .toList();
+    }
+
+    /**
+     * A publication time the prompt can show: present and within the formatter's range. A chunk without one is
+     * unusable (never a 500 later while building the prompt or the citation).
+     */
+    static boolean datable(@Nullable Instant publishedAt) {
+        if (publishedAt == null) {
+            return false;
+        }
+        try {
+            return !PUBLISHED.format(publishedAt).isEmpty();
+        } catch (DateTimeException e) {
+            return false;
+        }
     }
 
     /** Top stack frames without the message, so provider text never reaches the log. */

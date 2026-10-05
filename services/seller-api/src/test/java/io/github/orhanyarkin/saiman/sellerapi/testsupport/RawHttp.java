@@ -33,6 +33,42 @@ public final class RawHttp {
         }
     }
 
+    /** POSTs {@code json} with {@code Transfer-Encoding: chunked} (no Content-Length), in 1 KiB chunks. */
+    public static Response postChunked(int port, String path, String host, Map<String, String> headers, String json)
+            throws IOException {
+        try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
+            socket.setSoTimeout(30_000);
+            StringBuilder request = new StringBuilder();
+            request.append("POST ").append(path).append(" HTTP/1.1\r\n");
+            request.append("Host: ").append(host).append("\r\n");
+            headers.forEach((name, value) ->
+                    request.append(name).append(": ").append(value).append("\r\n"));
+            request.append("Content-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
+            OutputStream out = socket.getOutputStream();
+            out.write(request.toString().getBytes(StandardCharsets.ISO_8859_1));
+            byte[] body = json.getBytes(StandardCharsets.UTF_8);
+            try {
+                for (int offset = 0; offset < body.length; offset += 1024) {
+                    int length = Math.min(1024, body.length - offset);
+                    out.write((Integer.toHexString(length) + "\r\n").getBytes(StandardCharsets.ISO_8859_1));
+                    out.write(body, offset, length);
+                    out.write("\r\n".getBytes(StandardCharsets.ISO_8859_1));
+                }
+                out.write("0\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
+                out.flush();
+            } catch (IOException e) {
+                // The server may answer 413 and close before the whole body was sent; read the answer anyway.
+            }
+            String raw = new String(socket.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            int end = raw.indexOf("\r\n\r\n");
+            String head = end < 0 ? raw : raw.substring(0, end);
+            return new Response(
+                    Integer.parseInt(head.substring(9, 12)),
+                    head.toLowerCase(Locale.ROOT),
+                    end < 0 ? "" : raw.substring(end + 4));
+        }
+    }
+
     /**
      * Sends {@code method path} to the local server on {@code port} with the given {@code Host} and extra headers, and a
      * JSON body if {@code json} is not null.

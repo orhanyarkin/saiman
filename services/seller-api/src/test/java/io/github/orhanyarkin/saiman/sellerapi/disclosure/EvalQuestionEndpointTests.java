@@ -15,12 +15,14 @@ import io.github.orhanyarkin.saiman.sellerapi.testsupport.Concurrently;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.FakeIngestServer;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.RagTestBase;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.RawHttp;
+import io.github.orhanyarkin.saiman.shared.retrieval.RetrievedChunk;
 import io.github.orhanyarkin.x402.core.X402Headers;
 import io.micrometer.observation.ObservationRegistry;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.function.IntSupplier;
@@ -229,6 +231,68 @@ class EvalQuestionEndpointTests extends RagTestBase {
 
         assertThat(statuses).containsOnly(200, 429).contains(200, 429);
         assertThat(router.maxConcurrentModelCalls()).isEqualTo(1);
+    }
+
+    @Test
+    @SuppressWarnings("NullAway") // a chunk without a publication time, as a broken ingest could send
+    void chunksWithoutAUsablePublicationTimeAreDroppedNot500() {
+        router.replyWith(CITING_BOTH);
+        RetrievedChunk good = FakeIngestServer.chunk("kap:5:0000", "THYAO", "one");
+        RetrievedChunk undated = withPublishedAt(FakeIngestServer.chunk("kap:5:0001", "THYAO", "two"), null);
+        RetrievedChunk farFuture = withPublishedAt(FakeIngestServer.chunk("kap:5:0002", "THYAO", "three"), Instant.MAX);
+        INGEST.retrieves(List.of(good, undated, farFuture), "v-dates");
+
+        RawHttp.Response response = post(BODY, TestTokens.SERVICE_EVALS, HOST, null);
+
+        assertThat(response.status()).isEqualTo(200);
+        assertThat(response.body()).contains("\"outcome\":\"REFUSED\""); // one usable excerpt left
+        assertThat(router.modelCalls()).isZero();
+        assertThat(GroundedGenerator.datable(null)).isFalse();
+        assertThat(GroundedGenerator.datable(Instant.MAX)).isFalse();
+        assertThat(GroundedGenerator.datable(Instant.parse("2023-06-01T10:00:00Z")))
+                .isTrue();
+    }
+
+    @SuppressWarnings("NullAway")
+    private static RetrievedChunk withPublishedAt(RetrievedChunk c, @Nullable Instant publishedAt) {
+        return new RetrievedChunk(
+                c.chunkId(),
+                c.ticker(),
+                c.source(),
+                c.title(),
+                c.sourceUrl(),
+                publishedAt,
+                c.retrievedAt(),
+                c.text(),
+                c.rrfScore(),
+                c.vectorRank(),
+                c.lexicalRank());
+    }
+
+    @Test
+    void theBodyCapOfThePaidApiAppliesToo() throws IOException {
+        router.replyWith(CITING_BOTH);
+        String big = "{\"ticker\":\"THYAO\",\"question\":\"" + "x".repeat(5 * 1024) + "\"}";
+        Map<String, String> auth = Map.of("Authorization", TestTokens.bearer(TestTokens.SERVICE_EVALS));
+
+        assertThat(post(big, TestTokens.SERVICE_EVALS, HOST, null).status()).isEqualTo(413);
+        assertThat(RawHttp.postChunked(port, PATH, HOST, auth, big).status()).isEqualTo(413);
+        assertThat(router.routerRequests()).isZero();
+        assertThat(INGEST.retrieveCalls()).isZero();
+    }
+
+    @Test
+    void theDailyEvalLimitIsA429BeforeAnyWork() {
+        router.replyWith(CITING_BOTH);
+        redis.opsForValue()
+                .set("seller:runs:caller:day:evals:" + java.time.LocalDate.now(java.time.ZoneOffset.UTC), "100");
+
+        RawHttp.Response response = post(BODY, TestTokens.SERVICE_EVALS, HOST, null);
+
+        assertThat(response.status()).isEqualTo(429);
+        assertThat(response.header("content-type")).startsWith("application/problem+json");
+        assertThat(router.routerRequests()).isZero();
+        assertThat(INGEST.retrieveCalls()).isZero();
     }
 
     private DefaultModelRouter realRouter(ChatModel chat, EmbeddingModel embedding) {
