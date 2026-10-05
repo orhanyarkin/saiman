@@ -34,7 +34,7 @@ The API needs a Bearer token. The SPA treats it as a secret:
 ## Live e2e (`pnpm e2e:live`, `make e2e-live`)
 
 The live specs in `e2e/live/` run against the real stack and spend testnet funds. With auth on they
-need an **operator** token in the environment variable `SAIMAN_E2E_TOKEN`; each test seeds it into
+need an **operator** token in a file named by `SAIMAN_E2E_TOKEN_FILE` (preferred; or the environment variable `SAIMAN_E2E_TOKEN`); each test seeds it into
 the tab's `sessionStorage` before the app loads (the same path as `e2e/helpers.ts`). A missing
 variable fails the run with a message naming the variable, never its value.
 
@@ -43,7 +43,7 @@ example:
 
 ```make
 e2e-live: web/node_modules
-	SAIMAN_E2E_TOKEN="$$(cat secrets/api_operator_token)" SAIMAN_E2E_BASE_URL=http://localhost:8088 pnpm --dir web e2e:live
+	SAIMAN_E2E_TOKEN_FILE=secrets/api_operator_token SAIMAN_E2E_BASE_URL=http://localhost:8088 pnpm --dir web e2e:live
 ```
 
 Make echoes the recipe text with `$$(...)` unexpanded, so the token itself never reaches the log.
