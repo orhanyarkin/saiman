@@ -231,6 +231,20 @@ class EvalQuestionEndpointTests extends RagTestBase {
         assertThat(router.maxConcurrentModelCalls()).isEqualTo(1);
     }
 
+    @Test
+    void theDailyEvalLimitIsA429BeforeAnyWork() {
+        router.replyWith(CITING_BOTH);
+        redis.opsForValue()
+                .set("seller:runs:caller:day:evals:" + java.time.LocalDate.now(java.time.ZoneOffset.UTC), "100");
+
+        RawHttp.Response response = post(BODY, TestTokens.SERVICE_EVALS, HOST, null);
+
+        assertThat(response.status()).isEqualTo(429);
+        assertThat(response.header("content-type")).startsWith("application/problem+json");
+        assertThat(router.routerRequests()).isZero();
+        assertThat(INGEST.retrieveCalls()).isZero();
+    }
+
     private DefaultModelRouter realRouter(ChatModel chat, EmbeddingModel embedding) {
         ModelFactory factory = new ModelFactory() {
             @Override

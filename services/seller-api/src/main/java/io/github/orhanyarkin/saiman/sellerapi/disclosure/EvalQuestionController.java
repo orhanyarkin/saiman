@@ -37,14 +37,19 @@ import org.springframework.web.bind.annotation.RestController;
  * <p><b>Access.</b> Only the {@code evals} service token ({@code SERVICE_evals}, the security chain), only through
  * the compose network ({@code Host} must be one of {@code seller.internal.allowed-hosts}, checked here so it holds for
  * any path form); nginx never routes {@code /internal}. Limits: the run guard under caller {@code evals}
- * ({@code seller.eval.*}: 1 in flight, 60 per hour by default; 429 when reached, 503 when the guard can not decide)
- * and the router's daily USD cap.
+ * ({@code seller.eval.*}: 1 in flight, 60 per hour, 100 per UTC day by default; 429 when reached, 503 when the guard
+ * can not decide) and the router's daily USD cap.
+ *
+ * <p><b>Shared day cap.</b> Eval calls are charged to the same router daily USD cap as paid traffic. Once eval calls
+ * have used it up, a paid question is still settled up front and then answered 503 with a credit note for the full
+ * amount (ADR-0021). {@code seller.eval.max-runs-per-day} bounds how much of the cap the harness can take.
  *
  * <p><b>Input bounds</b> are the paid endpoint's: ticker {@code ^[A-Z0-9]{3,6}$}, question 3 to 500 characters and
  * not blank. A bad request is a 400 with fixed text.
  *
  * <p><b>Outcomes</b> (200, {@link EvalAnswerResponse}; {@code modelCostUsdMicros} is the router's own cost
- * observation of this request's model calls, 0 when none ran):
+ * observation of this request's chat-model calls in seller-api, 0 when none ran; it excludes the query embedding ingest
+ * computes for retrieval, which is charged in ingest):
  *
  * <ul>
  *   <li>{@code ANSWERED}: at least two valid citations; the answer and the cited chunks with their publication time.
