@@ -1,0 +1,11 @@
+{
+  "eventId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:4",
+  "runId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+  "seq" : 4,
+  "type" : "TOOL_CALL_REQUESTED",
+  "occurredAt" : "2026-10-01T10:00:04Z",
+  "data" : {
+    "tool" : "ask_disclosures",
+    "arguments" : "ticker=THYAO question=\"son açıklamalar\""
+  }
+}

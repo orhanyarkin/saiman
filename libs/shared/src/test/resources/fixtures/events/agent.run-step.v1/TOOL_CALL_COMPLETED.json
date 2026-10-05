@@ -1,0 +1,12 @@
+{
+  "eventId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:10",
+  "runId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+  "seq" : 10,
+  "type" : "TOOL_CALL_COMPLETED",
+  "occurredAt" : "2026-10-01T10:00:10Z",
+  "data" : {
+    "tool" : "ask_disclosures",
+    "paid" : true,
+    "citationCount" : 3
+  }
+}

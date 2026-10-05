@@ -1,0 +1,15 @@
+{
+  "eventId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:9",
+  "runId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+  "seq" : 9,
+  "type" : "PAYMENT_AMBIGUOUS",
+  "occurredAt" : "2026-10-01T10:00:09Z",
+  "data" : {
+    "paymentIntentId" : "75f93933-72b5-4604-ad2c-063e3f4e6ed6",
+    "amount" : {
+      "atomicUnits" : 20000,
+      "asset" : "USDC",
+      "decimals" : 6
+    }
+  }
+}

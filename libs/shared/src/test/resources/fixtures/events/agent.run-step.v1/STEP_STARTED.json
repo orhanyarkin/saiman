@@ -1,0 +1,10 @@
+{
+  "eventId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:2",
+  "runId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+  "seq" : 2,
+  "type" : "STEP_STARTED",
+  "occurredAt" : "2026-10-01T10:00:02Z",
+  "data" : {
+    "step" : "PLANNER"
+  }
+}

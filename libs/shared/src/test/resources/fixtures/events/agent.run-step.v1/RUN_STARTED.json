@@ -1,0 +1,15 @@
+{
+  "eventId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:1",
+  "runId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+  "seq" : 1,
+  "type" : "RUN_STARTED",
+  "occurredAt" : "2026-10-01T10:00:01Z",
+  "data" : {
+    "question" : "THYAO son özel durum açıklamaları neler?",
+    "budget" : {
+      "atomicUnits" : 50000,
+      "asset" : "USDC",
+      "decimals" : 6
+    }
+  }
+}

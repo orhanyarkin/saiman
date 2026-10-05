@@ -1,0 +1,16 @@
+{
+  "eventId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:8",
+  "runId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+  "seq" : 8,
+  "type" : "PAYMENT_SETTLED",
+  "occurredAt" : "2026-10-01T10:00:08Z",
+  "data" : {
+    "paymentIntentId" : "75f93933-72b5-4604-ad2c-063e3f4e6ed6",
+    "amount" : {
+      "atomicUnits" : 20000,
+      "asset" : "USDC",
+      "decimals" : 6
+    },
+    "txHash" : "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090"
+  }
+}

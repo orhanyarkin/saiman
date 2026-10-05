@@ -1,0 +1,11 @@
+{
+  "eventId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:6",
+  "runId" : "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+  "seq" : 6,
+  "type" : "PAYMENT_APPROVAL_DECIDED",
+  "occurredAt" : "2026-10-01T10:00:06Z",
+  "data" : {
+    "approvalId" : "0b5c6a8e-3c1d-4b1e-9f0a-2f6d7c1e9a01",
+    "decision" : "APPROVED"
+  }
+}
