@@ -1,14 +1,15 @@
 package io.github.orhanyarkin.saiman.orchestrator.budget;
 
+import io.github.orhanyarkin.saiman.orchestrator.dashboard.BoundedReads;
 import io.github.orhanyarkin.saiman.orchestrator.openapi.ProblemDetailSchema;
 import io.github.orhanyarkin.saiman.shared.money.Money;
-import io.github.orhanyarkin.x402.client.X402ClientProperties;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.List;
@@ -25,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * {@code GET /api/v1/spend?day=YYYY-MM-DD}: the configured limits plus one UTC day of spend (default
- * today). Read-only: limits come from {@link SpendProperties} and the starter's client properties,
+ * today). Read-only: limits come from {@link SpendProperties} and {@link SpendLimitsView},
  * the numbers are aggregated in SQL from {@code spend_day} and {@code payment_intent}.
  *
  * <p>An intent belongs to the day it reserved on ({@code reserved_day}); one that never reserved
@@ -39,12 +40,14 @@ class SpendController {
     private final JdbcClient jdbc;
     private final SpendProperties spend;
     private final @Nullable Long perRequestMax;
+    private final BoundedReads reads;
     private final Clock clock;
 
-    SpendController(JdbcClient jdbc, SpendProperties spend, X402ClientProperties x402) {
+    SpendController(JdbcClient jdbc, SpendProperties spend, SpendLimitsView limits, BoundedReads reads) {
         this.jdbc = jdbc;
         this.spend = spend;
-        this.perRequestMax = x402.maxAmountPerRequest();
+        this.perRequestMax = limits.perRequestMaxAtomic();
+        this.reads = reads;
         this.clock = Clock.systemUTC();
     }
 
@@ -63,6 +66,12 @@ class SpendController {
     @GetMapping(path = "/api/v1/spend", produces = MediaType.APPLICATION_JSON_VALUE)
     SpendOverview spend(@RequestParam(required = false) @Nullable String day) {
         LocalDate date = parse(day);
+        return reads.read(() -> overview(date));
+    }
+
+    private SpendOverview overview(LocalDate date) {
+        OffsetDateTime dayStart = date.atStartOfDay().atOffset(ZoneOffset.UTC);
+        OffsetDateTime dayEnd = dayStart.plusDays(1);
         long[] counters = jdbc.sql("SELECT reserved_atomic, committed_atomic FROM spend_day WHERE day = :day")
                 .param("day", date)
                 .query((rs, row) -> new long[] {rs.getLong(1), rs.getLong(2)})
@@ -71,11 +80,14 @@ class SpendController {
         List<SpendOverview.ByTool> byTool = jdbc.sql("""
                         SELECT tool, status, count(*) AS n, coalesce(sum(amount_atomic), 0) AS amount
                           FROM payment_intent
-                         WHERE coalesce(reserved_day, (created_at AT TIME ZONE 'UTC')::date) = :day
+                         WHERE reserved_day = :day
+                            OR (reserved_day IS NULL AND created_at >= :dayStart AND created_at < :dayEnd)
                          GROUP BY tool, status
                          ORDER BY tool, status
                         """)
                 .param("day", date)
+                .param("dayStart", dayStart)
+                .param("dayEnd", dayEnd)
                 .query((rs, row) -> new SpendOverview.ByTool(
                         rs.getString("tool"),
                         rs.getString("status"),
