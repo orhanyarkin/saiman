@@ -90,3 +90,15 @@ Why: the seller answer service answers only with at least two valid citations (t
 | cost / p95 latency | $0.005495 / 4.9 s | $0.005903 / 3.8 s |
 
 Reading: the jump from 0.000 comes from the labels now matching the service contract, not from a change in the service. n=5 is a smoke test, not a benchmark: every item is saturated, which also means the set cannot discriminate between models or prompts yet. Publication dates are answerable because the service gives the model each excerpt's `published` timestamp. A free-form question can still fail the two-citation rule: a live demo run "ASELS en son açıklamaları neler ve hangi konulara ilişkin?" ended `NO_EVIDENCE` (the paid upfront calls were settled and credited) while the same kind of question for THYAO, SISE and ARCLK succeeded.
+
+## TEMPORAL items: no relative-time claims (2026-10-05)
+
+Why: an early demo answer to "SISE güncel bildirimlerinde neler var?" said there had been no new disclosure "in the last 7 days" - a relative-time claim that is false for a frozen corpus whose newest disclosure is from 29 Dec 2023. The answer prompt now states the snapshot date and forbids relative-time wording (`GroundedGenerator`, rule 6); the eval has a `TEMPORAL` kind (two recency-phrased questions: SISE and KCHOL) and an extra `relativeTimeFree` metric on the ANSWER items, checked deterministically against a documented list of Turkish and English patterns (`services/evals/README.md`).
+
+| | Before the prompt rule | After (run `dd7a79f`) |
+|---|---|---|
+| SISE "güncel bildirimleri" | one observed demo answer with "son 7 günde ..." (n = 1, not an eval run) | no relative-time expression, 8 valid citations |
+| TEMPORAL temporalSuccess / relativeTimeFree (n = 2) | not measured | 1.000 / 1.000 |
+| ANSWER relativeTimeFree (n = 5) | not measured | 1.000 |
+
+n = 2 and a phrase list are a regression guard, not a guarantee: the model can paraphrase a relative-time claim the patterns do not list.
