@@ -112,7 +112,12 @@ class FacilitatorTelemetryIntegrationTests {
 
                 @Override
                 public void onStop(Observation.Context context) {
-                    STOPPED_CONTEXTS.add(context.getName() + " " + context.getAllKeyValues());
+                    var parent = context.getParentObservation();
+                    STOPPED_CONTEXTS.add(context.getName()
+                            + " parent="
+                            + (parent == null ? "-" : parent.getContextView().getName())
+                            + " "
+                            + context.getAllKeyValues());
                 }
             });
         }
@@ -190,6 +195,9 @@ class FacilitatorTelemetryIntegrationTests {
         assertObservation("x402.facilitator.verify", "success", "none");
         assertObservation("x402.facilitator.settle", "success", "none");
         assertThat(settleFailureWarnLines()).isEmpty();
+        assertThat(STOPPED_CONTEXTS)
+                .anyMatch(c -> c.startsWith("x402.facilitator.settle parent=x402.server.payment "))
+                .anyMatch(c -> c.startsWith("x402.facilitator.verify parent=x402.server.payment "));
     }
 
     @Test
@@ -273,7 +281,7 @@ class FacilitatorTelemetryIntegrationTests {
         assertObservation("x402.facilitator.settle", "transport_error", "none");
         assertThat(settleFailureWarnLines().getFirst())
                 .contains("facilitatorStatus=0")
-                .contains("cause=FacilitatorException");
+                .contains("outcome=transport_error");
     }
 
     @Test

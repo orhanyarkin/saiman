@@ -34,13 +34,12 @@ One WARN per settle failure, logger `io.github.orhanyarkin.x402.server.PaymentSe
 
 ```
 x402 settlement failed: reason=<code> attemptId=<uuid> payer=<0x..> nonceRef=<8 hex> validAfter=<s> validBefore=<s>
-  secondsLeft=<n> verifyToSettleGapMs=<n> settleDurationMs=<n> facilitatorStatus=<http|0> txHashPresent=<bool> txHash=<0x..|->
-  cause=<exception class|->
+  secondsLeft=<n> verifyToSettleGapMs=<n> settleDurationMs=<n> facilitatorStatus=<http|0> txHashPresent=<bool> txHash=<0x..|-> outcome=<tag value>
 ```
 
 - `attemptId` equals the `eventId` of the published `X402PaymentFailedEvent`.
 - `nonceRef` is the first 8 hex of `sha256(lowercase(from) + lowercase(nonce))`. To find the authorization, compute the same prefix over the (public, on-chain) `AuthorizationUsed` events or the ledger's rows; the prefix cannot be turned back into the nonce.
-- `secondsLeft` is `validBefore` minus the settle start time on our clock (negative means already expired). `verifyToSettleGapMs` is the time between a successful `/verify` and the `/settle` call (large in the default flow, since it includes the handler).
+- `secondsLeft` is `validBefore` minus the instant the `/settle` call started, on our clock (not the time of the log line) (negative means already expired). `verifyToSettleGapMs` is the time between a successful `/verify` and the `/settle` call (large in the default flow, since it includes the handler).
 - `facilitatorStatus` is `200` for any decoded answer, the real status for a 4xx/5xx, `0` when no response arrived.
 - Never logged or tagged: the signature, the payload, the facilitator's `errorMessage`, the raw nonce.
 
@@ -58,12 +57,7 @@ Reading the data:
 
 ## Metric to watch
 
-```
-x402_facilitator_settle_seconds_count{outcome="rejected",reason="invalid_exact_evm_transaction_failed"}
-  / ignoring(outcome, reason) sum without(outcome, reason) (x402_facilitator_settle_seconds_count)
-```
-
-(Micrometer renders the observation `x402.facilitator.settle` as the timer `x402_facilitator_settle_seconds_*` in Prometheus. The exact name depends on the registry; check `/actuator/prometheus` once.) Over a window, for example 7 days:
+`x402.facilitator.settle{outcome="rejected",reason="invalid_exact_evm_transaction_failed"}`, as a share of all `x402.facilitator.settle` calls. (Micrometer renders the observation `x402.facilitator.settle` as the timer `x402_facilitator_settle_seconds_*` in Prometheus. The exact name depends on the registry; check `/actuator/prometheus` once.) Over a window, for example 7 days:
 
 ```
 sum(increase(x402_facilitator_settle_seconds_count{outcome="rejected",reason="invalid_exact_evm_transaction_failed"}[7d]))

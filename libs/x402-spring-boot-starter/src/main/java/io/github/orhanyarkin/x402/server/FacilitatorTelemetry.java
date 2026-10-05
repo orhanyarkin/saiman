@@ -65,8 +65,11 @@ final class FacilitatorTelemetry {
         this.registry = registry;
     }
 
-    Observation start(String name) {
-        return Observation.createNotStarted(name, registry).start();
+    /** Starts {@code name} as a child of {@code parent}, so the span nests under the payment span. */
+    Observation start(String name, @Nullable Observation parent) {
+        return Observation.createNotStarted(name, registry)
+                .parentObservation(parent)
+                .start();
     }
 
     /** Tags and stops {@code observation}. Never throws into the payment path. */

@@ -248,7 +248,7 @@ public final class RequiresPaymentInterceptor implements HandlerInterceptor {
                 null);
 
         VerifyResponse verifyResponse;
-        Observation verifyObservation = telemetry.start(FacilitatorTelemetry.VERIFY_OBSERVATION);
+        Observation verifyObservation = telemetry.start(FacilitatorTelemetry.VERIFY_OBSERVATION, attempt.observation());
         try {
             verifyResponse = facilitatorClient.verify(serverPayload, entry.offer());
             FacilitatorTelemetry.finish(verifyObservation, FacilitatorTelemetry.ofVerify(verifyResponse));

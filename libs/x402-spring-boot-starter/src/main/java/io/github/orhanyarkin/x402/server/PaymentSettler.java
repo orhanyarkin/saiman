@@ -58,7 +58,8 @@ final class PaymentSettler {
             long verifyToSettleGapMs,
             @Nullable String txHash,
             boolean txHashPresent,
-            @Nullable String cause) {}
+            long startedAtEpochSecond,
+            String outcome) {}
 
     PaymentSettler(
             FacilitatorClient facilitatorClient,
@@ -86,8 +87,9 @@ final class PaymentSettler {
     boolean settle(HttpServletRequest request, HttpServletResponse response, X402PaymentAttempt attempt)
             throws IOException {
         SettlementResponse settlement;
-        Observation observation = telemetry.start(FacilitatorTelemetry.SETTLE_OBSERVATION);
+        Observation observation = telemetry.start(FacilitatorTelemetry.SETTLE_OBSERVATION, attempt.observation());
         long startedAt = System.nanoTime();
+        long startedAtEpochSecond = clock.instant().getEpochSecond();
         try {
             settlement =
                     facilitatorClient.settle(attempt.payload(), attempt.entry().offer());
@@ -95,20 +97,13 @@ final class PaymentSettler {
             FacilitatorTelemetry.Result result = FacilitatorTelemetry.ofFailure(settleError);
             FacilitatorTelemetry.finish(observation, result);
             failSettlement(
-                    request,
-                    response,
-                    attempt,
-                    null,
-                    trace(
-                            attempt,
-                            startedAt,
-                            result.httpStatus(),
-                            null,
-                            settleError.getClass().getSimpleName()));
+                    request, response, attempt, null, trace(attempt, startedAt, startedAtEpochSecond, result, null));
             return false;
         }
-        FacilitatorTelemetry.finish(observation, FacilitatorTelemetry.ofSettle(settlement));
-        SettleTrace settleTrace = trace(attempt, startedAt, 200, settlement.transaction(), null);
+        FacilitatorTelemetry.Result settleResult = FacilitatorTelemetry.ofSettle(settlement);
+        FacilitatorTelemetry.finish(observation, settleResult);
+        SettleTrace settleTrace =
+                trace(attempt, startedAt, startedAtEpochSecond, settleResult, settlement.transaction());
         // Anything unexpected from here on (a null/malformed transaction hash -- the field isn't
         // @Nullable on SettlementResponse, but the tolerant facilitator-response mapper leaves it
         // null when a hostile or buggy facilitator omits it; or any other failure while finishing
@@ -200,20 +195,20 @@ final class PaymentSettler {
         log.warn(
                 "x402 settlement failed: reason={} attemptId={} payer={} nonceRef={} validAfter={} validBefore={}"
                         + " secondsLeft={} verifyToSettleGapMs={} settleDurationMs={} facilitatorStatus={}"
-                        + " txHashPresent={} txHash={} cause={}",
+                        + " txHashPresent={} txHash={} outcome={}",
                 reasonCode,
                 eventId,
                 authorization.from(),
                 FacilitatorTelemetry.nonceRef(authorization.from(), authorization.nonce()),
                 authorization.validAfter(),
                 authorization.validBefore(),
-                secondsLeft(authorization.validBefore()),
+                secondsLeft(authorization.validBefore(), trace.startedAtEpochSecond()),
                 trace.verifyToSettleGapMs(),
                 trace.durationMs(),
                 trace.httpStatus(),
                 trace.txHashPresent(),
                 trace.txHash() == null ? "-" : trace.txHash(),
-                trace.cause() == null ? "-" : trace.cause());
+                trace.outcome());
         RequiresPaymentInterceptor.writePaymentRequired(
                 response,
                 codec,
@@ -236,9 +231,9 @@ final class PaymentSettler {
     private SettleTrace trace(
             X402PaymentAttempt attempt,
             long startedAtNanos,
-            int httpStatus,
-            @Nullable String transaction,
-            @Nullable String cause) {
+            long startedAtEpochSecond,
+            FacilitatorTelemetry.Result result,
+            @Nullable String transaction) {
         long now = System.nanoTime();
         boolean present = transaction != null && !transaction.isEmpty();
         String wellFormed = present
@@ -248,18 +243,19 @@ final class PaymentSettler {
                 ? transaction
                 : null;
         return new SettleTrace(
-                httpStatus,
+                result.httpStatus(),
                 (now - startedAtNanos) / 1_000_000L,
                 (startedAtNanos - attempt.verifiedAtNanos()) / 1_000_000L,
                 wellFormed,
                 present,
-                cause);
+                startedAtEpochSecond,
+                result.outcome().tag());
     }
 
-    /** Seconds from now until {@code validBefore} (negative once expired); exact for any uint256. */
-    private String secondsLeft(String validBefore) {
+    /** Seconds from the settle start until {@code validBefore} (negative if expired); exact for any uint256. */
+    private static String secondsLeft(String validBefore, long settleStartEpochSecond) {
         return new BigInteger(validBefore)
-                .subtract(BigInteger.valueOf(clock.instant().getEpochSecond()))
+                .subtract(BigInteger.valueOf(settleStartEpochSecond))
                 .toString();
     }
 
