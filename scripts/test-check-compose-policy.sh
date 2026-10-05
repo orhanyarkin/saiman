@@ -60,6 +60,27 @@ done
 # --- scripts/check-compose-policy.sh: the real compose file must PASS ---
 expect_exit "check-compose-policy: deploy/compose/docker-compose.yml" 0 scripts/check-compose-policy.sh
 
+# --- scripts/check-nginx-conf.sh (the dashboard's nginx.conf rules, ADR-0022) ---
+NGINX_FIXTURES_DIR="scripts/testdata/nginx-conf"
+for fixture in "${NGINX_FIXTURES_DIR}"/fail-*.conf; do
+  name="$(basename "${fixture}" .conf)"
+  expect_exit "check-nginx-conf: ${name}" 1 env NGINX_CONF="${fixture}" scripts/check-nginx-conf.sh
+  expected="$(sed -n 's/^# expect: //p' "${fixture}")"
+  if [[ -z "${expected}" ]]; then
+    echo "FAIL: ${name}: fixture has no '# expect:' line" >&2
+    failures=$((failures + 1))
+  elif ! grep -qF -- "${expected}" "${err_file}"; then
+    echo "FAIL: ${name}: output lacks the expected violation \"${expected}\"" >&2
+    sed 's/^/  /' "${err_file}" >&2
+    failures=$((failures + 1))
+  fi
+done
+for fixture in "${NGINX_FIXTURES_DIR}"/pass-*.conf; do
+  name="$(basename "${fixture}" .conf)"
+  expect_exit "check-nginx-conf: ${name}" 0 env NGINX_CONF="${fixture}" scripts/check-nginx-conf.sh
+done
+expect_exit "check-nginx-conf: deploy/compose/nginx.conf" 0 scripts/check-nginx-conf.sh
+
 # --- scripts/prepare-ingest-secrets.sh: only the two ingest secrets, never buyer.key ---
 ingest_secrets_src="${work_dir}/secrets-src"
 ingest_secrets_dest="${work_dir}/ingest-secrets"

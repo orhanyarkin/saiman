@@ -23,7 +23,7 @@ export X402_SELLER_PAYTO_ADDRESS
 .PHONY: help images check-x402-env infra-up up down clean ps logs test lint format web-dev verify-trace \
 	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check \
 	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask \
-	research-run research-approve research-status \
+	research-run research-approve research-status web-build e2e e2e-live lighthouse gen-api \
 	recon-run recon-report ledger-balance ledger-tamper-demo
 
 help: ## Show this help.
@@ -42,10 +42,11 @@ check-x402-env: ## Verify X402_SELLER_PAYTO_ADDRESS is a valid address (required
 infra-up: ## Start postgres, kafka, redis, otel-collector, jaeger and wait for health.
 	$(COMPOSE) up -d --wait
 
-up: ## Verify payTo, create empty secret files if missing, build images, start the full stack and wait for app health.
+up: ## Verify payTo, create empty secret files, build images and the dashboard, start the full stack, wait for app health.
 	scripts/check-x402-env.sh
 	scripts/ensure-secret-files.sh
 	$(MAKE) images
+	$(MAKE) web-build
 	$(COMPOSE) --profile apps up -d
 	@if [ -s secrets/x402_buyer_private_key ]; then \
 	  scripts/wait-for-health.sh 8080 8081 8082 8083; \
@@ -53,6 +54,7 @@ up: ## Verify payTo, create empty secret files if missing, build images, start t
 	  echo "up: secrets/x402_buyer_private_key is empty: the orchestrator fails closed at startup (blank x402.client.private-key, ADR-0008) and stays down until you fill it; waiting for the other apps only." >&2; \
 	  scripts/wait-for-health.sh 8081 8082 8083; \
 	fi
+	@echo "Dashboard: http://localhost:8088"
 
 down: ## Stop and remove all containers (volumes kept).
 	$(COMPOSE) --profile apps down
@@ -76,6 +78,7 @@ lint: web/node_modules ## Run backend + web linters (no formatting changes).
 	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer spotlessCheck
 	pnpm --dir web lint
 	pnpm --dir web typecheck
+	@if grep -q '"gen:api"' web/package.json; then pnpm --dir web gen:api --check; else echo "lint: web has no gen:api script yet; skipping the generated-client check."; fi
 
 format: web/node_modules ## Apply backend + web formatting.
 	./gradlew spotlessApply
@@ -83,6 +86,28 @@ format: web/node_modules ## Apply backend + web formatting.
 
 web-dev: web/node_modules ## Run the Vite dev server against a running `make up` stack.
 	pnpm --dir web dev
+
+# Dashboard (M5, ADR-0022): `make up` serves web/dist through the compose `web` service (nginx) on
+# http://localhost:8088. Playwright's Chromium is installed once by the human
+# (`pnpm --dir web exec playwright install chromium`); CI installs it itself.
+
+web-build: web/node_modules ## Build the dashboard into web/dist for the compose `web` service (browser tracing on, same-origin /otlp).
+	VITE_OTEL_ENABLED=true VITE_OTEL_TRACES_URL=/otlp/v1/traces pnpm --dir web build
+
+e2e: web/node_modules ## Playwright e2e against the fixture server (no stack needed; needs Playwright's Chromium).
+	pnpm --dir web e2e
+
+e2e-live: web/node_modules ## Playwright e2e against the running stack at http://localhost:8088 (needs `make up`).
+	@grep -q '"e2e:live"' web/package.json || { echo "e2e-live: web has no e2e:live script yet (added by the frontend task, M5 T5)." >&2; exit 1; }
+	SAIMAN_E2E_BASE_URL=http://localhost:8088 pnpm --dir web e2e:live
+
+lighthouse: web/node_modules ## Lighthouse accessibility audit of the dashboard routes (needs Chromium).
+	@grep -q '"lighthouse"' web/package.json || { echo "lighthouse: web has no lighthouse script yet (added by the frontend task, M5 T3c)." >&2; exit 1; }
+	pnpm --dir web lighthouse
+
+gen-api: web/node_modules ## Regenerate the typed API clients from docs/api/*.openapi.json.
+	@grep -q '"gen:api"' web/package.json || { echo "gen-api: web has no gen:api script yet (added by the frontend task, M5 T3)." >&2; exit 1; }
+	pnpm --dir web gen:api
 
 verify-trace: ## Verify a trace in Jaeger. Usage: make verify-trace TRACE_ID=<id> (or omit to self-generate one).
 	scripts/verify-trace.sh $${TRACE_ID:+"$$TRACE_ID"}

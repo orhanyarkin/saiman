@@ -1,0 +1,12 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: web: volumes must be exactly
+name: cptest-web-extra-mount
+services:
+  web:
+    image: nginx:1.30.5-alpine
+    ports:
+      - "127.0.0.1:8088:80"
+    volumes:
+      - ./web/dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./extra:/usr/share/nginx/extra:ro
