@@ -34,14 +34,21 @@ class ActuatorAccessTests {
     private RestTestClient client;
 
     @ParameterizedTest
-    @ValueSource(strings = {"/actuator/env", "/actuator/heapdump", "/actuator/beans", "/actuator/configprops"})
+    @ValueSource(
+            strings = {
+                "/actuator/env",
+                "/actuator/heapdump",
+                "/actuator/beans",
+                "/actuator/configprops",
+                "/actuator/info"
+            })
     void sensitiveEndpointsDoNotExistEvenWhenExposed(String uri) {
         client.get().uri(uri).exchange().expectStatus().isNotFound();
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/actuator/health", "/actuator/info"})
-    void healthAndInfoStayAvailable(String uri) {
+    @ValueSource(strings = {"/actuator/health"})
+    void healthStaysAvailable(String uri) {
         client.get().uri(uri).exchange().expectStatus().isOk();
     }
 }
