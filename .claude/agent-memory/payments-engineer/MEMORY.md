@@ -13,4 +13,5 @@
 - [Spring DAO exception classification](spring-dao-exception-classification.md) — DataAccessResourceFailure is NonTransient (08xxx), spring-kafka 4.1 setBackOffFunction, TestPayment fresh eventId per call.
 - [springdoc + JSpecify OpenAPI](springdoc-jspecify-openapi.md) — nullability via ModelConverter, sorted required, Problem Details responses, snapshot-test recipe.
 - [Spring 7 Problem Details echo](spring7-problem-details-echo.md) — null bodies in ResponseEntityExceptionHandler, instance = URI, resource 404 bypasses advice, RestTestClient % re-encoding.
+- [Standalone MockMvc probes](standalone-mockmvc-probe-controllers.md) — inner @Controller probes for error-path tests; chain_tx_hash means canonical receipt, not party/amount match.
 - [M4b audit Lows findings](m4b-audit-lows-findings.md) — PaymentBook not redelivery-idempotent for F/C conflicts; 1 s epoch cushion in window tests; settleMargin() single source.
