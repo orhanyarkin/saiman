@@ -70,6 +70,12 @@ class RuntimeRoleGrantsTests extends SettlementTestBase {
                         .update())
                 .isEqualTo(1);
 
+        // Column grants: only tx_hash, outcome and reason_code are updatable.
+        assertDenied("UPDATE settlement SET amount_atomic = 1");
+        assertDenied("UPDATE settlement SET payer = 'x'");
+        // Trigger: the only transition is SETTLE_FAILED -> SETTLED (this row is SETTLED now).
+        assertDenied("UPDATE settlement SET outcome = 'SETTLE_FAILED'");
+        assertDenied("UPDATE settlement SET tx_hash = '0x00'");
         assertDenied("DELETE FROM settlement");
         assertDenied("TRUNCATE settlement");
     }
