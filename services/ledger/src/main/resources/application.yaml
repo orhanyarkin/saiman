@@ -77,9 +77,21 @@ saiman:
       retry-attempts: 3
       retry-wait: 200ms
       circuit-open-wait: 30s
+    # Dashboard reads (BoundedReads): a transaction-local statement_timeout and a bulkhead, so polling can neither
+    # hold a connection long nor take the pool (Hikari default 10) from the Kafka inbox/posting path. Both refusals
+    # are a fixed 503 with Retry-After: 5.
+    dashboard:
+      read-timeout: 3s
+      max-concurrent-reads: 4
 
 server:
   port: 8082
+  # Boot's /error fallback (errors outside Spring MVC's handlers): never echo the path, message, trace or bindings.
+  error:
+    include-path: never
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
 
 # The OpenAPI document is a build-time contract (docs/api/ledger.openapi.json, ADR-0022), not a runtime endpoint:
 # OpenApiContractTests turns it on. No UI either (api-only starter).

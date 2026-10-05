@@ -184,9 +184,11 @@ public class LedgerQueries {
      * Seller revenue per {@code payTo} and asset from the SELLER book's accounts (ADR-0021), each a signed net summed as
      * {@code numeric}: {@code revenue:data} credits minus debits, {@code revenue:credit-notes} debits minus credits,
      * {@code liability:customer-credits} credits minus debits, so REVERSAL entries count. The chain-verified split
-     * follows {@link RevenueReport.Verified}; {@code openFindings} counts the seller's payments (with SELLER-book
-     * entries) that have any {@code reconciliation_mismatch} row. At most {@link #MAX_REVENUE_ROWS} rows, largest
-     * gross first.
+     * follows {@link RevenueReport.Verified}: a sale needs {@code chain_state = 'USED'} <em>and</em> a
+     * {@code chain_tx_hash} (reconciliation matched a canonical receipt; a used authorization whose transaction was not
+     * found, TX_UNKNOWN, is not enough) and no blocking finding. {@code openFindings} counts the seller's payments (with
+     * SELLER-book entries) that have a {@code reconciliation_mismatch} row without an adjustment entry (unresolved). At
+     * most {@link #MAX_REVENUE_ROWS} rows, largest gross first.
      *
      * @param payTo only this seller (lower-case), or null for all
      */
@@ -198,7 +200,7 @@ public class LedgerQueries {
                                    substr(a.code, length('seller:' || a.wallet || ':') + 1) AS acct,
                                    CASE p.side WHEN 'CREDIT' THEN p.amount_atomic::numeric
                                                ELSE -p.amount_atomic::numeric END AS signed,
-                                   coalesce(pm.chain_state = 'USED' AND NOT EXISTS (
+                                   coalesce(pm.chain_state = 'USED' AND pm.chain_tx_hash IS NOT NULL AND NOT EXISTS (
                                        SELECT 1 FROM reconciliation_mismatch m
                                         WHERE m.payment_id = pm.id
                                           AND m.kind NOT IN ('ENCUMBRANCE_NOT_CLEARED', 'BOOKS_OPEN',
@@ -237,12 +239,15 @@ public class LedgerQueries {
                               FROM journal_entry e
                               JOIN payment pm ON pm.id = e.payment_id
                              WHERE e.book = 'SELLER' AND e.kind IN ('SALE', 'CREDIT_NOTE')
+                               AND (CAST(:payTo AS text) IS NULL OR pm.pay_to = CAST(:payTo AS text))
                              GROUP BY pm.pay_to, pm.asset),
                         findings AS (
                             SELECT pm.pay_to, pm.asset, count(DISTINCT m.payment_id) AS open_findings
                               FROM reconciliation_mismatch m
                               JOIN payment pm ON pm.id = m.payment_id
-                             WHERE EXISTS (SELECT 1 FROM journal_entry e
+                             WHERE m.adjustment_entry_id IS NULL
+                               AND (CAST(:payTo AS text) IS NULL OR pm.pay_to = CAST(:payTo AS text))
+                               AND EXISTS (SELECT 1 FROM journal_entry e
                                             WHERE e.payment_id = pm.id AND e.book = 'SELLER')
                              GROUP BY pm.pay_to, pm.asset)
                         SELECT t.pay_to, t.asset, t.decimals, t.gross, t.credit_notes,

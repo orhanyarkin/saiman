@@ -2,7 +2,7 @@
   "components" : {
     "schemas" : {
       "ChainVerifiedRevenue" : {
-        "description" : "Revenue Base Sepolia confirms: sales seen on chain (chainState USED) without a chain finding, and credit notes of those sales that seller-api corroborated.",
+        "description" : "Revenue Base Sepolia confirms: sales whose canonical on-chain receipt was matched (chainState USED with a chainTxHash) without a chain finding, and credit notes of those sales that seller-api corroborated with the same tx hash and amount.",
         "properties" : {
           "creditNotes" : {
             "$ref" : "#/components/schemas/Money"
@@ -445,7 +445,7 @@
         "type" : "object"
       },
       "SellerRevenue" : {
-        "description" : "One seller's revenue. grossSales, creditNotes, netRevenue and customerCredits are PER BOOKS, NOT CHAIN-VERIFIED: forged seller events (unauthenticated Kafka until M6) stay in them even after reconciliation flags them. chainVerified is the part Base Sepolia confirms; unverifiedGrossSales = grossSales - chainVerified.grossSales (never negative); openFindings counts this seller's payments with a reconciliation finding. Amounts are clamped to [0, 2^53-1] (netRevenue: +-(2^53-1)) and saturated says a clamp happened.",
+        "description" : "One seller's revenue. grossSales, creditNotes, netRevenue and customerCredits are PER BOOKS, NOT CHAIN-VERIFIED: forged seller events (unauthenticated Kafka until M6) stay in them even after reconciliation flags them. chainVerified is the part Base Sepolia confirms; unverifiedGrossSales = grossSales - chainVerified.grossSales (never negative); openFindings counts this seller's payments with an unresolved reconciliation finding (one reconciliation did not adjust; adjusted findings are not counted). Amounts are clamped to [0, 2^53-1] (netRevenue: +-(2^53-1)) and saturated says a clamp happened.",
         "properties" : {
           "chainVerified" : {
             "$ref" : "#/components/schemas/ChainVerifiedRevenue"
@@ -600,6 +600,25 @@
               }
             },
             "description" : "Malformed runId, book, limit or before"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "The read timed out or too many reads are running; retry after Retry-After seconds",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds to wait",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
           }
         },
         "tags" : [ "ledger-payments-controller" ]
@@ -647,6 +666,25 @@
               }
             },
             "description" : "No such payment"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "The read timed out or too many reads are running; retry after Retry-After seconds",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds to wait",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
           }
         },
         "tags" : [ "ledger-payments-controller" ]
@@ -683,6 +721,25 @@
               }
             },
             "description" : "payTo is not an address"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "The read timed out or too many reads are running; retry after Retry-After seconds",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds to wait",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
           }
         },
         "tags" : [ "revenue-controller" ]
@@ -704,6 +761,25 @@
               }
             },
             "description" : "OK"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "The read timed out or too many reads are running; retry after Retry-After seconds",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds to wait",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
           }
         },
         "tags" : [ "trial-balance-controller" ]
@@ -742,6 +818,25 @@
               }
             },
             "description" : "limit outside 1..100"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "The read timed out or too many reads are running; retry after Retry-After seconds",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds to wait",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
           }
         },
         "tags" : [ "reconciliation-controller" ]
@@ -818,6 +913,25 @@
           },
           "404" : {
             "description" : "No run yet (empty body)"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "The read timed out or too many reads are running; retry after Retry-After seconds",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds to wait",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
           }
         },
         "tags" : [ "reconciliation-controller" ]
@@ -858,6 +972,25 @@
           },
           "404" : {
             "description" : "No such run (empty body)"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "The read timed out or too many reads are running; retry after Retry-After seconds",
+            "headers" : {
+              "Retry-After" : {
+                "description" : "Seconds to wait",
+                "schema" : {
+                  "type" : "integer"
+                },
+                "style" : "simple"
+              }
+            }
           }
         },
         "tags" : [ "reconciliation-controller" ]

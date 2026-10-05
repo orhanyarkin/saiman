@@ -15,6 +15,7 @@ import io.github.orhanyarkin.saiman.ledger.payment.PaymentLedgerService;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentProjection;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentRepository;
 import io.github.orhanyarkin.saiman.ledger.payment.TestPayment;
+import io.github.orhanyarkin.saiman.ledger.query.RevenueReport;
 import io.github.orhanyarkin.saiman.shared.ledger.LedgerTopics;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.saiman.shared.payments.AuthorizationRef;
@@ -29,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.SplittableRandom;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -36,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
@@ -366,6 +369,49 @@ class ReconciliationTests {
         assertThat(item(report, payment).status()).isEqualTo("PENDING");
     }
 
+    /**
+     * M5 audit: a forged seller fact names a real, used authorization with a transaction hash that has no receipt,
+     * and the log search finds nothing. Reconciliation records chain USED but no canonical receipt (chain_tx_hash
+     * stays null) and a TX_NOT_FOUND finding, so the sale is not chain-verified revenue.
+     */
+    @Test
+    void usedAuthorizationWithoutAMatchedReceiptIsNotVerifiedRevenue() {
+        TestPayment forged = settledBothBooks(20_000);
+        chain.markUsedWithoutLog(
+                forged.authorization().payer(), forged.authorization().nonce());
+
+        ReconciliationReport.Item item = item(runNow(), forged);
+
+        assertThat(item.chainState()).isEqualTo("USED");
+        assertThat(item.status()).isEqualTo("MISMATCH");
+        assertThat(mismatchKinds(forged)).containsExactly("TX_NOT_FOUND");
+        assertThat(chainTxHash(forged)).isNull();
+        assertUnverified(forged);
+    }
+
+    /**
+     * A row from before the seller-hash rule (or a buyer-only CHAIN resolution) has no reported hash at all: a used
+     * authorization the log search misses is TX_UNKNOWN, which records no finding. Without a canonical receipt it must
+     * still not count as chain-verified revenue.
+     */
+    @Test
+    void txUnknownSaleWithoutAFindingIsNotVerifiedRevenue() {
+        TestPayment legacy = settledBothBooks(30_000);
+        jdbc.sql("UPDATE payment SET buyer_tx_hash = NULL, seller_tx_hash = NULL WHERE payment_key = :key")
+                .param("key", legacy.key())
+                .update();
+        chain.markUsedWithoutLog(
+                legacy.authorization().payer(), legacy.authorization().nonce());
+
+        ReconciliationReport.Item item = item(runNow(), legacy);
+
+        assertThat(item.status()).isEqualTo("TX_UNKNOWN");
+        assertThat(item.chainState()).isEqualTo("USED");
+        assertThat(mismatchKinds(legacy)).isEmpty();
+        assertThat(chainTxHash(legacy)).isNull();
+        assertUnverified(legacy);
+    }
+
     @Test
     void secondRunWhileOneHoldsTheLockIsRefusedWith409() throws Exception {
         try (Connection other = dataSource.getConnection()) {
@@ -429,9 +475,15 @@ class ReconciliationTests {
                 .isEqualTo(429)
                 .expectHeader()
                 .exists("Retry-After")
+                .expectHeader()
+                .contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
                 .expectBody()
                 .jsonPath("$.status")
-                .isEqualTo(429);
+                .isEqualTo(429)
+                .jsonPath("$.detail")
+                .isEqualTo("A reconciliation run was started recently; retry later")
+                .jsonPath("$.instance")
+                .isEqualTo("/api/v1/reconciliation/runs");
     }
 
     @Test
@@ -499,6 +551,33 @@ class ReconciliationTests {
                 .filter(i -> i.paymentId().equals(id))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("payment not in run " + report.runId()));
+    }
+
+    private @Nullable String chainTxHash(TestPayment payment) {
+        return jdbc.sql("SELECT chain_tx_hash FROM payment WHERE payment_key = :key")
+                .param("key", payment.key())
+                .query((rs, n) -> Optional.ofNullable(rs.getString(1)))
+                .single()
+                .orElse(null);
+    }
+
+    /** The seller's revenue row counts the sale per books only. */
+    private void assertUnverified(TestPayment payment) {
+        RevenueReport revenue = client.get()
+                .uri("/api/v1/ledger/revenue?payTo=" + payment.payTo())
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody(RevenueReport.class)
+                .returnResult()
+                .getResponseBody();
+        assertThat(revenue).isNotNull();
+        assertThat(revenue.items()).singleElement().satisfies(s -> {
+            assertThat(s.grossSales().atomicUnits()).isEqualTo(payment.amount().atomicUnits());
+            assertThat(s.chainVerified().grossSales().atomicUnits()).isZero();
+            assertThat(s.unverifiedGrossSales().atomicUnits())
+                    .isEqualTo(payment.amount().atomicUnits());
+        });
     }
 
     private int entryCount(TestPayment payment) {

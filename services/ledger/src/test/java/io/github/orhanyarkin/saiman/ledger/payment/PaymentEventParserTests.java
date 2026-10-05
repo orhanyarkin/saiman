@@ -55,6 +55,31 @@ class PaymentEventParserTests {
                 valid.replace(TestPayment.USDC_ADDRESS, "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")));
     }
 
+    /**
+     * M5 audit: a seller's settled fact without a transaction hash could claim a used authorization it never settled.
+     * The shared record rejects it even with CHAIN evidence (the only evidence that may lack a hash), and the parser
+     * must surface that as malformed (dead letter, never retried). The buyer's CHAIN resolution without a hash stays
+     * valid.
+     */
+    @Test
+    void sellerSettledWithoutTxHashIsMalformed() {
+        String txHash = ",\"txHash\":\"" + payment.txHash() + "\"";
+        String seller = json.writeValueAsString(payment.sellerSettled());
+        String buyer = json.writeValueAsString(payment.buyerSettled());
+        assertThat(seller).contains(txHash).contains("\"evidence\":\"FACILITATOR\"");
+
+        String sellerChainNoHash =
+                seller.replace(txHash, "").replace("\"evidence\":\"FACILITATOR\"", "\"evidence\":\"CHAIN\"");
+        String sellerNullHash = seller.replace(txHash, ",\"txHash\":null")
+                .replace("\"evidence\":\"FACILITATOR\"", "\"evidence\":\"CHAIN\"");
+        String buyerChainNoHash =
+                buyer.replace(txHash, "").replace("\"evidence\":\"FACILITATOR\"", "\"evidence\":\"CHAIN\"");
+
+        assertMalformed(() -> parser.settled(sellerChainNoHash));
+        assertMalformed(() -> parser.settled(sellerNullHash));
+        assertThat(parser.settled(buyerChainNoHash).txHash()).isNull();
+    }
+
     @Test
     void validBeforeOfLongMaxIsMalformed() {
         String forged = json.writeValueAsString(payment.authorized())
