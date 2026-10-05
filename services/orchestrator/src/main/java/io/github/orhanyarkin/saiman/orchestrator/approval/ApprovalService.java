@@ -75,6 +75,16 @@ public class ApprovalService {
                 .optional();
     }
 
+    /** Approvals in one status, newest request first, at most {@code limit}. */
+    public List<ApprovalView> listByStatus(ApprovalStatus status, int limit) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM approval WHERE status = :status"
+                        + " ORDER BY requested_at DESC, id DESC LIMIT :limit")
+                .param("status", status.name())
+                .param("limit", limit)
+                .query(ApprovalService::map)
+                .list();
+    }
+
     public Optional<ApprovalView> findForIntent(UUID paymentIntentId) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM approval WHERE payment_intent_id = :id")
                 .param("id", paymentIntentId)

@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.orchestrator.payment;
 
+import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.saiman.shared.run.DenyReason;
 import java.net.URI;
 import java.security.SecureRandom;
@@ -89,6 +90,36 @@ public class PaymentIntentService {
                 .param("id", id)
                 .query(PaymentIntentService::map)
                 .optional();
+    }
+
+    public boolean runExists(UUID runId) {
+        return jdbc.sql("SELECT count(*) FROM run WHERE id = :id")
+                        .param("id", runId)
+                        .query(Integer.class)
+                        .single()
+                > 0;
+    }
+
+    /** The run's intents with their current status, oldest first; only the columns of {@link RunPaymentItem}. */
+    public List<RunPaymentItem> listForRun(UUID runId) {
+        return jdbc.sql("SELECT id, tool, status, amount_atomic, pay_to, resource, tx_hash, created_at, updated_at"
+                        + " FROM payment_intent WHERE run_id = :runId ORDER BY created_at, id")
+                .param("runId", runId)
+                .query((rs, row) -> {
+                    long amount = rs.getLong("amount_atomic");
+                    boolean noAmount = rs.wasNull();
+                    return new RunPaymentItem(
+                            rs.getObject("id", UUID.class),
+                            rs.getString("tool"),
+                            PaymentIntentStatus.valueOf(rs.getString("status")),
+                            noAmount ? null : Money.usdc(amount),
+                            rs.getString("pay_to"),
+                            rs.getString("resource"),
+                            rs.getString("tx_hash"),
+                            rs.getTimestamp("created_at").toInstant(),
+                            rs.getTimestamp("updated_at").toInstant());
+                })
+                .list();
     }
 
     /** An earlier SETTLED intent of the same run for the same tool and arguments, for dedupe. */

@@ -8,6 +8,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
@@ -115,6 +116,43 @@ class RunRepository {
                             result == null ? null : json.readValue(result, RunEventData.Report.class));
                 })
                 .optional();
+    }
+
+    /**
+     * Newest-first keyset page: runs strictly older than {@code after} in {@code (created_at, id)}
+     * order. One row more than {@code limit} is read so the caller can tell whether another page exists.
+     */
+    List<RunListItem> page(@Nullable RunCursor after, int limit) {
+        String where = after == null ? "" : " WHERE (r.created_at, r.id) < (:createdAt, :id)";
+        JdbcClient.StatementSpec spec = jdbc.sql("""
+                SELECT r.id, r.question, r.status, r.budget_atomic, r.reserved_atomic, r.committed_atomic,
+                       r.llm_cost_usd_micros, r.created_at, r.finished_at,
+                       (SELECT count(*) FROM approval a WHERE a.run_id = r.id AND a.status = 'PENDING') AS pending
+                  FROM run r""" + where + " ORDER BY r.created_at DESC, r.id DESC LIMIT :limit")
+                .param("limit", limit + 1);
+        if (after != null) {
+            spec = spec.param("createdAt", Timestamp.from(after.createdAt())).param("id", after.id());
+        }
+        return spec.query((rs, row) -> new RunListItem(
+                        rs.getObject("id", UUID.class),
+                        RunStatus.valueOf(rs.getString("status")),
+                        rs.getString("question"),
+                        Money.usdc(rs.getLong("budget_atomic")),
+                        Money.usdc(rs.getLong("committed_atomic")),
+                        Money.usdc(rs.getLong("reserved_atomic")),
+                        cost(rs),
+                        rs.getTimestamp("created_at").toInstant(),
+                        instant(rs.getTimestamp("finished_at")),
+                        rs.getInt("pending")))
+                .list();
+    }
+
+    boolean exists(UUID id) {
+        return jdbc.sql("SELECT count(*) FROM run WHERE id = :id")
+                        .param("id", id)
+                        .query(Integer.class)
+                        .single()
+                > 0;
     }
 
     private static RunCost cost(ResultSet rs) throws SQLException {
