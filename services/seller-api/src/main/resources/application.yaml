@@ -109,6 +109,11 @@ seller:
     disclosure-answer: 20000 # 0.02 test USDC (POST /v1/disclosures/{ticker}/questions)
 
 saiman:
+  # API authentication (ADR-0023): only /internal/** is authenticated, with per-caller service tokens
+  # (saiman.auth.service.tokens.<caller>.sha256, compose: SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256 and
+  # _EVALS_SHA256). seller-api has no human users, so no READER/OPERATOR digests are required.
+  auth:
+    require-human-tokens: false
   router:
     openai:
       # One attempt within 20 s: the request deadline is 25 s and a retried call would be billed twice.
