@@ -67,6 +67,21 @@ describe("normalizeCapture", () => {
   });
 });
 
+describe("prototype safety", () => {
+  it("keeps a __proto__ run id as plain data and leaves Object.prototype alone", () => {
+    const capture = normalizeCapture(
+      JSON.parse(
+        `{"capturedAt":"2026-10-01T10:00:00Z","environment":"e","responses":{},"runEvents":{"__proto__":[{"x":1}],"constructor":[]}}`,
+      ),
+    );
+    expect(Object.getPrototypeOf(capture.runEvents)).toBeNull();
+    expect(Object.hasOwn(capture.runEvents, "__proto__")).toBe(true);
+    expect(Object.hasOwn(capture.runEvents, "toString")).toBe(false);
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+    expect(Object.keys(Object.prototype)).toEqual([]);
+  });
+});
+
 describe("replay timing", () => {
   it("clamps gaps to 50 ms - 2 s", () => {
     expect(clampGap(0)).toBe(MIN_GAP_MS);

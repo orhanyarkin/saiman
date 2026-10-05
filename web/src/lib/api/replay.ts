@@ -46,10 +46,16 @@ export function normalizeCapture(json: unknown): Capture {
   if (!isRecord(json.responses)) {
     throw new Error("The recording has no responses.");
   }
-  const runEvents: Record<string, RunEvent[]> = {};
+  // No prototype: a run id such as "__proto__" is then just a key, never Object.prototype.
+  const runEvents: Record<string, RunEvent[]> = Object.create(null) as Record<string, RunEvent[]>;
   if (isRecord(json.runEvents)) {
     for (const [runId, events] of Object.entries(json.runEvents)) {
-      runEvents[runId] = parseRunEvents(events);
+      Object.defineProperty(runEvents, runId, {
+        value: parseRunEvents(events),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
   }
   return {

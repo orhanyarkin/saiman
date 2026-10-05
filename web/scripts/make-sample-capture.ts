@@ -41,5 +41,11 @@ const capture = {
 
 const out = resolve(HERE, "../public/demo/capture.json");
 mkdirSync(dirname(out), { recursive: true });
-writeFileSync(out, `${JSON.stringify(capture, null, 2)}\n`);
+// Internal service hosts (http://seller-api:8081) say nothing useful to a visitor and expose the
+// topology: replace them with a neutral placeholder before anything is published.
+const text = JSON.stringify(capture, null, 2).replace(
+  /http:\/\/[A-Za-z0-9_.-]+:\d+/g,
+  "https://demo.invalid",
+);
+writeFileSync(out, `${text}\n`);
 console.log(`wrote ${out}`);

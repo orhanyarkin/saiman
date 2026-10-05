@@ -268,7 +268,7 @@
         {
           "paymentIntentId": "75f93933-72b5-4604-ad2c-063e3f4e6ed6",
           "tool": "disclosure-questions",
-          "resource": "http://seller-api:8081/v1/disclosures/THYAO/questions",
+          "resource": "https://demo.invalid/v1/disclosures/THYAO/questions",
           "payTo": "0x1111111111111111111111111111111111111111",
           "amount": {
             "atomicUnits": 20000,
@@ -283,7 +283,7 @@
         {
           "paymentIntentId": "b1c2d3e4-0000-4000-8000-000000000002",
           "tool": "disclosure-search",
-          "resource": "http://seller-api:8081/v1/disclosures/search",
+          "resource": "https://demo.invalid/v1/disclosures/search",
           "payTo": "0x1111111111111111111111111111111111111111",
           "amount": {
             "atomicUnits": 10000,

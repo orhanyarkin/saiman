@@ -25,7 +25,20 @@ export interface SseMessage {
  * line, between CR and LF, inside a field name); it returns the messages completed by each chunk.
  * Line ends may be CRLF, LF or CR. Lines starting with `:` are comments; unknown fields are ignored.
  */
+/** Bounds on what one stream may make the parser hold (a hostile or broken server). */
+export const SSE_MAX_LINE_CHARS = 1024 * 1024;
+export const SSE_MAX_DATA_CHARS = 1024 * 1024;
+/** A server `retry: 0` must not become a tight reconnect loop. */
+export const SSE_MIN_RETRY_MS = 250;
+/** A connection must live this long before the failure counter (and so the backoff) resets. */
+const STABLE_CONNECTION_MS = 10_000;
+
 export class SseParser {
+  /** Set when the pending line or the event data exceeded its bound: the stream must be dropped. */
+  overflowed = false;
+  private scanFrom = 0;
+  private dataChars = 0;
+
   /** Server-requested reconnect delay in ms (`retry:`), or null. */
   retryMs: number | null = null;
   /** Last `id:` seen on a dispatched message. */
@@ -40,6 +53,9 @@ export class SseParser {
   private hasId = false;
 
   push(chunk: string): SseMessage[] {
+    if (this.overflowed) {
+      return [];
+    }
     let text = chunk;
     if (!this.started && text.length > 0) {
       this.started = true;
@@ -58,7 +74,8 @@ export class SseParser {
 
     const out: SseMessage[] = [];
     let start = 0;
-    for (let i = 0; i < this.buffer.length; i++) {
+    // Resume where the last call stopped: the kept tail has no line end, so no rescan from 0.
+    for (let i = this.scanFrom; i < this.buffer.length; i++) {
       const ch = this.buffer[i];
       if (ch !== "\n" && ch !== "\r") {
         continue;
@@ -83,6 +100,12 @@ export class SseParser {
       start = i + 1;
     }
     this.buffer = this.buffer.slice(start);
+    this.scanFrom = this.buffer.length;
+    if (this.buffer.length > SSE_MAX_LINE_CHARS || this.dataChars > SSE_MAX_DATA_CHARS) {
+      this.overflowed = true;
+      this.buffer = "";
+      this.data = [];
+    }
     return out;
   }
 
@@ -106,6 +129,7 @@ export class SseParser {
         break;
       case "data":
         this.data.push(value);
+        this.dataChars += value.length + 1;
         break;
       case "id":
         if (!value.includes("\0")) {
@@ -136,6 +160,7 @@ export class SseParser {
     }
     this.event = "";
     this.data = [];
+    this.dataChars = 0;
     this.pendingId = null;
     this.hasId = false;
   }
@@ -204,6 +229,10 @@ export function connectSse(options: SseOptions): SseConnection {
           return;
         }
         deliver(parser.push(decoder.decode(value, { stream: true })));
+        if (parser.overflowed) {
+          await reader.cancel();
+          return;
+        }
         if (signal.aborted) {
           return;
         }
@@ -218,7 +247,6 @@ export function connectSse(options: SseOptions): SseConnection {
       if (signal.aborted) {
         return;
       }
-      failures = 0;
       options.onMessage(message);
     }
   }
@@ -265,17 +293,27 @@ export function connectSse(options: SseOptions): SseConnection {
     } catch {
       // Connection dropped mid-stream: fall through to a reconnect.
     }
+    if (parser.overflowed) {
+      options.onEnd?.(); // a line or event beyond the bounds: drop the stream, do not reconnect
+      return true;
+    }
     return false;
   }
 
   async function loop(): Promise<void> {
     while (!aborted()) {
+      const startedAt = Date.now();
       const stop = await attempt();
       if (stop || aborted()) {
         return;
       }
+      // Only a connection that stayed up resets the backoff; a server that sends one message and
+      // closes, over and over, is backed off like any failure.
+      if (Date.now() - startedAt >= STABLE_CONNECTION_MS) {
+        failures = 0;
+      }
       options.onReconnecting?.();
-      const base = parser.retryMs ?? SSE_DEFAULT_RETRY_MS;
+      const base = Math.max(SSE_MIN_RETRY_MS, parser.retryMs ?? SSE_DEFAULT_RETRY_MS);
       const delay = backoffMs(base, failures);
       failures++;
       await wait(delay, signal);

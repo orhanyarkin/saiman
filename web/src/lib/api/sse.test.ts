@@ -4,6 +4,9 @@ import {
   backoffMs,
   connectSse,
   SSE_MAX_BACKOFF_MS,
+  SSE_MAX_DATA_CHARS,
+  SSE_MAX_LINE_CHARS,
+  SSE_MIN_RETRY_MS,
   SseParser,
   type SseMessage,
 } from "@/lib/api/sse";
@@ -273,5 +276,87 @@ describe("connectSse", () => {
     });
     connection.close();
     expect(aborted).toBe(true);
+  });
+});
+
+describe("connectSse limits", () => {
+  it("ends the stream for good when 10 MB arrive without a newline, with bounded memory", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const chunk = new TextEncoder().encode("x".repeat(64 * 1024));
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulled += chunk.length;
+          controller.enqueue(chunk);
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+    const fetchImpl = vi.fn(() => Promise.resolve(response));
+    const onEnd = vi.fn();
+    connectSse({ url: "/x", fetchImpl, onMessage: () => undefined, onEnd });
+    await vi.waitFor(() => {
+      expect(onEnd).toHaveBeenCalledTimes(1);
+    });
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(SSE_MAX_LINE_CHARS + 16 * 64 * 1024); // stopped near the bound, not at 10 MB
+    expect(fetchImpl).toHaveBeenCalledTimes(1); // no reconnect
+  });
+
+  it("applies a minimum retry base so retry: 0 cannot spin, and backs off after one-message streams", async () => {
+    const delays: number[] = [];
+    const fetchImpl = vi.fn(() => Promise.resolve(streamOf(["retry: 0\n\nid: 1\ndata: x\n\n"])));
+    const realSetTimeout = globalThis.setTimeout;
+    const spy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      fn: () => void,
+      ms?: number,
+    ) => {
+      delays.push(ms ?? 0);
+      return realSetTimeout(fn, 0);
+    }) as typeof setTimeout);
+    const connection = connectSse({ url: "/x", fetchImpl, onMessage: () => undefined });
+    await vi.waitFor(() => {
+      expect(delays.length).toBeGreaterThanOrEqual(4);
+    });
+    connection.close();
+    spy.mockRestore();
+    expect(delays.slice(0, 4)).toEqual([
+      SSE_MIN_RETRY_MS,
+      SSE_MIN_RETRY_MS * 2,
+      SSE_MIN_RETRY_MS * 4,
+      SSE_MIN_RETRY_MS * 8,
+    ]);
+  });
+});
+
+describe("SseParser bounds", () => {
+  it("flags overflow of an unterminated line and of accumulated data", () => {
+    const line = new SseParser();
+    line.push("x".repeat(SSE_MAX_LINE_CHARS + 1));
+    expect(line.overflowed).toBe(true);
+    expect(line.push("data: a\n\n")).toEqual([]);
+
+    const data = new SseParser();
+    const piece = `data: ${"y".repeat(100_000)}\n`;
+    for (let i = 0; i < 12; i++) {
+      data.push(piece);
+    }
+    expect(data.overflowed).toBe(true);
+    expect(SSE_MAX_DATA_CHARS).toBeLessThan(12 * 100_000);
+  });
+
+  it("keeps a long line spread over many chunks correct (scan cursor)", () => {
+    const parser = new SseParser();
+    const out: SseMessage[] = [];
+    for (let i = 0; i < 2000; i++) {
+      out.push(...parser.push("a".repeat(100)));
+    }
+    out.push(...parser.push("\n\n"));
+    expect(out).toEqual([]);
+    expect(parser.push("data: ok\n\n")).toEqual([{ event: "message", data: "ok", id: null }]);
   });
 });
