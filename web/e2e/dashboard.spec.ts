@@ -80,6 +80,8 @@ test("spend page: cap, remaining, limits, per-tool table and day validation", as
     .getByRole("heading", { name: "Remaining" })
     .locator("xpath=ancestor::*[3]");
   await expect(remaining).toContainText("0.94 USDC");
+  await expect(page.getByRole("heading", { name: "Model budget today (shared)" })).toBeVisible();
+  await expect(page.getByText(/\$1\.250000/)).toContainText("$1.250000 of $5.000000");
   const byTool = page.getByRole("table", { name: /by tool and status/ });
   await expect(byTool.getByRole("columnheader")).toHaveCount(4);
   await expect(byTool).toContainText("HELD");

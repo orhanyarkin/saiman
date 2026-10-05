@@ -1,6 +1,62 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { Money, SpendOverview } from "@/lib/api/types";
-import { formatMoney, moneyTitle, remainingMoney, UNAVAILABLE } from "@/lib/money";
+import type { LlmDay, Money, SpendOverview } from "@/lib/api/types";
+import {
+  formatMoney,
+  formatUsdMicros,
+  moneyTitle,
+  remainingMoney,
+  remainingUsdMicros,
+  UNAVAILABLE,
+} from "@/lib/money";
+
+/**
+ * Below this much model budget left, a new run may be refused with the daily-cap answer. The API
+ * does not expose the per-run model budget yet, so this is an approximation shown as a hint only
+ * (the 503 itself stays the authority).
+ */
+const LLM_RUN_BUDGET_HINT_USD_MICROS = 100_000;
+
+/** The shared model (LLM) budget of the UTC day, spent / cap at micro-dollar precision. */
+export function LlmDayCard({ llmDay }: { llmDay: LlmDay }) {
+  const spent = formatUsdMicros(llmDay.spentUsdMicros);
+  const cap = formatUsdMicros(llmDay.capUsdMicros);
+  const left = remainingUsdMicros(llmDay.capUsdMicros, llmDay.spentUsdMicros);
+  const low = left !== null && left < LLM_RUN_BUDGET_HINT_USD_MICROS;
+  const canMeter = Number.isSafeInteger(llmDay.capUsdMicros) && llmDay.capUsdMicros > 0;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <h3>Model budget today (shared)</h3>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xl font-semibold">
+          {spent ?? UNAVAILABLE} <span className="text-muted-foreground text-base">of</span>{" "}
+          {cap ?? UNAVAILABLE}
+        </p>
+        {canMeter ? (
+          <meter
+            className="mt-2 h-3 w-full"
+            min={0}
+            max={llmDay.capUsdMicros}
+            value={Math.min(Math.max(llmDay.spentUsdMicros, 0), llmDay.capUsdMicros)}
+            aria-label="Model budget used today"
+          />
+        ) : null}
+        <p className="text-muted-foreground text-sm">
+          One language-model budget for all visitors, per UTC day.
+        </p>
+        {low ? (
+          <p role="note" className="mt-2 text-sm font-medium">
+            Not enough is left for a full run: new runs will be offered the recorded demo until
+            00:00 UTC.
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
 
 function Amount({ money }: { money: Money }) {
   return <span title={moneyTitle(money)}>{formatMoney(money)}</span>;
@@ -87,6 +143,8 @@ export function SpendOverviewView({ spend }: { spend: SpendOverview }) {
               <p className="text-muted-foreground text-sm">Paid and settled today.</p>
             </CardContent>
           </Card>
+          {/* Recordings made before ADR-0026 have no llmDay. */}
+          {(spend as Partial<SpendOverview>).llmDay ? <LlmDayCard llmDay={spend.llmDay} /> : null}
         </div>
       </section>
 

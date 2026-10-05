@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's principal name and effective roles */
+        get: operations["getMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ping": {
         parameters: {
             query?: never;
@@ -158,6 +175,7 @@ export interface components {
             amountAtomic: number;
             /** Format: date-time */
             decidedAt?: string | null;
+            decidedBy?: string | null;
             /** Format: date-time */
             expiresAt: string;
             /** Format: uuid */
@@ -181,6 +199,10 @@ export interface components {
         DecisionRequest: {
             /** @enum {string|null} */
             decision?: "APPROVE" | "REJECT" | null;
+        };
+        MeResponse: {
+            name: string;
+            roles: string[];
         };
         Money: {
             asset: string;
@@ -284,6 +306,12 @@ export interface components {
             maxRunBudget: components["schemas"]["Money"];
             perRequestMax?: components["schemas"]["Money"] | null;
         };
+        SpendLlmDay: {
+            /** Format: int64 */
+            capUsdMicros: number;
+            /** Format: int64 */
+            spentUsdMicros: number;
+        };
         SpendOverview: {
             byTool: components["schemas"]["SpendByTool"][];
             dailyCap: components["schemas"]["Money"];
@@ -292,6 +320,7 @@ export interface components {
             dayCommitted: components["schemas"]["Money"];
             dayReserved: components["schemas"]["Money"];
             limits: components["schemas"]["SpendLimits"];
+            llmDay: components["schemas"]["SpendLlmDay"];
         };
         StartRunRequest: {
             /** Format: int64 */
@@ -340,6 +369,26 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    getMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeResponse"];
                 };
             };
         };
@@ -438,7 +487,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The service is not ready; Retry-After says when to try again */
+            /** @description The service is not ready, or the daily model budget is used up (code LLM_DAILY_CAP_REACHED, replayAvailable true); Retry-After says when to try again */
             503: {
                 headers: {
                     [name: string]: unknown;

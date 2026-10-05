@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./live-test";
 
 /**
  * M5 acceptance against the real stack: a new user starts a run, approves the payment and sees it

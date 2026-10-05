@@ -36,6 +36,12 @@ export function ApprovalRow({ approval }: { approval: ApprovalView }) {
           <time dateTime={approval.expiresAt}>{expires.toLocaleTimeString()}</time>
           {expired ? <strong> (expired)</strong> : null}
         </dd>
+        {approval.decidedBy ? (
+          <>
+            <dt className="text-muted-foreground font-medium">Decided by</dt>
+            <dd>{approval.decidedBy}</dd>
+          </>
+        ) : null}
         <dt className="text-muted-foreground font-medium">Run</dt>
         <dd>
           <Link
