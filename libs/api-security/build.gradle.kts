@@ -11,6 +11,11 @@ dependencies {
     implementation(libs.spring.boot.autoconfigure)
     implementation(libs.spring.boot.starter.webmvc)
 
+    // TestTokens: known raw tokens and their digests for the services' tests (DynamicPropertyRegistry helper).
+    testFixturesApi(platform(libs.spring.boot.dependencies))
+    testFixturesImplementation(libs.jspecify)
+    testFixturesImplementation(libs.spring.boot.starter.test)
+
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.spring.boot.starter.security.test)
     testImplementation(libs.spring.boot.starter.webmvc.test)
