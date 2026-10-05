@@ -19,7 +19,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * The dashboard's view of payments (M5, ADR-0022): a keyset-paged list and a drill-down, addressed by payment id.
  * Read-only, behind {@link LedgerApiGuardFilter}. Malformed parameters (a non-UUID id, an unknown book, a non-integer
- * limit) are 400 Problem Details from Spring MVC's type conversion.
+ * limit, a forged or out-of-range cursor) are 400 Problem Details whose {@code detail} names the parameter, never its
+ * value ({@link ApiExceptionHandler}).
  */
 @RestController
 @RequestMapping("/api/v1/ledger/payments")
@@ -56,7 +57,7 @@ public class LedgerPaymentsController {
         try {
             return queries.payments(runId, book, limit, before);
         } catch (LedgerQueries.InvalidCursorException e) {
-            throw ApiProblems.badRequest("before is not a cursor issued by this service");
+            throw ApiProblems.badRequest("before is invalid");
         }
     }
 

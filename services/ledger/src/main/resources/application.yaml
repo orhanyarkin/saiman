@@ -7,6 +7,11 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+  # API only: no static resources. An unknown path is then a NoHandlerFoundException that the service's
+  # ApiExceptionHandler renders with fixed text, instead of a resource-handler 404 that quotes the path.
+  web:
+    resources:
+      add-mappings: false
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/saiman}
     username: ${SPRING_DATASOURCE_USERNAME:saiman}

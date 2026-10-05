@@ -4,6 +4,7 @@ import io.github.orhanyarkin.saiman.shared.money.Money;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -28,14 +29,22 @@ public class LedgerQueries {
     /** Largest page the payments list returns. */
     public static final int MAX_LIMIT = 100;
 
+    /** Most sellers the revenue report lists. */
+    public static final int MAX_REVENUE_ROWS = 100;
+
+    /** 2^53-1: the largest integer every JSON client reads exactly. */
+    static final long MAX_SAFE_INTEGER = 9_007_199_254_740_991L;
+
     private static final String SUMMARY_COLUMNS = """
             p.id, p.run_id, p.buyer_state, p.seller_state, p.chain_state, p.amount_atomic, p.asset, p.decimals,
             p.pay_to, p.created_at, p.updated_at, p.buyer_tx_hash, p.seller_tx_hash, p.chain_tx_hash""";
 
     private final JdbcClient jdbc;
+    private final Clock clock;
 
-    public LedgerQueries(JdbcClient jdbc) {
+    public LedgerQueries(JdbcClient jdbc, Clock clock) {
         this.jdbc = jdbc;
+        this.clock = clock;
     }
 
     /** A {@code before} token that this service did not issue. */
@@ -49,7 +58,8 @@ public class LedgerQueries {
      * Payments newest first, keyset-paged on {@code (created_at, id)}.
      *
      * @param before the previous page's {@code nextCursor}
-     * @throws InvalidCursorException if {@code before} is not a cursor this service issued
+     * @throws InvalidCursorException if {@code before} is not a cursor this service issued, or its instant lies
+     *     outside [2025-01-01, now + 1 day]
      */
     @Transactional(readOnly = true)
     public PaymentPage payments(@Nullable UUID runId, @Nullable BookFilter book, int limit, @Nullable String before) {
@@ -67,7 +77,8 @@ public class LedgerQueries {
             params.put("book", book.name());
         }
         if (before != null) {
-            PaymentCursor cursor = PaymentCursor.decode(before).orElseThrow(InvalidCursorException::new);
+            PaymentCursor cursor =
+                    PaymentCursor.decode(before, clock.instant()).orElseThrow(InvalidCursorException::new);
             where.add("(p.created_at, p.id) < (:beforeAt, :beforeId)");
             params.put("beforeAt", OffsetDateTime.ofInstant(cursor.createdAt(), ZoneOffset.UTC));
             params.put("beforeId", cursor.paymentId());
@@ -170,31 +181,55 @@ public class LedgerQueries {
     }
 
     /**
-     * Seller revenue per {@code payTo} and asset, summed as {@code numeric} from the SELLER book's accounts (ADR-0021):
-     * credits of {@code revenue:data}, debits of {@code revenue:credit-notes}, credits of {@code
-     * liability:customer-credits}; entry counts from the SELLER book's SALE and CREDIT_NOTE entries.
+     * Seller revenue per {@code payTo} and asset from the SELLER book's accounts (ADR-0021), each a signed net summed as
+     * {@code numeric}: {@code revenue:data} credits minus debits, {@code revenue:credit-notes} debits minus credits,
+     * {@code liability:customer-credits} credits minus debits, so REVERSAL entries count. The chain-verified split
+     * follows {@link RevenueReport.Verified}; {@code openFindings} counts the seller's payments (with SELLER-book
+     * entries) that have any {@code reconciliation_mismatch} row. At most {@link #MAX_REVENUE_ROWS} rows, largest
+     * gross first.
+     *
+     * @param payTo only this seller (lower-case), or null for all
      */
     @Transactional(readOnly = true)
-    public RevenueReport revenue() {
-        List<RevenueReport.Seller> sellers = jdbc.sql("""
-                        WITH totals AS (
+    public RevenueReport revenue(@Nullable String payTo) {
+        List<RevenueReport.Seller> rows = jdbc.sql("""
+                        WITH lines AS (
                             SELECT a.wallet AS pay_to, a.asset, a.decimals,
-                                   coalesce(sum(p.amount_atomic) FILTER (
-                                       WHERE a.code = 'seller:' || a.wallet || ':revenue:data'
-                                         AND p.side = 'CREDIT'), 0) AS gross,
-                                   coalesce(sum(p.amount_atomic) FILTER (
-                                       WHERE a.code = 'seller:' || a.wallet || ':revenue:credit-notes'
-                                         AND p.side = 'DEBIT'), 0) AS credit_notes,
-                                   coalesce(sum(p.amount_atomic) FILTER (
-                                       WHERE a.code = 'seller:' || a.wallet || ':liability:customer-credits'
-                                         AND p.side = 'CREDIT'), 0) AS customer_credits
+                                   substr(a.code, length('seller:' || a.wallet || ':') + 1) AS acct,
+                                   CASE p.side WHEN 'CREDIT' THEN p.amount_atomic::numeric
+                                               ELSE -p.amount_atomic::numeric END AS signed,
+                                   coalesce(pm.chain_state = 'USED' AND NOT EXISTS (
+                                       SELECT 1 FROM reconciliation_mismatch m
+                                        WHERE m.payment_id = pm.id
+                                          AND m.kind NOT IN ('ENCUMBRANCE_NOT_CLEARED', 'BOOKS_OPEN',
+                                                             'CREDIT_NOTE_UNCORROBORATED')), false) AS sale_verified,
+                                   EXISTS (
+                                       SELECT 1 FROM credit_note_corroboration c
+                                        WHERE c.payment_id = pm.id AND c.tx_hash = pm.seller_tx_hash
+                                          AND c.amount_atomic = pm.amount_atomic) AS note_corroborated
                               FROM account a
-                              LEFT JOIN posting p ON p.account_code = a.code AND p.asset = a.asset
+                              JOIN posting p ON p.account_code = a.code AND p.asset = a.asset
+                              JOIN journal_entry e ON e.id = p.entry_id
+                              LEFT JOIN payment pm ON pm.id = e.payment_id
                              WHERE a.book = 'SELLER' AND a.wallet IS NOT NULL
+                               AND (CAST(:payTo AS text) IS NULL OR a.wallet = CAST(:payTo AS text))
                                AND a.code IN ('seller:' || a.wallet || ':revenue:data',
                                               'seller:' || a.wallet || ':revenue:credit-notes',
-                                              'seller:' || a.wallet || ':liability:customer-credits')
-                             GROUP BY a.wallet, a.asset, a.decimals),
+                                              'seller:' || a.wallet || ':liability:customer-credits')),
+                        totals AS (
+                            SELECT pay_to, asset, decimals,
+                                   coalesce(sum(signed) FILTER (WHERE acct = 'revenue:data'), 0) AS gross,
+                                   coalesce(-sum(signed) FILTER (WHERE acct = 'revenue:credit-notes'), 0)
+                                       AS credit_notes,
+                                   coalesce(sum(signed) FILTER (WHERE acct = 'liability:customer-credits'), 0)
+                                       AS customer_credits,
+                                   coalesce(sum(signed) FILTER (WHERE acct = 'revenue:data' AND sale_verified), 0)
+                                       AS v_gross,
+                                   coalesce(-sum(signed) FILTER (
+                                       WHERE acct = 'revenue:credit-notes' AND sale_verified AND note_corroborated), 0)
+                                       AS v_credit_notes
+                              FROM lines
+                             GROUP BY pay_to, asset, decimals),
                         counts AS (
                             SELECT pm.pay_to, pm.asset,
                                    count(*) FILTER (WHERE e.kind = 'SALE')        AS sales,
@@ -202,28 +237,58 @@ public class LedgerQueries {
                               FROM journal_entry e
                               JOIN payment pm ON pm.id = e.payment_id
                              WHERE e.book = 'SELLER' AND e.kind IN ('SALE', 'CREDIT_NOTE')
+                             GROUP BY pm.pay_to, pm.asset),
+                        findings AS (
+                            SELECT pm.pay_to, pm.asset, count(DISTINCT m.payment_id) AS open_findings
+                              FROM reconciliation_mismatch m
+                              JOIN payment pm ON pm.id = m.payment_id
+                             WHERE EXISTS (SELECT 1 FROM journal_entry e
+                                            WHERE e.payment_id = pm.id AND e.book = 'SELLER')
                              GROUP BY pm.pay_to, pm.asset)
                         SELECT t.pay_to, t.asset, t.decimals, t.gross, t.credit_notes,
                                t.gross - t.credit_notes AS net, t.customer_credits,
-                               coalesce(c.sales, 0) AS sales, coalesce(c.credited, 0) AS credited
+                               t.v_gross, t.v_credit_notes, t.v_gross - t.v_credit_notes AS v_net,
+                               greatest(t.gross - t.v_gross, 0) AS unverified,
+                               coalesce(c.sales, 0) AS sales, coalesce(c.credited, 0) AS credited,
+                               coalesce(f.open_findings, 0) AS open_findings
                           FROM totals t
                           LEFT JOIN counts c ON c.pay_to = t.pay_to AND c.asset = t.asset
+                          LEFT JOIN findings f ON f.pay_to = t.pay_to AND f.asset = t.asset
                          ORDER BY t.gross DESC, t.pay_to, t.asset
+                         LIMIT :fetch
                         """)
+                .param("payTo", payTo)
+                .param("fetch", MAX_REVENUE_ROWS + 1)
                 .query((rs, n) -> {
                     String asset = rs.getString("asset");
                     int decimals = rs.getInt("decimals");
+                    Clamp clamp = new Clamp();
+                    Money gross = new Money(clamp.amount(rs.getBigDecimal("gross")), asset, decimals);
+                    Money creditNotes = new Money(clamp.amount(rs.getBigDecimal("credit_notes")), asset, decimals);
+                    SignedAmount net = new SignedAmount(clamp.signed(rs.getBigDecimal("net")), asset, decimals);
+                    Money customerCredits =
+                            new Money(clamp.amount(rs.getBigDecimal("customer_credits")), asset, decimals);
+                    RevenueReport.Verified verified = new RevenueReport.Verified(
+                            new Money(clamp.amount(rs.getBigDecimal("v_gross")), asset, decimals),
+                            new Money(clamp.amount(rs.getBigDecimal("v_credit_notes")), asset, decimals),
+                            new SignedAmount(clamp.signed(rs.getBigDecimal("v_net")), asset, decimals));
+                    Money unverified = new Money(clamp.amount(rs.getBigDecimal("unverified")), asset, decimals);
                     return new RevenueReport.Seller(
                             rs.getString("pay_to"),
-                            new Money(saturated(rs.getBigDecimal("gross")), asset, decimals),
-                            new Money(saturated(rs.getBigDecimal("credit_notes")), asset, decimals),
-                            new SignedAmount(saturated(rs.getBigDecimal("net")), asset, decimals),
-                            new Money(saturated(rs.getBigDecimal("customer_credits")), asset, decimals),
+                            gross,
+                            creditNotes,
+                            net,
+                            customerCredits,
                             rs.getLong("sales"),
-                            rs.getLong("credited"));
+                            rs.getLong("credited"),
+                            verified,
+                            unverified,
+                            rs.getLong("open_findings"),
+                            clamp.happened);
                 })
                 .list();
-        return new RevenueReport(sellers);
+        boolean truncated = rows.size() > MAX_REVENUE_ROWS;
+        return new RevenueReport(truncated ? rows.subList(0, MAX_REVENUE_ROWS) : rows, truncated);
     }
 
     private static PaymentSummary summary(ResultSet rs, int row) throws SQLException {
@@ -256,15 +321,34 @@ public class LedgerQueries {
         return atomic < 0 ? null : new Money(atomic, rs.getString("asset"), rs.getInt("decimals"));
     }
 
-    /** A numeric sum clamped to {@code ±Long.MAX_VALUE}. */
-    private static long saturated(BigDecimal value) {
-        BigDecimal max = BigDecimal.valueOf(Long.MAX_VALUE);
-        if (value.compareTo(max) > 0) {
-            return Long.MAX_VALUE;
+    /**
+     * Clamps numeric sums to what every JSON client reads exactly (2^53-1, the bound V3 puts on single amounts) and
+     * remembers whether it had to. A flood of forged events must not turn the report into a 500 or a wrong number.
+     */
+    private static final class Clamp {
+        private static final BigDecimal MAX = BigDecimal.valueOf(MAX_SAFE_INTEGER);
+        private boolean happened;
+
+        /** For Money: [0, 2^53-1]. */
+        long amount(BigDecimal value) {
+            if (value.signum() < 0) {
+                happened = true;
+                return 0;
+            }
+            return signed(value);
         }
-        if (value.compareTo(max.negate()) < 0) {
-            return -Long.MAX_VALUE;
+
+        /** For SignedAmount: [-(2^53-1), 2^53-1]. */
+        long signed(BigDecimal value) {
+            if (value.compareTo(MAX) > 0) {
+                happened = true;
+                return MAX_SAFE_INTEGER;
+            }
+            if (value.compareTo(MAX.negate()) < 0) {
+                happened = true;
+                return -MAX_SAFE_INTEGER;
+            }
+            return value.longValueExact();
         }
-        return value.longValueExact();
     }
 }
