@@ -369,7 +369,7 @@ class PaidCallSpendControlTests extends SpendTestSupport {
                         .param("id", run)
                         .update())
                 .isInstanceOf(DataAccessException.class)
-                .hasMessageContaining("immutable");
+                .hasRootCauseMessage("ERROR: permission denied for table run");
         assertThatThrownBy(() -> jdbc.sql("UPDATE run SET reserved_atomic = 20001 WHERE id = :id")
                         .param("id", run)
                         .update())
