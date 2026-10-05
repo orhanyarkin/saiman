@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./helpers";
 
 test("landing route shows the System check card", async ({ page }) => {
   await page.goto("/");

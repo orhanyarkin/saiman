@@ -1,0 +1,1332 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-01T10:00:00Z",
+  "environment": "SAMPLE DATA from the e2e fixtures - not a real recording",
+  "network": "base-sepolia",
+  "sourceCommit": "sample",
+  "responses": {
+    "/api/v1/ping": {
+      "service": "orchestrator",
+      "dbTime": "2026-10-01T10:00:00Z",
+      "traceId": null
+    },
+    "/api/v1/runs?limit=20": {
+      "items": [
+        {
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "status": "SUCCEEDED",
+          "question": "THYAO son özel durum açıklamaları neler?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 30000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 30000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 6923,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 36923,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T10:00:01Z",
+          "finishedAt": "2026-10-01T10:00:13Z",
+          "pendingApprovals": 0
+        },
+        {
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "status": "FAILED",
+          "question": "ASELS temettü kararları nelerdir?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 0,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T09:00:00Z",
+          "finishedAt": "2026-10-01T09:00:07Z",
+          "pendingApprovals": 0
+        }
+      ],
+      "next": "cursor-2"
+    },
+    "/api/v1/runs?limit=20&before=cursor-2": {
+      "items": [
+        {
+          "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+          "status": "SUCCEEDED",
+          "question": "GARAN bilanço duyuruları hangi tarihlerde yapıldı?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 20000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 5400,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 25400,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T08:00:00Z",
+          "finishedAt": "2026-10-01T08:00:11Z",
+          "pendingApprovals": 0
+        }
+      ]
+    },
+    "/api/v1/runs?limit=5": {
+      "items": [
+        {
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "status": "SUCCEEDED",
+          "question": "THYAO son özel durum açıklamaları neler?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 30000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 30000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 6923,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 36923,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T10:00:01Z",
+          "finishedAt": "2026-10-01T10:00:13Z",
+          "pendingApprovals": 0
+        },
+        {
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "status": "FAILED",
+          "question": "ASELS temettü kararları nelerdir?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 0,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T09:00:00Z",
+          "finishedAt": "2026-10-01T09:00:07Z",
+          "pendingApprovals": 0
+        },
+        {
+          "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+          "status": "SUCCEEDED",
+          "question": "GARAN bilanço duyuruları hangi tarihlerde yapıldı?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 20000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 5400,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 25400,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T08:00:00Z",
+          "finishedAt": "2026-10-01T08:00:11Z",
+          "pendingApprovals": 0
+        }
+      ]
+    },
+    "/api/v1/runs/6ad4354c-8e79-4b49-b5d9-d45eb9689b41/payments": {
+      "items": [
+        {
+          "paymentIntentId": "75f93933-72b5-4604-ad2c-063e3f4e6ed6",
+          "tool": "disclosure-questions",
+          "resource": "http://seller-api:8081/v1/disclosures/THYAO/questions",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "status": "SETTLED",
+          "txHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "createdAt": "2026-10-01T10:00:05Z",
+          "updatedAt": "2026-10-01T10:00:08Z"
+        },
+        {
+          "paymentIntentId": "b1c2d3e4-0000-4000-8000-000000000002",
+          "tool": "disclosure-search",
+          "resource": "http://seller-api:8081/v1/disclosures/search",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 10000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "status": "HELD",
+          "txHash": null,
+          "createdAt": "2026-10-01T10:00:09Z",
+          "updatedAt": "2026-10-01T10:00:09Z"
+        }
+      ]
+    },
+    "/api/v1/spend": {
+      "day": "2026-10-05",
+      "dailyCap": {
+        "atomicUnits": 1000000,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "dayReserved": {
+        "atomicUnits": 10000,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "dayCommitted": {
+        "atomicUnits": 50000,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "limits": {
+        "defaultRunBudget": {
+          "atomicUnits": 50000,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "maxRunBudget": {
+          "atomicUnits": 200000,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "approvalThreshold": {
+          "atomicUnits": 10000,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "perRequestMax": {
+          "atomicUnits": 100000,
+          "asset": "USDC",
+          "decimals": 6
+        }
+      },
+      "byTool": [
+        {
+          "tool": "disclosure-questions",
+          "status": "SETTLED",
+          "count": 2,
+          "amount": {
+            "atomicUnits": 40000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        },
+        {
+          "tool": "disclosure-search",
+          "status": "HELD",
+          "count": 1,
+          "amount": {
+            "atomicUnits": 10000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        },
+        {
+          "tool": "disclosure-search",
+          "status": "RELEASED",
+          "count": 1,
+          "amount": {
+            "atomicUnits": 10000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        }
+      ]
+    },
+    "/api/v1/ledger/trial-balance": [
+      {
+        "book": "BUYER",
+        "account": "buyer:0x2222222222222222222222222222222222222222:wallet:available",
+        "type": "ASSET",
+        "asset": "USDC",
+        "decimals": 6,
+        "debit": 0,
+        "credit": 60000,
+        "balance": -60000
+      },
+      {
+        "book": "BUYER",
+        "account": "buyer:0x2222222222222222222222222222222222222222:wallet:encumbered",
+        "type": "ASSET",
+        "asset": "USDC",
+        "decimals": 6,
+        "debit": 60000,
+        "credit": 40000,
+        "balance": 20000
+      },
+      {
+        "book": "BUYER",
+        "account": "buyer:0x2222222222222222222222222222222222222222:expense:data",
+        "type": "EXPENSE",
+        "asset": "USDC",
+        "decimals": 6,
+        "debit": 40000,
+        "credit": 0,
+        "balance": 40000
+      },
+      {
+        "book": "SELLER",
+        "account": "seller:0x1111111111111111111111111111111111111111:wallet",
+        "type": "ASSET",
+        "asset": "USDC",
+        "decimals": 6,
+        "debit": 40000,
+        "credit": 0,
+        "balance": 40000
+      },
+      {
+        "book": "SELLER",
+        "account": "seller:0x1111111111111111111111111111111111111111:revenue:data",
+        "type": "REVENUE",
+        "asset": "USDC",
+        "decimals": 6,
+        "debit": 0,
+        "credit": 40000,
+        "balance": -40000
+      }
+    ],
+    "/api/v1/ledger/payments?limit=20": {
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "buyerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "sellerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "chainTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "createdAt": "2026-10-01T10:00:10Z",
+          "updatedAt": "2026-10-01T10:05:00Z"
+        },
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52",
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "buyerTxHash": null,
+          "sellerTxHash": null,
+          "chainTxHash": null,
+          "createdAt": "2026-10-01T09:00:10Z",
+          "updatedAt": "2026-10-01T09:05:00Z"
+        }
+      ],
+      "nextCursor": "page-2"
+    },
+    "/api/v1/ledger/payments?limit=20&before=page-2": {
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e53",
+          "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "AUTHORIZED",
+          "sellerState": "NONE",
+          "chainState": "UNKNOWN",
+          "buyerTxHash": null,
+          "sellerTxHash": null,
+          "chainTxHash": null,
+          "createdAt": "2026-10-01T08:00:10Z",
+          "updatedAt": "2026-10-01T08:00:10Z"
+        }
+      ],
+      "nextCursor": null
+    },
+    "/api/v1/ledger/payments?book=BUYER&limit=20": {
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "buyerTxHash": null,
+          "sellerTxHash": null,
+          "chainTxHash": null,
+          "createdAt": "2026-10-01T10:00:10Z",
+          "updatedAt": "2026-10-01T10:05:00Z"
+        }
+      ],
+      "nextCursor": null
+    },
+    "/api/v1/ledger/payments?book=SELLER&limit=20": {
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52",
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "buyerTxHash": null,
+          "sellerTxHash": null,
+          "chainTxHash": null,
+          "createdAt": "2026-10-01T09:00:10Z",
+          "updatedAt": "2026-10-01T09:05:00Z"
+        }
+      ],
+      "nextCursor": null
+    },
+    "/api/v1/ledger/payments?runId=6ad4354c-8e79-4b49-b5d9-d45eb9689b41&limit=50": {
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "buyerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "sellerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "chainTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "createdAt": "2026-10-01T10:00:10Z",
+          "updatedAt": "2026-10-01T10:05:00Z"
+        }
+      ],
+      "nextCursor": null
+    },
+    "/api/v1/ledger/payments/3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51": {
+      "payment": {
+        "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+        "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+        "payTo": "0x1111111111111111111111111111111111111111",
+        "amount": {
+          "atomicUnits": 20000,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "buyerState": "SETTLED",
+        "sellerState": "SETTLED",
+        "chainState": "USED",
+        "buyerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+        "sellerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+        "chainTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+        "createdAt": "2026-10-01T10:00:10Z",
+        "updatedAt": "2026-10-01T10:05:00Z"
+      },
+      "entries": [
+        {
+          "entryId": "e0000000-0000-4000-8000-000000000001",
+          "book": "BUYER",
+          "kind": "ENCUMBER",
+          "description": "Authorization signed",
+          "effectiveAt": "2026-10-01T10:00:10Z",
+          "reversesEntryId": null,
+          "postings": [
+            {
+              "accountCode": "buyer:0x2222222222222222222222222222222222222222:wallet:encumbered",
+              "side": "DEBIT",
+              "amount": {
+                "atomicUnits": 20000,
+                "asset": "USDC",
+                "decimals": 6
+              }
+            },
+            {
+              "accountCode": "buyer:0x2222222222222222222222222222222222222222:wallet:available",
+              "side": "CREDIT",
+              "amount": {
+                "atomicUnits": 20000,
+                "asset": "USDC",
+                "decimals": 6
+              }
+            }
+          ]
+        },
+        {
+          "entryId": "e0000000-0000-4000-8000-000000000002",
+          "book": "BUYER",
+          "kind": "SETTLE",
+          "description": "Payment settled",
+          "effectiveAt": "2026-10-01T10:00:20Z",
+          "reversesEntryId": null,
+          "postings": [
+            {
+              "accountCode": "buyer:0x2222222222222222222222222222222222222222:expense:data",
+              "side": "DEBIT",
+              "amount": {
+                "atomicUnits": 20000,
+                "asset": "USDC",
+                "decimals": 6
+              }
+            },
+            {
+              "accountCode": "buyer:0x2222222222222222222222222222222222222222:wallet:encumbered",
+              "side": "CREDIT",
+              "amount": {
+                "atomicUnits": 20000,
+                "asset": "USDC",
+                "decimals": 6
+              }
+            }
+          ]
+        },
+        {
+          "entryId": "e0000000-0000-4000-8000-000000000003",
+          "book": "SELLER",
+          "kind": "SALE",
+          "description": "Payment received",
+          "effectiveAt": "2026-10-01T10:00:21Z",
+          "reversesEntryId": null,
+          "postings": [
+            {
+              "accountCode": "seller:0x1111111111111111111111111111111111111111:wallet",
+              "side": "DEBIT",
+              "amount": {
+                "atomicUnits": 20000,
+                "asset": "USDC",
+                "decimals": 6
+              }
+            },
+            {
+              "accountCode": "seller:0x1111111111111111111111111111111111111111:revenue:data",
+              "side": "CREDIT",
+              "amount": {
+                "atomicUnits": 20000,
+                "asset": "USDC",
+                "decimals": 6
+              }
+            }
+          ]
+        }
+      ],
+      "mismatches": []
+    },
+    "/api/v1/ledger/payments/3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52": {
+      "payment": {
+        "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52",
+        "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+        "payTo": "0x1111111111111111111111111111111111111111",
+        "amount": {
+          "atomicUnits": 20000,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "buyerState": "SETTLED",
+        "sellerState": "SETTLED",
+        "chainState": "USED",
+        "buyerTxHash": null,
+        "sellerTxHash": null,
+        "chainTxHash": null,
+        "createdAt": "2026-10-01T09:00:10Z",
+        "updatedAt": "2026-10-01T09:05:00Z"
+      },
+      "entries": [
+        {
+          "entryId": "e0000000-0000-4000-8000-000000000011",
+          "book": "SELLER",
+          "kind": "SALE",
+          "description": "Payment received",
+          "effectiveAt": "2026-10-01T09:00:21Z",
+          "reversesEntryId": null,
+          "postings": [
+            {
+              "accountCode": "seller:0x1111111111111111111111111111111111111111:wallet",
+              "side": "DEBIT",
+              "amount": {
+                "atomicUnits": 20000,
+                "asset": "USDC",
+                "decimals": 6
+              }
+            },
+            {
+              "accountCode": "seller:0x1111111111111111111111111111111111111111:revenue:data",
+              "side": "CREDIT",
+              "amount": {
+                "atomicUnits": 20000,
+                "asset": "USDC",
+                "decimals": 6
+              }
+            }
+          ]
+        }
+      ],
+      "mismatches": [
+        {
+          "kind": "AMOUNT_MISMATCH",
+          "status": "OPEN",
+          "reconciliationRunId": "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61",
+          "detectedAt": "2026-10-01T10:10:00Z",
+          "adjustmentEntryId": null,
+          "ledgerValue": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "chainValue": {
+            "atomicUnits": 10000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        }
+      ]
+    },
+    "/api/v1/ledger/payments/3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e53": {
+      "payment": {
+        "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e53",
+        "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+        "payTo": "0x1111111111111111111111111111111111111111",
+        "amount": {
+          "atomicUnits": 20000,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "buyerState": "AUTHORIZED",
+        "sellerState": "NONE",
+        "chainState": "UNKNOWN",
+        "buyerTxHash": null,
+        "sellerTxHash": null,
+        "chainTxHash": null,
+        "createdAt": "2026-10-01T08:00:10Z",
+        "updatedAt": "2026-10-01T08:00:10Z"
+      },
+      "entries": [],
+      "mismatches": []
+    },
+    "/api/v1/ledger/revenue": {
+      "items": [
+        {
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "grossSales": {
+            "atomicUnits": 40000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "creditNotes": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "netRevenue": {
+            "atomicUnits": 40000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "customerCredits": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "sales": 2,
+          "credited": 0,
+          "chainVerified": {
+            "grossSales": {
+              "atomicUnits": 20000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "creditNotes": {
+              "atomicUnits": 0,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "netRevenue": {
+              "atomicUnits": 20000,
+              "asset": "USDC",
+              "decimals": 6
+            }
+          },
+          "unverifiedGrossSales": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "openFindings": 1,
+          "saturated": false
+        }
+      ],
+      "truncated": false
+    },
+    "/api/v1/reconciliation/runs?limit=20": {
+      "items": [
+        {
+          "runId": "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61",
+          "status": "COMPLETED",
+          "startedAt": "2026-10-01T10:10:00Z",
+          "finishedAt": "2026-10-01T10:10:04Z",
+          "safeBlock": 12345678,
+          "summary": {
+            "checked": 3,
+            "matched": 1,
+            "pending": 1,
+            "mismatches": 1,
+            "resolvedUsed": 2,
+            "resolvedUnused": 0
+          }
+        },
+        {
+          "runId": "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a62",
+          "status": "PARTIAL",
+          "startedAt": "2026-10-01T09:10:00Z",
+          "finishedAt": "2026-10-01T09:10:02Z",
+          "safeBlock": 12345000,
+          "summary": {
+            "checked": 2,
+            "matched": 1,
+            "pending": 1,
+            "mismatches": 0,
+            "resolvedUsed": 1,
+            "resolvedUnused": 0
+          }
+        }
+      ]
+    },
+    "/api/v1/reconciliation/runs/latest": {
+      "runId": "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61",
+      "status": "COMPLETED",
+      "network": "eip155:84532",
+      "startedAt": "2026-10-01T10:10:00Z",
+      "finishedAt": "2026-10-01T10:10:04Z",
+      "safeBlock": 12345678,
+      "summary": {
+        "checked": 3,
+        "matched": 1,
+        "pending": 1,
+        "mismatches": 1,
+        "resolvedUsed": 2,
+        "resolvedUnused": 0
+      },
+      "suspense": {
+        "atomicUnits": 0,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "suspenseSide": null,
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+          "paymentIntentId": null,
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "status": "MATCHED",
+          "txHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "mismatch": null
+        },
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52",
+          "paymentIntentId": null,
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "status": "MISMATCH",
+          "txHash": null,
+          "mismatch": {
+            "kind": "AMOUNT_MISMATCH",
+            "adjustmentEntryId": null,
+            "ledgerValue": {
+              "atomicUnits": 20000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "chainValue": {
+              "atomicUnits": 10000,
+              "asset": "USDC",
+              "decimals": 6
+            }
+          }
+        },
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e53",
+          "paymentIntentId": null,
+          "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "AUTHORIZED",
+          "sellerState": "NONE",
+          "chainState": "UNKNOWN",
+          "status": "PENDING",
+          "txHash": null,
+          "mismatch": null
+        }
+      ]
+    },
+    "/api/v1/reconciliation/runs/9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61": {
+      "runId": "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61",
+      "status": "COMPLETED",
+      "network": "eip155:84532",
+      "startedAt": "2026-10-01T10:10:00Z",
+      "finishedAt": "2026-10-01T10:10:04Z",
+      "safeBlock": 12345678,
+      "summary": {
+        "checked": 3,
+        "matched": 1,
+        "pending": 1,
+        "mismatches": 1,
+        "resolvedUsed": 2,
+        "resolvedUnused": 0
+      },
+      "suspense": {
+        "atomicUnits": 0,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "suspenseSide": null,
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+          "paymentIntentId": null,
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "status": "MATCHED",
+          "txHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "mismatch": null
+        },
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52",
+          "paymentIntentId": null,
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "status": "MISMATCH",
+          "txHash": null,
+          "mismatch": {
+            "kind": "AMOUNT_MISMATCH",
+            "adjustmentEntryId": null,
+            "ledgerValue": {
+              "atomicUnits": 20000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "chainValue": {
+              "atomicUnits": 10000,
+              "asset": "USDC",
+              "decimals": 6
+            }
+          }
+        },
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e53",
+          "paymentIntentId": null,
+          "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "buyerState": "AUTHORIZED",
+          "sellerState": "NONE",
+          "chainState": "UNKNOWN",
+          "status": "PENDING",
+          "txHash": null,
+          "mismatch": null
+        }
+      ]
+    },
+    "/api/v1/runs/6ad4354c-8e79-4b49-b5d9-d45eb9689b41": {
+      "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+      "status": "SUCCEEDED",
+      "question": "THYAO son özel durum açıklamaları neler?",
+      "budget": {
+        "atomicUnits": 50000,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "reserved": {
+        "atomicUnits": 0,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "committed": {
+        "atomicUnits": 0,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "cost": {
+        "paymentsUsdc": {
+          "atomicUnits": 30000,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "llmUsd": {
+          "atomicUnits": 6923,
+          "asset": "USD",
+          "decimals": 6
+        },
+        "totalUsd": {
+          "atomicUnits": 36923,
+          "asset": "USD",
+          "decimals": 6
+        }
+      },
+      "failureCode": null,
+      "traceId": null,
+      "createdAt": "2026-10-01T10:00:01Z",
+      "startedAt": "2026-10-01T10:00:01Z",
+      "finishedAt": "2026-10-01T10:00:13Z",
+      "report": {
+        "answer": "Örnek yanıt.",
+        "citations": [
+          {
+            "chunkId": "kap:1118495:0000",
+            "sourceUrl": "https://www.kap.org.tr/tr/Bildirim/1118495",
+            "title": "Özel Durum Açıklaması"
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02": {
+      "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+      "status": "FAILED",
+      "question": "ASELS temettü kararları nelerdir?",
+      "budget": {
+        "atomicUnits": 50000,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "reserved": {
+        "atomicUnits": 0,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "committed": {
+        "atomicUnits": 0,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "cost": {
+        "paymentsUsdc": {
+          "atomicUnits": 0,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "llmUsd": {
+          "atomicUnits": 1200,
+          "asset": "USD",
+          "decimals": 6
+        },
+        "totalUsd": {
+          "atomicUnits": 1200,
+          "asset": "USD",
+          "decimals": 6
+        }
+      },
+      "failureCode": "NO_EVIDENCE",
+      "traceId": null,
+      "createdAt": "2026-10-01T09:00:00Z",
+      "startedAt": "2026-10-01T09:00:00Z",
+      "finishedAt": "2026-10-01T09:00:07Z",
+      "report": null
+    },
+    "/api/v1/runs/0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02/payments": {
+      "items": []
+    },
+    "/api/v1/runs/7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03": {
+      "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+      "status": "SUCCEEDED",
+      "question": "GARAN bilanço duyuruları hangi tarihlerde yapıldı?",
+      "budget": {
+        "atomicUnits": 50000,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "reserved": {
+        "atomicUnits": 0,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "committed": {
+        "atomicUnits": 0,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "cost": {
+        "paymentsUsdc": {
+          "atomicUnits": 20000,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "llmUsd": {
+          "atomicUnits": 5400,
+          "asset": "USD",
+          "decimals": 6
+        },
+        "totalUsd": {
+          "atomicUnits": 25400,
+          "asset": "USD",
+          "decimals": 6
+        }
+      },
+      "failureCode": null,
+      "traceId": null,
+      "createdAt": "2026-10-01T08:00:00Z",
+      "startedAt": "2026-10-01T08:00:00Z",
+      "finishedAt": "2026-10-01T08:00:11Z",
+      "report": {
+        "answer": "Örnek yanıt.",
+        "citations": [
+          {
+            "chunkId": "kap:1118495:0000",
+            "sourceUrl": "https://www.kap.org.tr/tr/Bildirim/1118495",
+            "title": "Özel Durum Açıklaması"
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03/payments": {
+      "items": []
+    },
+    "/api/v1/approvals?status=PENDING": []
+  },
+  "runEvents": {
+    "6ad4354c-8e79-4b49-b5d9-d45eb9689b41": [
+      {
+        "eventId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:1",
+        "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+        "seq": 1,
+        "type": "RUN_STARTED",
+        "occurredAt": "2026-10-01T10:00:01Z",
+        "data": {
+          "question": "THYAO son özel durum açıklamaları neler?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        }
+      },
+      {
+        "eventId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:2",
+        "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+        "seq": 2,
+        "type": "RUN_COMPLETED",
+        "occurredAt": "2026-10-01T10:00:13Z",
+        "data": {
+          "report": {
+            "answer": "Örnek yanıt.",
+            "citations": [
+              {
+                "chunkId": "kap:1118495:0000",
+                "sourceUrl": "https://www.kap.org.tr/tr/Bildirim/1118495",
+                "title": "Özel Durum Açıklaması"
+              }
+            ]
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 30000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 6923,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 36923,
+              "asset": "USD",
+              "decimals": 6
+            }
+          }
+        }
+      }
+    ],
+    "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02": [
+      {
+        "eventId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02:1",
+        "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+        "seq": 1,
+        "type": "RUN_STARTED",
+        "occurredAt": "2026-10-01T09:00:00Z",
+        "data": {
+          "question": "ASELS temettü kararları nelerdir?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        }
+      },
+      {
+        "eventId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02:2",
+        "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+        "seq": 2,
+        "type": "RUN_FAILED",
+        "occurredAt": "2026-10-01T09:00:07Z",
+        "data": {
+          "failureCode": "NO_EVIDENCE",
+          "costSoFar": {
+            "paymentsUsdc": {
+              "atomicUnits": 0,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            }
+          }
+        }
+      }
+    ],
+    "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03": [
+      {
+        "eventId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03:1",
+        "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+        "seq": 1,
+        "type": "RUN_STARTED",
+        "occurredAt": "2026-10-01T08:00:00Z",
+        "data": {
+          "question": "GARAN bilanço duyuruları hangi tarihlerde yapıldı?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        }
+      },
+      {
+        "eventId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03:2",
+        "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+        "seq": 2,
+        "type": "RUN_COMPLETED",
+        "occurredAt": "2026-10-01T08:00:11Z",
+        "data": {
+          "report": {
+            "answer": "Örnek yanıt.",
+            "citations": [
+              {
+                "chunkId": "kap:1118495:0000",
+                "sourceUrl": "https://www.kap.org.tr/tr/Bildirim/1118495",
+                "title": "Özel Durum Açıklaması"
+              }
+            ]
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 20000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 5400,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 25400,
+              "asset": "USD",
+              "decimals": 6
+            }
+          }
+        }
+      }
+    ]
+  }
+}

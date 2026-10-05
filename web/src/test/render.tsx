@@ -10,11 +10,25 @@ import {
 import { render, type RenderResult } from "@testing-library/react";
 import type { ReactElement } from "react";
 
-/** A client without retries, so a failing request surfaces immediately. */
-export function testQueryClient(): QueryClient {
-  return new QueryClient({
+import { queryKeys } from "@/lib/api/queries";
+import type { Me } from "@/lib/api/types";
+
+export const OPERATOR_ME: Me = { name: "operator:test0001", roles: ["OPERATOR", "READER"] };
+export const READER_ME: Me = { name: "reader:test0002", roles: ["READER"] };
+
+/**
+ * A client without retries, so a failing request surfaces immediately. `/me` is pre-seeded (an
+ * operator unless `me` says otherwise; null leaves it unseeded) so role-aware components render
+ * their actions without a network call.
+ */
+export function testQueryClient(me: Me | null = OPERATOR_ME): QueryClient {
+  const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  if (me !== null) {
+    client.setQueryData(queryKeys.me, me);
+  }
+  return client;
 }
 
 /**

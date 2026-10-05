@@ -8,7 +8,7 @@
  * Run through `pnpm lighthouse` (builds first). Chromium comes from Playwright's install
  * (`pnpm exec playwright install chromium`), or from `CHROME_PATH` when set.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -20,7 +20,9 @@ import lighthouse, { desktopConfig } from "lighthouse";
 const THRESHOLD = 0.9;
 const FIXTURE_PORT = Number(process.env.SAIMAN_LH_FIXTURE_PORT ?? 4120);
 const APP_PORT = Number(process.env.SAIMAN_LH_APP_PORT ?? 4121);
+const REPLAY_PORT = Number(process.env.SAIMAN_LH_REPLAY_PORT ?? 4122);
 const APP = `http://localhost:${String(APP_PORT)}`;
+const REPLAY_APP = `http://localhost:${String(REPLAY_PORT)}`;
 const OUT = resolve("reports/lighthouse");
 
 // Ids of the example capture (e2e/fixtures/*.json): a finished run, a payment, a reconciliation run.
@@ -40,6 +42,7 @@ const ROUTES = [
     "/reconciliation",
     `/reconciliation/${RECON}`,
     "/revenue",
+    "/connect", // opens the Connect dialog (ADR-0023): the dialog itself is what gets audited
 ];
 
 const children = [];
@@ -67,18 +70,52 @@ async function waitFor(url, label) {
     throw new Error(`${label} did not come up at ${url}`);
 }
 
-const slug = (route) => (route === "/" ? "landing" : route.slice(1).replaceAll("/", "_"));
+const slug = (route, prefix) =>
+    `${prefix}${route === "/" ? "landing" : route.slice(1).replaceAll("/", "_")}`;
 
 async function main() {
     rmSync(OUT, { recursive: true, force: true });
     mkdirSync(OUT, { recursive: true });
 
-    start("node", ["e2e/fixture-server.ts"], { SAIMAN_FIXTURE_PORT: String(FIXTURE_PORT) });
+    // The replay build (ADR-0026): VITE_DEMO_MODE=replay into its own dir, served as plain files.
+    const built = spawnSync(
+        "pnpm",
+        ["exec", "vite", "build", "--outDir", "dist-replay", "--emptyOutDir", "--logLevel", "warn"],
+        {
+            env: { ...process.env, VITE_DEMO_MODE: "replay", VITE_OTEL_ENABLED: "false" },
+            stdio: "inherit",
+        },
+    );
+    if (built.status !== 0) {
+        throw new Error("replay build failed");
+    }
+
+    // Auth off for the live build (a cold, protected API would only show the Connect dialog on
+    // every page); the dialog itself is audited through /connect.
+    start("node", ["e2e/fixture-server.ts"], {
+        SAIMAN_FIXTURE_PORT: String(FIXTURE_PORT),
+        SAIMAN_FIXTURE_AUTH: "off",
+    });
     start("pnpm", ["exec", "vite", "preview", "--port", String(APP_PORT), "--strictPort"], {
         SAIMAN_API_TARGET: `http://127.0.0.1:${String(FIXTURE_PORT)}`,
     });
+    start(
+        "pnpm",
+        [
+            "exec",
+            "vite",
+            "preview",
+            "--outDir",
+            "dist-replay",
+            "--port",
+            String(REPLAY_PORT),
+            "--strictPort",
+        ],
+        {},
+    );
     await waitFor(`http://127.0.0.1:${String(FIXTURE_PORT)}/api/v1/ping`, "fixture server");
     await waitFor(APP, "vite preview");
+    await waitFor(REPLAY_APP, "vite preview (replay)");
 
     // An explicit profile dir: under WSL chrome-launcher would otherwise create a Windows-style
     // path inside the current directory.
@@ -97,40 +134,44 @@ async function main() {
 
     let failed = false;
     try {
-        for (const route of ROUTES) {
-            const result = await lighthouse(
-                `${APP}${route}`,
-                {
-                    port: chrome.port,
-                    onlyCategories: ["accessibility"],
-                    output: ["html", "json"],
-                    logLevel: "error",
-                    maxWaitForLoad: 10_000,
-                    throttlingMethod: "provided",
-                },
-                desktopConfig,
-            );
-            if (!result) {
-                throw new Error(`no result for ${route}`);
-            }
-            const [html, json] = result.report;
-            writeFileSync(resolve(OUT, `${slug(route)}.html`), html);
-            writeFileSync(resolve(OUT, `${slug(route)}.json`), json);
+        for (const { base, prefix, label } of [
+            { base: APP, prefix: "", label: "live" },
+            { base: REPLAY_APP, prefix: "replay_", label: "replay" },
+        ])
+            for (const route of ROUTES) {
+                const result = await lighthouse(
+                    `${base}${route}`,
+                    {
+                        port: chrome.port,
+                        onlyCategories: ["accessibility"],
+                        output: ["html", "json"],
+                        logLevel: "error",
+                        maxWaitForLoad: 10_000,
+                        throttlingMethod: "provided",
+                    },
+                    desktopConfig,
+                );
+                if (!result) {
+                    throw new Error(`no result for ${route}`);
+                }
+                const [html, json] = result.report;
+                writeFileSync(resolve(OUT, `${slug(route, prefix)}.html`), html);
+                writeFileSync(resolve(OUT, `${slug(route, prefix)}.json`), json);
 
-            const score = result.lhr.categories.accessibility?.score ?? 0;
-            const ok = score >= THRESHOLD;
-            failed ||= !ok;
-            console.log(`${ok ? "PASS" : "FAIL"} ${score.toFixed(2)}  ${route}`);
-            for (const audit of Object.values(result.lhr.audits)) {
-                if (
-                    audit.score !== null &&
-                    audit.score < 1 &&
-                    audit.scoreDisplayMode === "binary"
-                ) {
-                    console.log(`       - ${audit.id}: ${audit.title}`);
+                const score = result.lhr.categories.accessibility?.score ?? 0;
+                const ok = score >= THRESHOLD;
+                failed ||= !ok;
+                console.log(`${ok ? "PASS" : "FAIL"} ${score.toFixed(2)}  [${label}] ${route}`);
+                for (const audit of Object.values(result.lhr.audits)) {
+                    if (
+                        audit.score !== null &&
+                        audit.score < 1 &&
+                        audit.scoreDisplayMode === "binary"
+                    ) {
+                        console.log(`       - ${audit.id}: ${audit.title}`);
+                    }
                 }
             }
-        }
     } finally {
         await chrome.kill();
         rmSync(userDataDir, { recursive: true, force: true });

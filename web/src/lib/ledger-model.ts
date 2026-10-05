@@ -56,6 +56,9 @@ const MISMATCH_TEXT: Record<string, string> = {
   ENCUMBRANCE_NOT_CLEARED: "The authorization is over, but the amount is still set aside.",
   BOOKS_OPEN: "The chain is final, but the books never reached a closing state.",
   CONFLICTING_FACT: "A later event contradicted an earlier one (amount, payee or validity).",
+  // The API (and the Kafka event) call this kind CREDIT_NOTE_UNCORROBORATED; the old key stays
+  // harmlessly for recordings made before the rename.
+  CREDIT_NOTE_UNCORROBORATED: "A credit note was booked that the seller does not confirm.",
   SELLER_CREDIT_UNCONFIRMED: "A credit note was booked that the seller does not confirm.",
 };
 export const mismatchText = (kind: string): string =>

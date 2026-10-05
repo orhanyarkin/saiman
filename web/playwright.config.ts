@@ -10,6 +10,7 @@ import { defineConfig, devices } from "@playwright/test";
  */
 const FIXTURE_PORT = Number(process.env.SAIMAN_FIXTURE_PORT ?? 4010);
 const APP_PORT = Number(process.env.SAIMAN_E2E_APP_PORT ?? 5174);
+const REPLAY_PORT = Number(process.env.SAIMAN_E2E_REPLAY_PORT ?? 5175);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -27,6 +28,7 @@ export default defineConfig({
     {
       command: "node e2e/fixture-server.ts",
       url: `http://127.0.0.1:${String(FIXTURE_PORT)}/api/v1/ping`,
+      // Auth is on (the default): every spec connects with a fixture token (e2e/helpers.ts).
       env: { SAIMAN_FIXTURE_PORT: String(FIXTURE_PORT), SAIMAN_STEP_MS: "100" },
       reuseExistingServer: false,
       gracefulShutdown: { signal: "SIGTERM", timeout: 2000 },
@@ -41,11 +43,27 @@ export default defineConfig({
       reuseExistingServer: false,
       gracefulShutdown: { signal: "SIGTERM", timeout: 2000 },
     },
+    {
+      // The static replay build (ADR-0026): built with VITE_DEMO_MODE=replay and served as files,
+      // no API behind it. It reads the bundled sample at /demo/capture.json.
+      command: `pnpm exec vite build --outDir dist-replay --emptyOutDir --logLevel warn && pnpm exec vite preview --outDir dist-replay --port ${String(REPLAY_PORT)} --strictPort`,
+      url: `http://localhost:${String(REPLAY_PORT)}`,
+      env: { VITE_DEMO_MODE: "replay", VITE_OTEL_ENABLED: "false" },
+      reuseExistingServer: false,
+      timeout: 120_000,
+      gracefulShutdown: { signal: "SIGTERM", timeout: 2000 },
+    },
   ],
   projects: [
     {
       name: "chromium",
+      testIgnore: ["**/live/**", "**/replay.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "replay",
+      testMatch: "**/replay.spec.ts",
+      use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${String(REPLAY_PORT)}` },
     },
   ],
 });

@@ -6,3 +6,5 @@ playwright-report
 test-results
 src/lib/api/generated
 reports
+public/demo
+dist-replay

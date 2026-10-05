@@ -17,6 +17,18 @@
  *
  * It mimics the real request guard (JSON content type + `X-Saiman-Csrf: 1` on every POST), so a
  * client that forgets them fails here too.
+ *
+ * Authentication (ADR-0023), on by default:
+ * - `Authorization: Bearer fixture-reader-<anything>` is a READER, `fixture-operator-<anything>` an
+ *   OPERATOR. No/unknown token on any `/api` call: 401 + `WWW-Authenticate: Bearer`. A READER's
+ *   POST: 403 (this token is read-only). A token in the query string: 400 (it must never be there).
+ * - `GET /api/v1/me` answers `{name, roles}`.
+ * - Auth off (`auth: false` / `SAIMAN_FIXTURE_AUTH=off`, used by the Lighthouse run): everything is
+ *   open and `/me` says OPERATOR.
+ * - LLM daily cap (ADR-0026): `llmCap: true` makes every `POST /api/v1/runs` answer 503
+ *   `LLM_DAILY_CAP_REACHED`; a question containing `__LLM_CAP__` does so for that request only
+ *   (specs run in parallel against one server), and `__LLM_CAP_MID__` starts a run that fails
+ *   with that code.
  */
 import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
@@ -34,6 +46,10 @@ interface Envelope {
   data: Json;
 }
 export interface Capture {
+  /** Capture format v1 (ADR-0026) carries these; the M5 example shape has only the last four. */
+  schemaVersion?: number;
+  network?: string;
+  sourceCommit?: string;
   capturedAt?: string;
   environment?: string;
   responses?: Record<string, unknown>;
@@ -53,6 +69,23 @@ export interface FixtureOptions {
   reconRunMs?: number;
   /** POST /reconciliation/runs answers 429 this long after the previous start. */
   reconCooldownMs?: number;
+  /** Require a bearer token on every /api call (default true). */
+  auth?: boolean;
+  /** Every POST /api/v1/runs answers 503 LLM_DAILY_CAP_REACHED. */
+  llmCap?: boolean;
+}
+
+export const CAP_MARKER = "__LLM_CAP__";
+export const CAP_MID_MARKER = "__LLM_CAP_MID__";
+const FIXTURE_TOKEN = /^fixture-(reader|operator)-[A-Za-z0-9_-]+$/;
+
+type FixtureRole = "READER" | "OPERATOR";
+
+function roleOf(req: IncomingMessage): FixtureRole | null {
+  const header = req.headers.authorization;
+  const match = typeof header === "string" ? /^Bearer (\S+)$/.exec(header) : null;
+  const token = FIXTURE_TOKEN.exec(match?.[1] ?? "");
+  return token ? (token[1] === "operator" ? "OPERATOR" : "READER") : null;
 }
 
 interface ReconRun {
@@ -167,6 +200,79 @@ async function readBody(req: IncomingMessage): Promise<string> {
 
 const money = (atomicUnits: number, asset = "USDC") => ({ atomicUnits, asset, decimals: 6 });
 
+/** The run summary the orchestrator would return for these events (what the examples capture). */
+export function summarizeRun(runId: string, events: readonly Envelope[], pending = false) {
+  const started = events.find((e) => e.type === "RUN_STARTED");
+  const done = events.find((e) => e.type === "RUN_COMPLETED");
+  const failed = events.find((e) => e.type === "RUN_FAILED");
+  const settled = events
+    .filter((e) => e.type === "PAYMENT_SETTLED")
+    .reduce((sum, e) => sum + (e.data.amount as { atomicUnits: number }).atomicUnits, 0);
+  const pendingAmount =
+    (
+      events.findLast((e) => e.type === "PAYMENT_APPROVAL_REQUIRED")?.data.amount as
+        { atomicUnits: number } | undefined
+    )?.atomicUnits ?? 0;
+  const zero = { paymentsUsdc: money(0), llmUsd: money(0, "USD"), totalUsd: money(0, "USD") };
+  const finalCost = (done?.data.cost ?? failed?.data.costSoFar ?? null) as typeof zero | null;
+  return {
+    runId,
+    status: done ? "SUCCEEDED" : failed ? "FAILED" : pending ? "AWAITING_APPROVAL" : "RUNNING",
+    question: (started?.data.question as string | undefined) ?? "",
+    budget: started?.data.budget ?? money(0),
+    reserved: money(pending ? pendingAmount : 0),
+    committed: money(settled),
+    cost: finalCost ?? zero,
+    failureCode: (failed?.data.failureCode as string | undefined) ?? null,
+    traceId: null,
+    createdAt: events[0]?.occurredAt ?? new Date().toISOString(),
+    startedAt: events[0]?.occurredAt ?? null,
+    finishedAt: done?.occurredAt ?? failed?.occurredAt ?? null,
+    report: done?.data.report ?? null,
+  };
+}
+
+/** Payment intents derived from a run's events (what `GET /runs/{id}/payments` returns). */
+export function paymentItemsOf(events: readonly Envelope[]) {
+  const items = new Map<string, Json>();
+  const byApproval = new Map<string, string>();
+  let tool = "unknown";
+  for (const event of events) {
+    const d = event.data;
+    if (event.type === "TOOL_CALL_REQUESTED") {
+      tool = String(d.tool);
+    } else if (event.type === "PAYMENT_APPROVAL_REQUIRED") {
+      const intentId = String(d.paymentIntentId);
+      byApproval.set(String(d.approvalId), intentId);
+      items.set(intentId, {
+        paymentIntentId: intentId,
+        tool,
+        resource: d.resource,
+        payTo: d.payTo,
+        amount: d.amount,
+        status: "AWAITING_APPROVAL",
+        txHash: null,
+        createdAt: event.occurredAt,
+        updatedAt: event.occurredAt,
+      });
+    } else if (event.type === "PAYMENT_APPROVAL_DECIDED") {
+      const item = items.get(byApproval.get(String(d.approvalId)) ?? "");
+      if (item) {
+        item.status = d.decision;
+        item.updatedAt = event.occurredAt;
+      }
+    } else if (event.type === "PAYMENT_SETTLED") {
+      const item = items.get(String(d.paymentIntentId));
+      if (item) {
+        item.status = "SETTLED";
+        item.txHash = d.txHash;
+        item.updatedAt = event.occurredAt;
+      }
+    }
+  }
+  return [...items.values()];
+}
+
 export function createFixtureServer(options: FixtureOptions = {}): Server {
   const stepMs = options.stepMs ?? 150;
   const retryMs = options.retryMs ?? 1000;
@@ -175,6 +281,7 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
   const reconRunMs = options.reconRunMs ?? 1500;
   const reconCooldownMs = options.reconCooldownMs ?? 4000;
   const capture = options.capture ?? {};
+  const authOn = options.auth ?? true;
   const fixtures = loadFixtures();
   const runs = new Map<string, Run>();
   const reconRuns: ReconRun[] = [];
@@ -282,78 +389,9 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
     run.waiting = false;
   }
 
-  function summary(run: Run) {
-    const started = run.events.find((e) => e.type === "RUN_STARTED");
-    const done = run.events.find((e) => e.type === "RUN_COMPLETED");
-    const failed = run.events.find((e) => e.type === "RUN_FAILED");
-    const settled = run.events
-      .filter((e) => e.type === "PAYMENT_SETTLED")
-      .reduce((sum, e) => sum + (e.data.amount as { atomicUnits: number }).atomicUnits, 0);
-    const pending = run.approval?.status === "PENDING";
-    const pendingAmount =
-      (
-        run.events.findLast((e) => e.type === "PAYMENT_APPROVAL_REQUIRED")?.data.amount as
-          { atomicUnits: number } | undefined
-      )?.atomicUnits ?? 0;
-    const zero = { paymentsUsdc: money(0), llmUsd: money(0, "USD"), totalUsd: money(0, "USD") };
-    const finalCost = (done?.data.cost ?? failed?.data.costSoFar ?? null) as typeof zero | null;
-    return {
-      runId: run.id,
-      status: done ? "SUCCEEDED" : failed ? "FAILED" : pending ? "AWAITING_APPROVAL" : "RUNNING",
-      question: (started?.data.question as string | undefined) ?? "",
-      budget: started?.data.budget ?? money(0),
-      reserved: money(pending ? pendingAmount : 0),
-      committed: money(settled),
-      cost: finalCost ?? zero,
-      failureCode: (failed?.data.failureCode as string | undefined) ?? null,
-      traceId: null,
-      createdAt: run.events[0]?.occurredAt ?? new Date().toISOString(),
-      startedAt: run.events[0]?.occurredAt ?? null,
-      finishedAt: done?.occurredAt ?? failed?.occurredAt ?? null,
-      report: done?.data.report ?? null,
-    };
-  }
-
-  /** Payment intents derived from a run's events (what `GET /runs/{id}/payments` returns). */
-  function paymentItems(run: Run) {
-    const items = new Map<string, Json>();
-    const byApproval = new Map<string, string>();
-    let tool = "unknown";
-    for (const event of run.events) {
-      const d = event.data;
-      if (event.type === "TOOL_CALL_REQUESTED") {
-        tool = String(d.tool);
-      } else if (event.type === "PAYMENT_APPROVAL_REQUIRED") {
-        const intentId = String(d.paymentIntentId);
-        byApproval.set(String(d.approvalId), intentId);
-        items.set(intentId, {
-          paymentIntentId: intentId,
-          tool,
-          resource: d.resource,
-          payTo: d.payTo,
-          amount: d.amount,
-          status: "AWAITING_APPROVAL",
-          txHash: null,
-          createdAt: event.occurredAt,
-          updatedAt: event.occurredAt,
-        });
-      } else if (event.type === "PAYMENT_APPROVAL_DECIDED") {
-        const item = items.get(byApproval.get(String(d.approvalId)) ?? "");
-        if (item) {
-          item.status = d.decision;
-          item.updatedAt = event.occurredAt;
-        }
-      } else if (event.type === "PAYMENT_SETTLED") {
-        const item = items.get(String(d.paymentIntentId));
-        if (item) {
-          item.status = "SETTLED";
-          item.txHash = d.txHash;
-          item.updatedAt = event.occurredAt;
-        }
-      }
-    }
-    return [...items.values()];
-  }
+  const summary = (run: Run) =>
+    summarizeRun(run.id, run.events, run.approval?.status === "PENDING");
+  const paymentItems = (run: Run) => paymentItemsOf(run.events);
 
   /** Pending approvals of the stateful runs (`GET /approvals?status=PENDING`). */
   function pendingApprovals() {
@@ -569,12 +607,44 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
     const path = url.pathname;
     const method = req.method ?? "GET";
 
+    // A credential in the URL would end up in access logs: refuse it outright (ADR-0023).
+    for (const name of ["token", "access_token", "authorization", "api_token"]) {
+      if (url.searchParams.has(name)) {
+        problem(res, 400, "credentials belong in the Authorization header");
+        return;
+      }
+    }
+
     if (method === "POST") {
       const contentType = req.headers["content-type"] ?? "";
       if (!contentType.startsWith("application/json") || req.headers["x-saiman-csrf"] !== "1") {
         problem(res, 403, "request rejected");
         return;
       }
+    }
+
+    // The real services run their request guard first, then authentication (ADR-0023).
+    const role: FixtureRole | null = authOn ? roleOf(req) : "OPERATOR";
+    if (path.startsWith("/api/") && role === null) {
+      problem(res, 401, "Authentication required", { "WWW-Authenticate": "Bearer" });
+      return;
+    }
+    if (method === "POST" && role === "READER") {
+      problem(res, 403, "Access denied: this token is read-only");
+      return;
+    }
+
+    if (method === "GET" && path === "/api/v1/me") {
+      json(
+        res,
+        200,
+        !authOn
+          ? { name: "anonymous", roles: ["OPERATOR"] }
+          : role === "OPERATOR"
+            ? { name: "operator:fixture1", roles: ["OPERATOR"] }
+            : { name: "reader:fixture2", roles: ["READER"] },
+      );
+      return;
     }
 
     if (method === "GET" && path === "/api/v1/ping") {
@@ -599,8 +669,38 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
         problem(res, 400, "question must be 3 to 500 characters");
         return;
       }
+      if (options.llmCap === true || question.includes(CAP_MARKER)) {
+        res.writeHead(503, {
+          "Content-Type": "application/problem+json",
+          "Retry-After": "3600",
+        });
+        res.end(
+          JSON.stringify({
+            type: "urn:saiman:problem:llm-daily-cap",
+            title: "Daily model budget reached",
+            status: 503,
+            detail: "The daily model budget is used up. New runs resume at 00:00 UTC.",
+            code: "LLM_DAILY_CAP_REACHED",
+            replayAvailable: true,
+          }),
+        );
+        return;
+      }
       const budget = typeof body.budgetAtomic === "number" ? body.budgetAtomic : 50_000;
       const run = startRun(question, budget);
+      if (question.includes(CAP_MID_MARKER)) {
+        // The cap is reached mid-run: the run fails with the dedicated code (ADR-0026).
+        run.queue = [
+          ...run.queue.slice(0, 2),
+          {
+            type: "RUN_FAILED",
+            data: {
+              ...structuredClone(fixtures.RUN_FAILED?.data ?? {}),
+              failureCode: "LLM_DAILY_CAP_REACHED",
+            },
+          },
+        ];
+      }
       res.setHeader("Location", `/api/v1/runs/${run.id}`);
       json(res, 202, { runId: run.id, eventsUrl: `/api/v1/runs/${run.id}/events`, traceId: null });
       return;
@@ -751,10 +851,12 @@ function main() {
         const ledger = read(resolve(HERE, "fixtures/capture.ledger.example.json"));
         return { ...orchestrator, responses: { ...orchestrator.responses, ...ledger.responses } };
       })();
+  const auth = process.env.SAIMAN_FIXTURE_AUTH !== "off";
   const stepMs = process.env.SAIMAN_STEP_MS ? Number(process.env.SAIMAN_STEP_MS) : undefined;
   const server = createFixtureServer({
     port,
     capture,
+    auth,
     ...(stepMs === undefined ? {} : { stepMs }),
   });
   server.listen(port, "127.0.0.1", () => {

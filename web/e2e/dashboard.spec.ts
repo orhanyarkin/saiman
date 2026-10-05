@@ -1,5 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+
+import { expect, test } from "./helpers";
 
 /** Serious and critical axe violations fail the test; the rest is reported by axe only. */
 async function expectNoSeriousA11yViolations(page: Page) {

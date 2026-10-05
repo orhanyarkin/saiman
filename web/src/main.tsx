@@ -3,7 +3,10 @@ import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { AuthProvider } from "@/components/auth/auth-provider";
+import { loadCapture } from "@/lib/api/replay";
 import { ApiError } from "@/lib/api/source";
+import { isReplayMode } from "@/lib/mode";
 import { initTelemetry } from "@/lib/telemetry";
 import { routeTree } from "@/routeTree.gen";
 
@@ -36,10 +39,19 @@ if (!rootElement) {
   throw new Error("Root element #root not found");
 }
 
+// In replay mode the capture is loaded before the first render, so the banner always knows the
+// environment and date, and screens never see a "recording still loading" state. A failed load
+// still renders: every read then reports the recording as unavailable.
+if (isReplayMode) {
+  await loadCapture().catch(() => undefined);
+}
+
 createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

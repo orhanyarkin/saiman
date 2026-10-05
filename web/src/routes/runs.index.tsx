@@ -5,7 +5,7 @@ import { ErrorNotice } from "@/components/error-notice";
 import { RunsTable } from "@/components/run/runs-table";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { runListQuery } from "@/lib/api/queries";
-import { isReplayMode } from "@/lib/api/source";
+import { useCapabilities } from "@/lib/use-capabilities";
 import { useDocumentTitle } from "@/lib/hooks";
 
 export const Route = createFileRoute("/runs/")({
@@ -14,6 +14,7 @@ export const Route = createFileRoute("/runs/")({
 
 function RunsPage() {
   useDocumentTitle("Runs");
+  const { canOperate } = useCapabilities();
   const runs = useInfiniteQuery(runListQuery());
   const pageError: unknown = runs.isFetchNextPageError ? runs.error : null;
   const items = runs.data?.pages.flatMap((page) => page.items) ?? [];
@@ -41,11 +42,11 @@ function RunsPage() {
       ) : items.length === 0 ? (
         <div className="space-y-3">
           <p className="text-muted-foreground">No runs yet.</p>
-          {isReplayMode ? null : (
+          {canOperate ? (
             <Link to="/runs/new" className={buttonVariants()}>
               Start your first research run
             </Link>
-          )}
+          ) : null}
         </div>
       ) : (
         <>
