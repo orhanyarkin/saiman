@@ -120,7 +120,7 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description Revenue Base Sepolia confirms: sales seen on chain (chainState USED) without a chain finding, and credit notes of those sales that seller-api corroborated. */
+        /** @description Revenue Base Sepolia confirms: sales whose canonical on-chain receipt was matched (chainState USED with a chainTxHash) without a chain finding, and credit notes of those sales that seller-api corroborated with the same tx hash and amount. */
         ChainVerifiedRevenue: {
             creditNotes: components["schemas"]["Money"];
             grossSales: components["schemas"]["Money"];
@@ -280,7 +280,7 @@ export interface components {
             items: components["schemas"]["SellerRevenue"][];
             truncated: boolean;
         };
-        /** @description One seller's revenue. grossSales, creditNotes, netRevenue and customerCredits are PER BOOKS, NOT CHAIN-VERIFIED: forged seller events (unauthenticated Kafka until M6) stay in them even after reconciliation flags them. chainVerified is the part Base Sepolia confirms; unverifiedGrossSales = grossSales - chainVerified.grossSales (never negative); openFindings counts this seller's payments with a reconciliation finding. Amounts are clamped to [0, 2^53-1] (netRevenue: +-(2^53-1)) and saturated says a clamp happened. */
+        /** @description One seller's revenue. grossSales, creditNotes, netRevenue and customerCredits are PER BOOKS, NOT CHAIN-VERIFIED: forged seller events (unauthenticated Kafka until M6) stay in them even after reconciliation flags them. chainVerified is the part Base Sepolia confirms; unverifiedGrossSales = grossSales - chainVerified.grossSales (never negative); openFindings counts this seller's payments with an unresolved reconciliation finding (one reconciliation did not adjust; adjusted findings are not counted). Amounts are clamped to [0, 2^53-1] (netRevenue: +-(2^53-1)) and saturated says a clamp happened. */
         SellerRevenue: {
             chainVerified: components["schemas"]["ChainVerifiedRevenue"];
             creditNotes: components["schemas"]["Money"];
@@ -356,6 +356,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description The read timed out or too many reads are running; retry after Retry-After seconds */
+            503: {
+                headers: {
+                    /** @description Seconds to wait */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     payment: {
@@ -396,6 +407,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description The read timed out or too many reads are running; retry after Retry-After seconds */
+            503: {
+                headers: {
+                    /** @description Seconds to wait */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     revenue: {
@@ -427,6 +449,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description The read timed out or too many reads are running; retry after Retry-After seconds */
+            503: {
+                headers: {
+                    /** @description Seconds to wait */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     trialBalance: {
@@ -445,6 +478,17 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrialBalanceRow"][];
+                };
+            };
+            /** @description The read timed out or too many reads are running; retry after Retry-After seconds */
+            503: {
+                headers: {
+                    /** @description Seconds to wait */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
         };
@@ -472,6 +516,17 @@ export interface operations {
             /** @description limit outside 1..100 */
             400: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The read timed out or too many reads are running; retry after Retry-After seconds */
+            503: {
+                headers: {
+                    /** @description Seconds to wait */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -554,6 +609,17 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description The read timed out or too many reads are running; retry after Retry-After seconds */
+            503: {
+                headers: {
+                    /** @description Seconds to wait */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     report: {
@@ -591,6 +657,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description The read timed out or too many reads are running; retry after Retry-After seconds */
+            503: {
+                headers: {
+                    /** @description Seconds to wait */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
         };
     };
