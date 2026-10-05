@@ -17,3 +17,4 @@
 - [M6 T7+T5a audit](m6-t7-t5a-audit.md) — settle null body escapes PaymentSettler (no failed event), verify null releases claim, SSE buffer unbounded (2026-10-05)
 - [M6 T3 ledger audit](m6-t3-ledger-audit.md) — owner cred residual undocumented/overstated, audit tables over-granted, 401 suppression signal (2026-10-05)
 - [M6 T2 orchestrator auth audit](m6-t2-orchestrator-auth-audit.md) — no Crit/High/Med; app DELETE resets spend_day, decided_by digest prefix to READER, auth-off locked closed (2026-10-05)
+- [M6 T3 seller audit](m6-t3-seller-audit.md) — eval drains shared router day cap, owner cred residual, /internal no body limit, firewall wraps /v1 (2026-10-05)
