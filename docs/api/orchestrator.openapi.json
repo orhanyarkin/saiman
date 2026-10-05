@@ -1,0 +1,857 @@
+{
+  "components" : {
+    "schemas" : {
+      "ApprovalResponse" : {
+        "properties" : {
+          "approvalId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "PENDING", "APPROVED", "REJECTED", "EXPIRED" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "approvalId", "status" ],
+        "type" : "object"
+      },
+      "ApprovalView" : {
+        "properties" : {
+          "amountAtomic" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "decidedAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "expiresAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "payTo" : {
+            "type" : "string"
+          },
+          "paymentIntentId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "requestedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "resource" : {
+            "type" : "string"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "PENDING", "APPROVED", "REJECTED", "EXPIRED" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "amountAtomic", "expiresAt", "id", "payTo", "paymentIntentId", "requestedAt", "resource", "runId", "status" ],
+        "type" : "object"
+      },
+      "Citation" : {
+        "properties" : {
+          "chunkId" : {
+            "type" : "string"
+          },
+          "sourceUrl" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "chunkId", "sourceUrl", "title" ],
+        "type" : "object"
+      },
+      "DecisionRequest" : {
+        "properties" : {
+          "decision" : {
+            "enum" : [ "APPROVE", "REJECT", null ],
+            "type" : [ "string", "null" ]
+          }
+        },
+        "type" : "object"
+      },
+      "Money" : {
+        "properties" : {
+          "asset" : {
+            "type" : "string"
+          },
+          "atomicUnits" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "decimals" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "asset", "atomicUnits", "decimals" ],
+        "type" : "object"
+      },
+      "PingResponse" : {
+        "properties" : {
+          "dbTime" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "service" : {
+            "type" : "string"
+          },
+          "traceId" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "dbTime", "service" ],
+        "type" : "object"
+      },
+      "ProblemDetail" : {
+        "properties" : {
+          "detail" : {
+            "type" : [ "string", "null" ]
+          },
+          "instance" : {
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "title" : {
+            "type" : [ "string", "null" ]
+          },
+          "type" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "status" ],
+        "type" : "object"
+      },
+      "Report" : {
+        "properties" : {
+          "answer" : {
+            "type" : "string"
+          },
+          "citations" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Citation"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "answer", "citations" ],
+        "type" : "object"
+      },
+      "RunCost" : {
+        "properties" : {
+          "llmUsd" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "paymentsUsdc" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "totalUsd" : {
+            "$ref" : "#/components/schemas/Money"
+          }
+        },
+        "required" : [ "llmUsd", "paymentsUsdc", "totalUsd" ],
+        "type" : "object"
+      },
+      "RunListItem" : {
+        "properties" : {
+          "budget" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "committed" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "cost" : {
+            "$ref" : "#/components/schemas/RunCost"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "finishedAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "pendingApprovals" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "question" : {
+            "type" : "string"
+          },
+          "reserved" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "QUEUED", "RUNNING", "AWAITING_APPROVAL", "SUCCEEDED", "FAILED" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "budget", "committed", "cost", "createdAt", "pendingApprovals", "question", "reserved", "runId", "status" ],
+        "type" : "object"
+      },
+      "RunPage" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RunListItem"
+            },
+            "type" : "array"
+          },
+          "next" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "items" ],
+        "type" : "object"
+      },
+      "RunPaymentItem" : {
+        "properties" : {
+          "amount" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/Money"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "payTo" : {
+            "type" : [ "string", "null" ]
+          },
+          "paymentIntentId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "resource" : {
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "PENDING", "AWAITING_APPROVAL", "APPROVED", "RESERVED", "SIGNED", "SETTLED", "HELD", "RELEASED", "DENIED", "REJECTED", "EXPIRED" ],
+            "type" : "string"
+          },
+          "tool" : {
+            "type" : "string"
+          },
+          "txHash" : {
+            "type" : [ "string", "null" ]
+          },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "createdAt", "paymentIntentId", "resource", "status", "tool", "updatedAt" ],
+        "type" : "object"
+      },
+      "RunPayments" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RunPaymentItem"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "items" ],
+        "type" : "object"
+      },
+      "RunSummary" : {
+        "properties" : {
+          "budget" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "committed" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "cost" : {
+            "$ref" : "#/components/schemas/RunCost"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "failureCode" : {
+            "type" : [ "string", "null" ]
+          },
+          "finishedAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "question" : {
+            "type" : "string"
+          },
+          "report" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/Report"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "reserved" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "startedAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "enum" : [ "QUEUED", "RUNNING", "AWAITING_APPROVAL", "SUCCEEDED", "FAILED" ],
+            "type" : "string"
+          },
+          "traceId" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "budget", "committed", "cost", "createdAt", "question", "reserved", "runId", "status" ],
+        "type" : "object"
+      },
+      "SpendByTool" : {
+        "properties" : {
+          "amount" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "tool" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "amount", "count", "status", "tool" ],
+        "type" : "object"
+      },
+      "SpendLimits" : {
+        "properties" : {
+          "approvalThreshold" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "defaultRunBudget" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "maxRunBudget" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "perRequestMax" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/Money"
+            }, {
+              "type" : "null"
+            } ]
+          }
+        },
+        "required" : [ "approvalThreshold", "defaultRunBudget", "maxRunBudget" ],
+        "type" : "object"
+      },
+      "SpendOverview" : {
+        "properties" : {
+          "byTool" : {
+            "items" : {
+              "$ref" : "#/components/schemas/SpendByTool"
+            },
+            "type" : "array"
+          },
+          "dailyCap" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "day" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "dayCommitted" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "dayReserved" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "limits" : {
+            "$ref" : "#/components/schemas/SpendLimits"
+          }
+        },
+        "required" : [ "byTool", "dailyCap", "day", "dayCommitted", "dayReserved", "limits" ],
+        "type" : "object"
+      },
+      "StartRunRequest" : {
+        "properties" : {
+          "budgetAtomic" : {
+            "format" : "int64",
+            "type" : [ "integer", "null" ]
+          },
+          "question" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "type" : "object"
+      },
+      "StartRunResponse" : {
+        "properties" : {
+          "eventsUrl" : {
+            "type" : "string"
+          },
+          "runId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "traceId" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "eventsUrl", "runId" ],
+        "type" : "object"
+      }
+    }
+  },
+  "info" : {
+    "title" : "OpenAPI definition",
+    "version" : "v0"
+  },
+  "openapi" : "3.1.0",
+  "paths" : {
+    "/api/v1/approvals" : {
+      "get" : {
+        "operationId" : "listApprovals",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/ApprovalView"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "The approvals"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "status is invalid"
+          }
+        },
+        "summary" : "Approvals in one status (default PENDING), newest first",
+        "tags" : [ "approval-controller" ]
+      }
+    },
+    "/api/v1/ping" : {
+      "get" : {
+        "operationId" : "ping",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PingResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "ping-controller" ]
+      }
+    },
+    "/api/v1/runs" : {
+      "get" : {
+        "operationId" : "listRuns",
+        "parameters" : [ {
+          "description" : "Page size, 1 to 100 (default 20)",
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "description" : "Opaque cursor: the next field of the previous page",
+          "in" : "query",
+          "name" : "before",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunPage"
+                }
+              }
+            },
+            "description" : "A page of runs, newest first"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "limit or before is invalid"
+          }
+        },
+        "summary" : "Runs, newest first (keyset pagination)",
+        "tags" : [ "run-controller" ]
+      },
+      "post" : {
+        "operationId" : "startRun",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/StartRunRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StartRunResponse"
+                }
+              }
+            },
+            "description" : "Run admitted; follow it at eventsUrl"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Invalid question or budget"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too many runs in flight; Retry-After says when to try again"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "The service is not ready; Retry-After says when to try again"
+          }
+        },
+        "summary" : "Start a research run",
+        "tags" : [ "run-controller" ]
+      }
+    },
+    "/api/v1/runs/{runId}" : {
+      "get" : {
+        "operationId" : "getRun",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunSummary"
+                }
+              }
+            },
+            "description" : "The run"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unknown run"
+          }
+        },
+        "summary" : "One run: status, budget, spend and report",
+        "tags" : [ "run-controller" ]
+      }
+    },
+    "/api/v1/runs/{runId}/approvals/{approvalId}" : {
+      "post" : {
+        "operationId" : "decideApproval",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "approvalId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DecisionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApprovalResponse"
+                }
+              }
+            },
+            "description" : "The approval after the decision"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "decision is missing or invalid"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "No such approval in this run"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Already decided, expired, or the run has ended"
+          }
+        },
+        "summary" : "Approve or reject one payment above the approval threshold",
+        "tags" : [ "approval-controller" ]
+      }
+    },
+    "/api/v1/runs/{runId}/events" : {
+      "get" : {
+        "description" : "Content negotiation: Accept application/json returns the complete ordered event list; Accept text/event-stream streams the same envelopes (id = seq, event = type, resumes after Last-Event-ID, ends after the terminal event). The envelope and payload shapes are documented in docs/events/agent.run-step.v1.schema.json (and the fixtures next to it).",
+        "operationId" : "getRunEvents",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "description" : "SSE only: resume after this event seq",
+          "in" : "header",
+          "name" : "Last-Event-ID",
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "type" : "object"
+                  },
+                  "type" : "array"
+                }
+              },
+              "text/event-stream" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "The events"
+          },
+          "204" : {
+            "description" : "SSE of a finished run: nothing left after Last-Event-ID"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unknown run"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too many event streams"
+          }
+        },
+        "summary" : "A run's events: the complete JSON list, or a live SSE stream",
+        "tags" : [ "run-event-controller" ]
+      }
+    },
+    "/api/v1/runs/{runId}/payments" : {
+      "get" : {
+        "operationId" : "listRunPayments",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "runId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunPayments"
+                }
+              }
+            },
+            "description" : "The intents"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unknown run"
+          }
+        },
+        "summary" : "Current state of the run's payment intents",
+        "tags" : [ "run-payments-controller" ]
+      }
+    },
+    "/api/v1/spend" : {
+      "get" : {
+        "operationId" : "getSpend",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "day",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SpendOverview"
+                }
+              }
+            },
+            "description" : "The limits and the day"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "day is not a valid YYYY-MM-DD date"
+          }
+        },
+        "summary" : "Configured spend limits and one UTC day of spend",
+        "tags" : [ "spend-controller" ]
+      }
+    }
+  }
+}

@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.orchestrator.budget;
 
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDate;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -22,6 +23,7 @@ public record SpendOverview(
      *
      * @param perRequestMax the starter's largest single payment, if configured
      */
+    @Schema(name = "SpendLimits")
     public record Limits(
             Money defaultRunBudget,
             Money maxRunBudget,
@@ -32,5 +34,6 @@ public record SpendOverview(
      * Intents of one tool in one status. {@code amount} sums the offered amounts (intents that never
      * reached the spend guard have none and add 0).
      */
+    @Schema(name = "SpendByTool")
     public record ByTool(String tool, String status, long count, Money amount) {}
 }
