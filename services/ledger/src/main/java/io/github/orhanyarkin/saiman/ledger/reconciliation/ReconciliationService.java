@@ -14,6 +14,7 @@ import io.github.orhanyarkin.saiman.ledger.payment.PaymentProjection;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentRepository;
 import io.github.orhanyarkin.saiman.ledger.payment.SellerState;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerCreditNote;
+import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerUnauthorizedException;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerUnavailableException;
 import io.github.orhanyarkin.saiman.shared.events.EventMetadata;
 import io.github.orhanyarkin.saiman.shared.ledger.MismatchKind;
@@ -126,6 +127,7 @@ public class ReconciliationService {
     private final SellerCreditNoteClient sellers;
     private final AtomicBoolean running = new AtomicBoolean();
     private final AtomicReference<@Nullable Instant> lastManualStart = new AtomicReference<>();
+    private final AtomicReference<@Nullable UUID> lastUnauthorizedRun = new AtomicReference<>();
     private final AtomicLong unbalancedEntries = new AtomicLong();
     private final AtomicLong dueBacklog = new AtomicLong();
     private final AtomicLong oldestUncheckedSeconds = new AtomicLong();
@@ -339,6 +341,16 @@ public class ReconciliationService {
             ChainReconciler.Evidence evidence = fetch(snapshot, safe, chain);
             return transactions.execute(tx -> book(runId, key, evidence, creditNote));
         } catch (ChainUnavailableException e) {
+            return skipped(runId, snapshot);
+        } catch (SellerUnauthorizedException e) {
+            // A wrong or missing service token fails every lookup: one ERROR per run, never the token itself.
+            if (!runId.equals(lastUnauthorizedRun.getAndSet(runId))) {
+                log.error(
+                        "Reconciliation run {}: seller-api refused the ledger's service token ({}); credited payments"
+                                + " stay PENDING until saiman.ledger.seller.service-token is fixed",
+                        runId,
+                        e.getMessage());
+            }
             return skipped(runId, snapshot);
         } catch (SellerUnavailableException e) {
             log.warn(

@@ -28,7 +28,10 @@ import java.util.UUID;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.test.context.TestPropertySource;
@@ -42,6 +45,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @LedgerIntegrationTest
 @TestPropertySource(properties = "saiman.test.context=reconciliation")
+@ExtendWith(OutputCaptureExtension.class)
 class CreditNoteCorroborationTests {
 
     private static final long AMOUNT = 20_000;
@@ -207,6 +211,33 @@ class CreditNoteCorroborationTests {
         // The second run found the row already there, so it published nothing (a fixed window: there is no sentinel
         // whose arrival would prove the absence, records of other keys may sit on other partitions).
         assertThat(drain(paymentId.toString(), 2, Duration.ofSeconds(5))).hasSize(1);
+    }
+
+    @Test
+    void aRefusedServiceTokenLeavesPaymentsPendingAndLogsOncePerRun(CapturedOutput output) {
+        TestPayment first = credited();
+        TestPayment second = credited();
+        sellers.unauthorized(first.key());
+        sellers.unauthorized(second.key());
+
+        ReconciliationReport report;
+        try {
+            report = runNow();
+        } finally {
+            // Shared context: later runs must find these corroborated, not unanswerable (PARTIAL).
+            for (TestPayment p : List.of(first, second)) {
+                sellers.up(p.key());
+                sellers.issue(p.key(), p.txHash(), AMOUNT);
+            }
+        }
+
+        assertThat(item(report, first).status()).isEqualTo("PENDING");
+        assertThat(item(report, second).status()).isEqualTo("PENDING");
+        assertThat(mismatchKinds(first)).isEmpty();
+        String marker = "Reconciliation run " + report.runId() + ": seller-api refused the ledger's service token";
+        assertThat(output.getAll().split(java.util.regex.Pattern.quote(marker), -1))
+                .as("one ERROR per run")
+                .hasSize(2);
     }
 
     // --- helpers ---

@@ -135,6 +135,32 @@ class LedgerApiSecurityTests {
     }
 
     @Test
+    void otherMethodsTrailingSlashesAndTheActuatorIndexAreDenied() throws IOException {
+        for (String method : List.of("HEAD", "OPTIONS")) {
+            for (String path : List.of(TRIAL_BALANCE, RUNS, "/actuator/health")) {
+                Response response = raw(
+                        method + " " + path + " HTTP/1.1\r\nHost: localhost\r\nAuthorization: " + OPERATOR + "\r\n");
+                assertThat(response.status()).as(method + " " + path).isEqualTo(403);
+            }
+        }
+        client.post()
+                .uri(RUNS + "/")
+                .header(HttpHeaders.AUTHORIZATION, OPERATOR)
+                .header(LedgerApiGuardFilter.CSRF_HEADER, "1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{}")
+                .exchange()
+                .expectStatus()
+                .isForbidden();
+        client.get()
+                .uri("/actuator")
+                .header(HttpHeaders.AUTHORIZATION, OPERATOR)
+                .exchange()
+                .expectStatus()
+                .isForbidden();
+    }
+
+    @Test
     void healthIsOpen() {
         client.get().uri("/actuator/health").exchange().expectStatus().isOk();
         client.get().uri("/actuator/health/readiness").exchange().expectStatus().isOk();

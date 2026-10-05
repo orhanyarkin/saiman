@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.ledger;
 
 import io.github.orhanyarkin.saiman.testsupport.PostgresContainerConfiguration.SuperuserDatabase;
+import io.github.orhanyarkin.saiman.testsupport.SharedContainers;
 import java.util.Properties;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -25,5 +26,15 @@ public final class Superuser {
 
     public static JdbcClient jdbc(SuperuserDatabase db) {
         return JdbcClient.create(dataSource(db));
+    }
+
+    /** {@code ledger_owner} (the role Flyway runs as) on this context's database, schema {@code ledger}. */
+    public static JdbcClient owner(SuperuserDatabase db) {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource(
+                db.jdbcUrl(), SharedContainers.ownerRole("ledger"), SharedContainers.ROLE_PASSWORD);
+        Properties properties = new Properties();
+        properties.setProperty("currentSchema", "ledger");
+        dataSource.setConnectionProperties(properties);
+        return JdbcClient.create(dataSource);
     }
 }

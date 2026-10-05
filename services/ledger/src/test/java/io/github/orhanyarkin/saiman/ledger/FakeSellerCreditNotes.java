@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.ledger;
 
 import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient;
+import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerUnauthorizedException;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -20,10 +21,14 @@ public class FakeSellerCreditNotes implements SellerCreditNoteClient {
     private final Map<String, SellerCreditNote> notes = new ConcurrentHashMap<>();
     private final Map<String, AtomicInteger> calls = new ConcurrentHashMap<>();
     private final Set<String> down = ConcurrentHashMap.newKeySet();
+    private final Set<String> unauthorized = ConcurrentHashMap.newKeySet();
 
     @Override
     public Optional<SellerCreditNote> find(String paymentKey) {
         calls.computeIfAbsent(paymentKey, k -> new AtomicInteger()).incrementAndGet();
+        if (unauthorized.contains(paymentKey)) {
+            throw new SellerUnauthorizedException("seller answered HTTP 401");
+        }
         if (down.contains(paymentKey)) {
             throw new SellerUnavailableException("test: seller down");
         }
@@ -40,9 +45,15 @@ public class FakeSellerCreditNotes implements SellerCreditNoteClient {
         down.add(paymentKey);
     }
 
+    /** Lookups of this key fail as if the seller refused the ledger's service token. */
+    public void unauthorized(String paymentKey) {
+        unauthorized.add(paymentKey);
+    }
+
     /** Lookups of this key work again. */
     public void up(String paymentKey) {
         down.remove(paymentKey);
+        unauthorized.remove(paymentKey);
     }
 
     /** How often this key was looked up. */

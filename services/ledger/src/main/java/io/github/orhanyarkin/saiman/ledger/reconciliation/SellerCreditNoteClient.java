@@ -19,6 +19,13 @@ public interface SellerCreditNoteClient {
         }
     }
 
+    /** The seller refused the ledger's service token (401/403): a configuration fault, still no definite answer. */
+    class SellerUnauthorizedException extends SellerUnavailableException {
+        public SellerUnauthorizedException(String message) {
+            super(message);
+        }
+    }
+
     /**
      * Looks up the seller's credit note for one payment.
      *
