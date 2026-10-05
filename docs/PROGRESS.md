@@ -1,8 +1,8 @@
 # Progress
 
 ## Current milestone
-M5 — Dashboard: **built and verified live** on branch `m5-dashboard` (not pushed). Human decisions (2026-10-05): nginx `web` service (same-origin, no CORS), the human installed Chromium, live acceptance once. Contract `docs/design/m5-dashboard.md`; ADR-0022. Status: T0-T5 done: per-task audit and its one re-review (fixes in), live acceptance passed, milestone audit done (Low and Infos fixed). Next: push and PR (needs the human's go).
-M4b (settle-before-serve, ADR-0021, PR #16), the Redis/Kafka swap (ADR-0020, PR #15) and M4 are done and merged.
+M6 — Hardening, evals, replay: **design done** on branch `m6-hardening` (not pushed). Human decisions (2026-10-05): static role tokens with Spring Security (JWT/OIDC as documented upgrade path, token only in memory/sessionStorage), SPA replay + server-side daily-cap fallback. Contract `docs/design/m6-hardening.md`; ADRs 0023-0026. Next: T0 contracts, then wave 2 (T1, T7, T4, T5a, T6a). Terraform/Infracost/Cloudflare/AWS capture remain human-only and are not in this plan.
+M5 (dashboard), M4b, the Redis/Kafka swap and M4 are done and merged.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
