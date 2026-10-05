@@ -26,8 +26,21 @@ public class ReconciliationReports {
         return repository.latestRun().map(this::toReport);
     }
 
-    private ReconciliationReport toReport(ReconciliationRepository.Run run) {
+    /** The {@code limit} most recently started runs, newest first, without their items. */
+    public ReconciliationRunList history(int limit) {
+        return new ReconciliationRunList(repository.runs(limit).stream()
+                .map(run -> new ReconciliationRunList.Run(
+                        run.id(), run.status(), run.startedAt(), run.finishedAt(), run.safeBlock(), summary(run)))
+                .toList());
+    }
+
+    private static ReconciliationReport.Summary summary(ReconciliationRepository.Run run) {
         var c = run.counters();
+        return new ReconciliationReport.Summary(
+                c.checked(), c.matched(), c.pending(), c.resolvedUsed(), c.resolvedUnused(), c.mismatches());
+    }
+
+    private ReconciliationReport toReport(ReconciliationRepository.Run run) {
         long suspense = repository.suspenseBalance(USDC_ZERO);
         var items = repository.items(run.id()).stream()
                 .map(row -> new ReconciliationReport.Item(
@@ -57,8 +70,7 @@ public class ReconciliationReports {
                 run.status(),
                 run.network(),
                 run.safeBlock(),
-                new ReconciliationReport.Summary(
-                        c.checked(), c.matched(), c.pending(), c.resolvedUsed(), c.resolvedUnused(), c.mismatches()),
+                summary(run),
                 Money.usdc(Math.absExact(suspense)),
                 suspense > 0 ? "DEBIT" : suspense < 0 ? "CREDIT" : null,
                 items);
