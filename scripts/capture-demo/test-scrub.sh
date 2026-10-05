@@ -16,6 +16,7 @@ mkdir -p "${fx}" "${work}/secrets"
 chmod 700 "${work}/secrets"
 printf '%s' "fixture-token-ABCDEFGHIJKLMNOPQRSTUV" >"${work}/secrets/api_reader_token"
 
+export ENV_FILE="${work}/absent.env"
 hex64="$(printf 'ab%.0s' {1..32})"
 tx="0x${hex64}"
 
@@ -52,7 +53,14 @@ expect_scrub bare-hex 1 "{\"k\":\"${hex64}\"}" 'bare 64-hex'
 expect_scrub bare-hex-after-text 1 "{\"k\":\"key=${hex64}\"}" 'bare 64-hex'
 expect_scrub longer-hex 1 "{\"k\":\"${hex64}${hex64}\"}" 'bare 64-hex'
 expect_scrub long-0x 1 "{\"k\":\"0x${hex64}${hex64}\"}" 'longer than a tx hash'
-expect_scrub token-content 1 '{"x":"fixture-token-ABCDEFGHIJKLMNOPQRSTUV"}' 'content of'
+expect_scrub token-content 1 '{"x":"fixture-token-ABCDEFGHIJKLMNOPQRSTUV"}' 'value from a secrets file'
+printf 'first-line-short\nsecond-secret-line-ABCDEFGHIJ\n' >"${work}/secrets/multi_line"
+expect_scrub multiline-secret 1 '{"x":"second-secret-line-ABCDEFGHIJ"}' 'value from a secrets file'
+printf 'export PLANTED_ENV="env-planted-value-0123456789"  # c\nOTHER=short\n' >"${work}/fixture.env"
+got=0
+printf '%s' '{"x":"env-planted-value-0123456789"}' >"${fx}/env.json"
+ENV_FILE="${work}/fixture.env" SECRETS_DIR="${work}/secrets" scrub_check "${fx}/env.json" 2>"${work}/err" || got=$?
+if [[ "${got}" -eq 1 ]] && ! grep -qF "env-planted" "${work}/err"; then pass "scrub env-file value"; else fail "scrub env-file value (rc=${got})"; fi
 expect_scrub short-hex-ok 0 '{"id":"6ad4354c-8e79-4b49-b5d9-d45eb9689b41","h":"abcdef0123456789"}'
 
 # --- capture-demo.sh against a fake curl ---------------------------------------------------
@@ -110,6 +118,49 @@ if [[ "${rc}" -ne 0 && ! -e "${work}/bad.json" ]]; then
   pass "capture-demo: a rejected token fails without output"
 else
   fail "capture-demo: a rejected token did not fail"
+fi
+
+# --- scripts/run-evals.sh publishing rules (no stack: EVAL_RUN_CMD stands in for the container) ---
+ev_out="${work}/ev-out"
+ev_pub="${work}/ev-pub"
+run_evals() { # <shell command that plays the container>
+  EVAL_RUN_CMD="$1" EVAL_OUT_DIR="${ev_out}" EVAL_PUBLISH_DIR="${ev_pub}" SECRETS_DIR="${work}/secrets" \
+    scripts/run-evals.sh >"${work}/out" 2>"${work}/err"
+}
+rc=0
+run_evals "printf '# report\n' >'${ev_out}/latest.md'; printf '{\"recall\":0.9}' >'${ev_out}/latest.json'" || rc=$?
+if [[ "${rc}" -eq 0 && -f "${ev_pub}/latest.md" && -f "${ev_pub}/latest.json" && "$(ls "${ev_pub}/runs" | wc -l)" -eq 1 ]]; then
+  pass "run-evals: clean reports are published"
+else
+  fail "run-evals: clean reports not published (rc=${rc}): $(cat "${work}/err")"
+fi
+rm -rf "${ev_pub}"
+printf 'host-file-content-that-must-not-be-copied\n' >"${work}/outside.txt"
+rc=0
+run_evals "ln -s '${work}/outside.txt' '${ev_out}/latest.md'; printf '{}' >'${ev_out}/latest.json'" || rc=$?
+if [[ "${rc}" -ne 0 && ! -e "${ev_pub}/latest.md" && ! -e "${ev_pub}/latest.json" ]] && grep -qF 'symlink' "${work}/err"; then
+  pass "run-evals: a planted symlink latest.md is rejected and nothing is copied"
+else
+  fail "run-evals: planted symlink not rejected (rc=${rc})"
+fi
+rc=0
+run_evals "printf 'x' >'${ev_out}/latest.md'; printf '{\"k\":\"second-secret-line-ABCDEFGHIJ\"}' >'${ev_out}/latest.json'" || rc=$?
+if [[ "${rc}" -ne 0 && ! -e "${ev_pub}/latest.json" ]] && grep -qF 'scrub check failed' "${work}/err"; then
+  pass "run-evals: a report containing a secret is rejected and nothing is copied"
+else
+  fail "run-evals: secret in report not rejected (rc=${rc})"
+fi
+rc=0
+run_evals "printf 'stale' >'${ev_out}/stale.md'; true" || rc=$?
+if [[ "${rc}" -eq 0 ]]; then pass "run-evals: (stale file from the container is a report like any other)"; fi
+rm -rf "${ev_pub}"
+printf 'old' >"${ev_out}/old.md"; ln -s "${work}/outside.txt" "${ev_out}/old-link"
+rc=0
+run_evals "true" || rc=$?
+if [[ "${rc}" -ne 0 && ! -e "${ev_out}/old.md" && ! -L "${ev_out}/old-link" ]]; then
+  pass "run-evals: stale files and symlinks are cleared before the run"
+else
+  fail "run-evals: stale output survived (rc=${rc})"
 fi
 
 if [[ "${failures}" -ne 0 ]]; then

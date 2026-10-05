@@ -24,7 +24,7 @@ export X402_SELLER_PAYTO_ADDRESS
 	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check \
 	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask \
 	research-run research-approve research-status web-build e2e e2e-live lighthouse gen-api \
-	recon-run recon-report ledger-balance ledger-tamper-demo db-roles auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest
+	recon-run recon-report ledger-balance ledger-tamper-demo db-roles psql auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest
 
 help: ## Show this help.
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -51,6 +51,9 @@ db-roles: ## (Re)run the idempotent per-service Postgres role bootstrap (db-init
 	$(COMPOSE) up -d --wait postgres
 	$(COMPOSE) run --rm db-init
 
+psql: ## Open a psql shell as the superuser inside the postgres container (unix socket, no password in argv or env).
+	$(COMPOSE) exec postgres psql -U saiman -d saiman
+
 auth-tokens: ## Show where the API token files are (never prints a token) and how to use one (ADR-0023).
 	@scripts/auth-tokens.sh
 
@@ -63,6 +66,7 @@ auth-token-show: ## Print a human API token to stdout (explicit request). Usage:
 up: ## Verify payTo, create secret files (generates DB passwords and API tokens), build images and the dashboard, start the full stack, wait for app health.
 	scripts/check-x402-env.sh
 	scripts/ensure-secret-files.sh
+	@[ "$$(stat -c %a secrets)" = "700" ] || { echo "up: secrets/ must be mode 700 (it is what protects the 0644 secret files inside); run: chmod 700 secrets" >&2; exit 1; }
 	$(MAKE) images
 	$(MAKE) web-build
 	scripts/with-auth-digests.sh $(COMPOSE) --profile apps up -d
@@ -171,7 +175,7 @@ secrets-from-dotenv: ## HUMAN ONLY: copy OPENAI_API_KEY from .env into secrets/o
 ingest-backfill: ## Run ingest locally in backfill mode against `make infra-up` (needs secrets/mkk_credentials + openai_api_key; connects as ingest_app, migrates as ingest_owner).
 	@bash -c '(exec 3<>/dev/tcp/127.0.0.1/5432)' 2>/dev/null || { echo "Postgres is not reachable on 127.0.0.1:5432; run 'make infra-up' first." >&2; exit 1; }
 	scripts/prepare-ingest-secrets.sh $(CURDIR)/secrets $(CURDIR)/build/ingest-secrets
-	SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=ingest_app SPRING_FLYWAY_USER=ingest_owner SPRING_DATA_REDIS_URL=redis://localhost:$${REDIS_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=$(CURDIR)/build/ingest-secrets/"
+	set +e; SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=ingest_app SPRING_FLYWAY_USER=ingest_owner SPRING_DATA_REDIS_URL=redis://localhost:$${REDIS_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=$(CURDIR)/build/ingest-secrets/"; rc=$$?; rm -rf $(CURDIR)/build/ingest-secrets; exit $$rc
 
 ingest-status: ## Show per-ticker ingest status from the running ingest container (loopback only).
 	@out=$$(curl -sf $(INGEST_URL)/internal/v1/tickers) || { echo "ingest not reachable on $(INGEST_URL) (is 'make up' running?)" >&2; exit 1; }; \
@@ -206,7 +210,7 @@ research-run: ## Start a research run and stream its events. Usage: make researc
 		| scripts/curl-auth.sh operator -sS --fail-with-body -X POST -H 'Content-Type: application/json' -H 'X-Saiman-Csrf: 1' --data @- $(ORCH_URL)/api/v1/runs) || { echo "$$resp" >&2; exit 1; }; \
 	printf '%s\n' "$$resp" | jq .; \
 	url=$$(printf '%s' "$$resp" | jq -r '.eventsUrl'); \
-	case "$$url" in /*) url="$(ORCH_URL)$$url";; esac; \
+	case "$$url" in /[!/]*) url="$(ORCH_URL)$$url";; *) echo "research-run: refusing eventsUrl that is not a path on $(ORCH_URL) (the token is never sent elsewhere)" >&2; exit 1;; esac; \
 	echo "--- streaming $$url (ends with the run's terminal event; approve with make research-approve) ---"; \
 	scripts/curl-auth.sh reader -sS -N -H 'Accept: text/event-stream' "$$url"
 

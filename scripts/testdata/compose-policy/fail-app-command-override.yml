@@ -1,6 +1,6 @@
 # Fixture for scripts/test-check-compose-policy.sh: must FAIL.
-# evals can write to the source tree.
-# expect: bind mount
+# A command override passing a Spring flag.
+# expect: command/entrypoint overrides are not allowed
 name: cptest-m6
 services:
   postgres:
@@ -62,6 +62,7 @@ services:
         target: spring.datasource.password
       - source: seller_service_token_ledger
         target: saiman.ledger.seller.service-token
+    command: [--saiman.auth.enabled=false]
     environment:
       SPRING_DATASOURCE_USERNAME: ledger_app
       SPRING_FLYWAY_USER: ledger_owner
@@ -87,7 +88,7 @@ services:
       - source: seller_service_token_evals
         target: saiman.evals.seller.service-token
     volumes:
-      - ../../docs:/out
+      - ../../build/evals:/out
 secrets:
   pg_superuser_password:
     file: ../../secrets/pg_superuser_password

@@ -16,12 +16,15 @@
 #      pg_<svc>_owner_password, pg_<svc>_app_password for orchestrator|ledger|seller_api|ingest
 #      (`openssl rand -hex 32`, ADR-0024) and seller_service_token_ledger / seller_service_token_evals
 #      (32 random bytes, base64url, ADR-0023);
+#    - pg_superuser_password: the Postgres superuser, mounted only into postgres and db-init (both run as
+#      root in the container), so 0600;
 #    - never mounted anywhere, humans and `make` only, so 0600: api_reader_token, api_operator_token
 #      (32 random bytes, base64url, ADR-0023).
 #    Rotating one = delete the file and run `make up` (tokens) or `make db-roles` (DB passwords).
 set -euo pipefail
 
 readonly CREDENTIAL_NAMES=(mkk_credentials openai_api_key x402_buyer_private_key)
+readonly SUPERUSER_PASSWORD_NAME=pg_superuser_password
 readonly DB_PASSWORD_NAMES=(
   pg_orchestrator_owner_password pg_orchestrator_app_password
   pg_ledger_owner_password pg_ledger_app_password
@@ -34,9 +37,10 @@ dir="${SECRETS_DIR:-secrets}"
 
 if [[ ! -d "$dir" ]]; then
   (umask 077 && mkdir -p "$dir")
-  chmod 700 "$dir"
   echo "ensure-secret-files: created directory ${dir}/ (0700)"
 fi
+# The directory mode is what protects the 0644 files inside: enforce it on every run.
+chmod 700 "$dir"
 
 for name in "${CREDENTIAL_NAMES[@]}"; do
   path="${dir}/${name}"
@@ -71,6 +75,8 @@ generate() {
   echo "ensure-secret-files: generated ${path} (${mode}, random, not printed)"
 }
 
+# Superuser password: mounted only into postgres and db-init (both root in the container, so 0600 works).
+generate "${dir}/${SUPERUSER_PASSWORD_NAME}" 600 new_password
 for name in "${DB_PASSWORD_NAMES[@]}"; do
   generate "${dir}/${name}" 644 new_password
 done

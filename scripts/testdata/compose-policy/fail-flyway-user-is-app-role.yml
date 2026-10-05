@@ -3,11 +3,16 @@
 # expect: SPRING_FLYWAY_USER=ledger_app is not allowed
 name: cptest-m6
 services:
-  db-init:
+  postgres:
     image: busybox:1
     environment:
-      PGPASSWORD: saiman
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_superuser_password
     secrets:
+      - pg_superuser_password
+  db-init:
+    image: busybox:1
+    secrets:
+      - pg_superuser_password
       - pg_orchestrator_owner_password
       - pg_orchestrator_app_password
       - pg_seller_api_owner_password
@@ -16,6 +21,8 @@ services:
       - pg_ledger_app_password
       - pg_ingest_owner_password
       - pg_ingest_app_password
+    volumes:
+      - ../../deploy/compose/postgres:/bootstrap:ro
   orchestrator:
     image: busybox:1
     profiles: ["apps"]
@@ -82,6 +89,8 @@ services:
     volumes:
       - ../../build/evals:/out
 secrets:
+  pg_superuser_password:
+    file: ../../secrets/pg_superuser_password
   pg_orchestrator_owner_password:
     file: ../../secrets/pg_orchestrator_owner_password
   pg_orchestrator_app_password:

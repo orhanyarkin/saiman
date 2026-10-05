@@ -27,6 +27,24 @@ for svc in orchestrator ledger seller_api ingest; do
   done
 done
 
-exec psql -v ON_ERROR_STOP=1 -X -q \
-  -h "${PGHOST:-postgres}" -U "${PGUSER:-saiman}" -d "${PGDATABASE:-saiman}" \
-  -f "${sql_file}"
+super_file="${secrets_dir}/pg_superuser_password"
+if [[ ! -s "${super_file}" ]]; then
+  echo "bootstrap-roles: ${super_file} is missing or empty (run scripts/ensure-secret-files.sh)" >&2
+  exit 1
+fi
+new_super="$(tr -d '\r\n' <"${super_file}")"
+export PW_SUPERUSER="${new_super}"
+
+psql_args=(-v ON_ERROR_STOP=1 -X -q -h "${PGHOST:-postgres}" -U "${PGUSER:-saiman}" -d "${PGDATABASE:-saiman}")
+
+# Migration path for volumes created before the superuser password became a secret: they still
+# accept the legacy literal. Try the secret first; if the server rejects it, connect with the legacy
+# password once, and the SQL below then rotates the superuser to the secret. The legacy literal is
+# not a credential anymore after that run.
+export PGPASSWORD="${new_super}"
+if ! psql "${psql_args[@]}" -c 'select 1' >/dev/null 2>&1; then
+  echo "bootstrap-roles: superuser secret not accepted yet; using the pre-M6 password once to rotate it" >&2
+  export PGPASSWORD=saiman
+fi
+
+exec psql "${psql_args[@]}" -f "${sql_file}"

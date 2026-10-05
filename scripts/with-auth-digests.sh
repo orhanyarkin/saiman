@@ -18,13 +18,31 @@ set -euo pipefail
 
 dir="${SECRETS_DIR:-secrets}"
 
+# Known test fixtures must never be real tokens: the literals are read from TestTokens.java at run time.
+test_tokens_file="$(dirname "${BASH_SOURCE[0]}")/../libs/api-security/src/testFixtures/java/io/github/orhanyarkin/saiman/apisecurity/testfixtures/TestTokens.java"
+
 digest_of() {
-  local file="$1"
+  local file="$1" token digest distinct
   if [[ ! -s "${file}" ]]; then
     echo "with-auth-digests: ${file} is missing or empty (run scripts/ensure-secret-files.sh)" >&2
     return 1
   fi
-  tr -d '\r\n' <"${file}" | sha256sum | cut -d' ' -f1
+  token="$(tr -d '\r\n' <"${file}")"
+  if [[ ! "${token}" =~ ^[A-Za-z0-9_-]{43,128}$ ]]; then
+    echo "with-auth-digests: ${file} is not 43-128 characters of [A-Za-z0-9_-]; delete it and run 'make up' to regenerate" >&2
+    return 1
+  fi
+  distinct="$(fold -w1 <<<"${token}" | sort -u | wc -l)"
+  if [[ "${distinct}" -lt 12 ]]; then
+    echo "with-auth-digests: ${file} has too little character diversity to be random; delete it and run 'make up' to regenerate" >&2
+    return 1
+  fi
+  digest="$(printf '%s' "${token}" | sha256sum | cut -d' ' -f1)"
+  if [[ -r "${test_tokens_file}" ]] && grep -oE '"[A-Za-z0-9_-]{32,}"' "${test_tokens_file}" | tr -d '"' | grep -qxF -e "${token}" -e "${digest}"; then
+    echo "with-auth-digests: ${file} equals a known test token; delete it and run 'make up' to regenerate" >&2
+    return 1
+  fi
+  printf '%s\n' "${digest}"
 }
 
 reader="$(digest_of "${dir}/api_reader_token")"

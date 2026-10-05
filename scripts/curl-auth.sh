@@ -15,6 +15,21 @@ case "${role}" in
     ;;
 esac
 
+# Flags that could print the Authorization header (verbose/trace output, dumped headers, config
+# files, library dumps) are refused: the token must never reach a terminal or a log.
+for arg in "$@"; do
+  case "${arg}" in
+    -v | --verbose | --trace | --trace-ascii | --trace-time | --trace-config | --trace-ids | -D* | --dump-header | -K | --config | --libcurl | --stderr)
+      echo "curl-auth: refusing curl flag ${arg} (it could print the Authorization header)" >&2
+      exit 2
+      ;;
+  esac
+  if [[ "${arg}" =~ ^-[A-Za-z]*[vDK][A-Za-z]*$ ]]; then
+    echo "curl-auth: refusing curl flag cluster ${arg} (contains -v, -D or -K)" >&2
+    exit 2
+  fi
+done
+
 token_file="${SECRETS_DIR:-secrets}/api_${role}_token"
 if [[ ! -s "${token_file}" ]]; then
   echo "curl-auth: ${token_file} is missing or empty (run 'make up' or scripts/ensure-secret-files.sh)" >&2

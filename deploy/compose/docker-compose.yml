@@ -51,7 +51,11 @@ services:
     environment:
       POSTGRES_DB: saiman
       POSTGRES_USER: saiman
-      POSTGRES_PASSWORD: saiman
+      # Superuser password from a file secret (only read on first init of an empty volume; db-init
+      # rotates it on existing volumes). No password in the environment (compose policy).
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_superuser_password
+    secrets:
+      - pg_superuser_password
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -77,8 +81,9 @@ services:
       PGHOST: postgres
       PGDATABASE: saiman
       PGUSER: saiman
-      PGPASSWORD: saiman
+      # The superuser password is read from the file secret by bootstrap-roles.sh (no PGPASSWORD here).
     secrets:
+      - pg_superuser_password
       - pg_orchestrator_owner_password
       - pg_orchestrator_app_password
       - pg_ledger_owner_password
@@ -406,6 +411,8 @@ services:
 # service tokens as random values. The human role tokens api_reader_token / api_operator_token
 # are generated there too but are never mounted anywhere.
 secrets:
+  pg_superuser_password:
+    file: ../../secrets/pg_superuser_password
   x402_buyer_private_key:
     file: ../../secrets/x402_buyer_private_key
   mkk_credentials:

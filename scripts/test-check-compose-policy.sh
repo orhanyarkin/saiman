@@ -242,6 +242,22 @@ else
   echo "FAIL: prepare-ingest-secrets: unexpected ingest secrets dir" >&2
   failures=$((failures + 1))
 fi
+
+# --- with-auth-digests.sh rejects weak or known tokens (ADR-0023) ---
+bad_dir="${work_dir}/badtok"
+cp -r "${gen_dir}" "${bad_dir}"
+for case in "short:abc123" "lowdiversity:$(printf 'ab%.0s' {1..30})" "badchars:$(printf 'a-b_c%.0s' {1..10})!!!!!!!!!!" "testtoken:saiman-test-reader-token-0123456789abcdefghij"; do
+  name="${case%%:*}"
+  printf '%s' "${case#*:}" >"${bad_dir}/api_reader_token"
+  expect_exit "with-auth-digests: rejects ${name} token" 1 env SECRETS_DIR="${bad_dir}" scripts/with-auth-digests.sh --print
+  if grep -qF "${case#*:}" "${out_file}" "${err_file}"; then
+    echo "FAIL: with-auth-digests: ${name} token was printed" >&2
+    failures=$((failures + 1))
+  fi
+done
+expect_exit "curl-auth: refuses -v" 2 scripts/curl-auth.sh reader -v http://localhost:1/
+expect_exit "curl-auth: refuses a -sSv cluster" 2 scripts/curl-auth.sh reader -sSv http://localhost:1/
+expect_exit "curl-auth: refuses -D-" 2 scripts/curl-auth.sh operator -D- http://localhost:1/
 expect_exit "capture-demo self-test" 0 scripts/capture-demo/test-scrub.sh
 
 if [[ "${failures}" -ne 0 ]]; then
