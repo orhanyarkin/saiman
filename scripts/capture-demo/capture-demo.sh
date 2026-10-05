@@ -163,7 +163,8 @@ jq -S -n \
   --slurpfile responses "${responses}" \
   --slurpfile runEvents "${events}" \
   '{schemaVersion: 1, capturedAt: $capturedAt, environment: $environment, network: "eip155:84532",
-    sourceCommit: $sourceCommit, responses: $responses[0], runEvents: $runEvents[0]}' >"${candidate}"
+    sourceCommit: $sourceCommit, responses: $responses[0], runEvents: $runEvents[0]}' |
+  jq -S 'walk(if type == "string" then gsub("http://[A-Za-z0-9_.-]+:[0-9]+"; "https://demo.invalid") else . end)' >"${candidate}"
 
 if ! SECRETS_DIR="${secrets_dir}" scrub_check "${candidate}"; then
   echo "capture-demo: scrub check failed; nothing was written" >&2

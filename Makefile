@@ -120,7 +120,7 @@ e2e: web/node_modules ## Playwright e2e against the fixture server (no stack nee
 	pnpm --dir web e2e
 
 e2e-live: web/node_modules ## Playwright e2e against the running stack at http://localhost:8088 (needs `make up`).
-	SAIMAN_E2E_BASE_URL=http://localhost:8088 pnpm --dir web e2e:live
+	SAIMAN_E2E_TOKEN="$$(cat secrets/api_operator_token)" SAIMAN_E2E_BASE_URL=http://localhost:8088 pnpm --dir web e2e:live
 
 lighthouse: web/node_modules ## Lighthouse accessibility audit of the dashboard routes (needs Chromium).
 	pnpm --dir web lighthouse

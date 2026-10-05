@@ -48,7 +48,7 @@ find "${out_dir}" -mindepth 1 -delete
 if [[ -n "${EVAL_RUN_CMD:-}" ]]; then
   bash -c "${EVAL_RUN_CMD}"
 else
-  docker compose -f "${COMPOSE_FILE}" --profile evals run --rm --no-deps --user "$(id -u):$(id -g)" evals
+  GIT_SHA="$(git rev-parse --short HEAD)" docker compose -f "${COMPOSE_FILE}" --profile evals run --rm --no-deps --user "$(id -u):$(id -g)" evals
 fi
 
 # Refuse symlinks and anything that is not a plain file or directory before reading a byte.

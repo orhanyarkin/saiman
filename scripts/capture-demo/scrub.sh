@@ -20,6 +20,12 @@ scrub_check() {
     fi
   done
 
+  # Internal service hosts (http://seller-api:8081) must be rewritten before publishing.
+  if grep -qE 'http://[A-Za-z0-9_.-]+:[0-9]+' "${file}"; then
+    echo "scrub: FAIL: the capture contains an internal http://<host>:<port> URL" >&2
+    rc=1
+  fi
+
   # Bare 64+ hex digits: not preceded by a hex digit or the x of a 0x prefix.
   if grep -qE '(^|[^0-9a-fA-Fx])[0-9a-fA-F]{64,}' "${file}"; then
     echo "scrub: FAIL: the capture contains a bare 64-hex string that is not a 0x-prefixed tx hash" >&2

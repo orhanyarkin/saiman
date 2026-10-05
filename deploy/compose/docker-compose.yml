@@ -394,6 +394,7 @@ services:
       SAIMAN_EVALS_INGEST_BASE_URL: http://ingest:8083
       SAIMAN_EVALS_SELLER_BASE_URL: http://seller-api:8081
       SAIMAN_EVALS_OUTPUT_DIR: /out
+      GIT_SHA: ${GIT_SHA:-unknown}
       # `make eval EVAL_ANSWERS=1` turns the answer tier (real LLM spend, day-capped) on.
       SAIMAN_EVALS_ANSWERS_ENABLED: ${SAIMAN_EVALS_ANSWERS_ENABLED:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318

@@ -19,9 +19,9 @@ import org.springframework.core.env.Environment;
  *
  * <p>Which role the context connects as is {@code saiman.test.db.runtime-role} (ADR-0024 transition flag):
  * <ul>
- *   <li>{@code superuser} (default until every service has its grants migration): the container's user, as before;
+ *   <li>{@code superuser} (default for modules without a service schema): the container's user, as before;
  *   <li>{@code owner}: the service's {@code <schema>_owner} for both the pool and Flyway;
- *   <li>{@code app}: the pool runs as {@code <schema>_app} (DML only) and Flyway as {@code <schema>_owner}, as in
+ *   <li>{@code app} (default for the four services): the pool runs as {@code <schema>_app} (DML only) and Flyway as {@code <schema>_owner}, as in
  *       production. The schema is the context's {@code spring.flyway.default-schema}.
  * </ul>
  * Tests that must tamper with the database on purpose inject {@link SuperuserDatabase}.
@@ -115,7 +115,13 @@ public class PostgresContainerConfiguration {
     }
 
     private static String mode(Environment environment) {
-        String mode = environment.getProperty(RUNTIME_ROLE_PROPERTY, "superuser");
+        // Services (a known flyway default schema) run as their app role like in production; other modules keep
+        // the container's user.
+        String fallback =
+                SharedContainers.SERVICE_SCHEMAS.contains(environment.getProperty("spring.flyway.default-schema", ""))
+                        ? "app"
+                        : "superuser";
+        String mode = environment.getProperty(RUNTIME_ROLE_PROPERTY, fallback);
         if (!mode.equals("superuser") && !mode.equals("owner") && !mode.equals("app")) {
             throw new IllegalStateException(RUNTIME_ROLE_PROPERTY + " must be superuser, owner or app, was " + mode);
         }

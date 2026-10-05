@@ -127,6 +127,8 @@ public final class SharedContainers {
         try (Connection connection = DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword());
                 Statement statement = connection.createStatement()) {
             statement.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public");
+            // As in production (db-init): no TEMP/CONNECT through PUBLIC.
+            statement.execute("REVOKE ALL ON DATABASE " + database + " FROM PUBLIC");
             for (String schema : SERVICE_SCHEMAS) {
                 statement.execute(
                         "GRANT CONNECT ON DATABASE " + database + " TO " + ownerRole(schema) + ", " + appRole(schema));
