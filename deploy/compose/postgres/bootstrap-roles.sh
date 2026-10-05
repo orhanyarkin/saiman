@@ -43,7 +43,7 @@ psql_args=(-v ON_ERROR_STOP=1 -X -q -h "${PGHOST:-postgres}" -U "${PGUSER:-saima
 # not a credential anymore after that run.
 export PGPASSWORD="${new_super}"
 if ! psql "${psql_args[@]}" -c 'select 1' >/dev/null 2>&1; then
-  echo "bootstrap-roles: superuser secret not accepted yet; using the pre-M6 password once to rotate it" >&2
+  echo "bootstrap-roles: WARNING: legacy superuser password fallback in use (secret file not yet accepted); rotating the superuser to pg_superuser_password now" >&2
   export PGPASSWORD=saiman
 fi
 

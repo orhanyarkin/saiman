@@ -21,6 +21,12 @@ dir="${SECRETS_DIR:-secrets}"
 # Known test fixtures must never be real tokens: the literals are read from TestTokens.java at run time.
 test_tokens_file="$(dirname "${BASH_SOURCE[0]}")/../libs/api-security/src/testFixtures/java/io/github/orhanyarkin/saiman/apisecurity/testfixtures/TestTokens.java"
 
+known_file="$(umask 077 && mktemp "${TMPDIR:-/tmp}/saiman-known-tokens.XXXXXX")"
+trap 'rm -f "${known_file}"' EXIT
+if [[ -r "${test_tokens_file}" ]]; then
+  grep -oE '"[A-Za-z0-9_-]{32,}"' "${test_tokens_file}" | tr -d '"' >"${known_file}" || true
+fi
+
 digest_of() {
   local file="$1" token digest distinct
   if [[ ! -s "${file}" ]]; then
@@ -32,13 +38,14 @@ digest_of() {
     echo "with-auth-digests: ${file} is not 43-128 characters of [A-Za-z0-9_-]; delete it and run 'make up' to regenerate" >&2
     return 1
   fi
-  distinct="$(fold -w1 <<<"${token}" | sort -u | wc -l)"
+  distinct="$(tr -d '\r\n' <"${file}" | fold -w1 | sort -u | wc -l)"
   if [[ "${distinct}" -lt 12 ]]; then
     echo "with-auth-digests: ${file} has too little character diversity to be random; delete it and run 'make up' to regenerate" >&2
     return 1
   fi
   digest="$(printf '%s' "${token}" | sha256sum | cut -d' ' -f1)"
-  if [[ -r "${test_tokens_file}" ]] && grep -oE '"[A-Za-z0-9_-]{32,}"' "${test_tokens_file}" | tr -d '"' | grep -qxF -e "${token}" -e "${digest}"; then
+  # The token goes to grep on stdin (printf is a builtin), the known values come from a 0600 file: nothing secret in argv.
+  if [[ -s "${known_file}" ]] && printf '%s\n%s\n' "${token}" "${digest}" | grep -qxFf "${known_file}"; then
     echo "with-auth-digests: ${file} equals a known test token; delete it and run 'make up' to regenerate" >&2
     return 1
   fi
@@ -67,4 +74,5 @@ export SAIMAN_AUTH_READER_TOKEN_SHA256="${reader}"
 export SAIMAN_AUTH_OPERATOR_TOKEN_SHA256="${operator}"
 export SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256="${svc_ledger}"
 export SAIMAN_AUTH_SERVICE_TOKENS_EVALS_SHA256="${svc_evals}"
+rm -f "${known_file}"
 exec "$@"

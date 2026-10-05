@@ -140,6 +140,13 @@ $adopt$;
 REVOKE ALL ON DATABASE saiman FROM PUBLIC;
 SELECT format('GRANT CONNECT ON DATABASE saiman TO %I', name) FROM bootstrap_role \gexec
 
+-- 4b. The roles must not reach the maintenance databases either (a fresh cluster lets PUBLIC connect
+--     to postgres and template1, and use TEMP there). Idempotent; the superuser is unaffected.
+REVOKE ALL ON DATABASE postgres FROM PUBLIC;
+REVOKE ALL ON DATABASE template1 FROM PUBLIC;
+SELECT format('REVOKE ALL ON DATABASE postgres FROM %I', name) FROM bootstrap_role \gexec
+SELECT format('REVOKE ALL ON DATABASE template1 FROM %I', name) FROM bootstrap_role \gexec
+
 -- 5. pgvector stays superuser-owned in `public` (the ingest roles reach it via their search_path).
 --    A volume where an older migration put it in another schema keeps it there (no move).
 CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
