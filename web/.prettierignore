@@ -4,3 +4,4 @@ pnpm-workspace.yaml
 src/routeTree.gen.ts
 playwright-report
 test-results
+src/lib/api/generated

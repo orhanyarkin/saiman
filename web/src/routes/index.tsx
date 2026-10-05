@@ -1,13 +1,51 @@
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { ErrorNotice } from "@/components/error-notice";
+import { RunsTable } from "@/components/run/runs-table";
 import { SystemCheckCard } from "@/components/system-check-card";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { recentRunsQuery } from "@/lib/api/queries";
 import { useDocumentTitle } from "@/lib/hooks";
 
 export const Route = createFileRoute("/")({
   component: Index,
 });
+
+function RecentRuns() {
+  const recent = useQuery(recentRunsQuery());
+  if (recent.isPending) {
+    return (
+      <p role="status" aria-busy="true" className="text-muted-foreground text-sm">
+        Loading recent runs…
+      </p>
+    );
+  }
+  if (recent.isError) {
+    return <ErrorNotice error={recent.error} />;
+  }
+  if (recent.data.items.length === 0) {
+    return (
+      <div className="space-y-3">
+        <p className="text-muted-foreground text-sm">
+          No runs to show yet. Start a run and it will be listed here.
+        </p>
+        <Link to="/runs/new" className={buttonVariants({ variant: "outline" })}>
+          Start your first run
+        </Link>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <RunsTable runs={recent.data.items} caption="The five most recent research runs" />
+      <Link to="/runs" className="text-sm underline underline-offset-4">
+        See all runs
+      </Link>
+    </div>
+  );
+}
 
 function Index() {
   useDocumentTitle("Home");
@@ -41,12 +79,10 @@ function Index() {
             <CardTitle>
               <h2 id="recent-title">Recent runs</h2>
             </CardTitle>
-            <CardDescription>Your latest research runs appear here.</CardDescription>
+            <CardDescription>Your five latest research runs.</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground text-sm">
-              No runs to show yet. Start a run and it will be listed here.
-            </p>
+            <RecentRuns />
           </CardContent>
         </Card>
       </section>

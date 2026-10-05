@@ -83,6 +83,30 @@ export function moneyTitle(money: MoneyLike): string {
   return `${String(money.atomicUnits)} atomic units of ${money.asset} (${String(money.decimals)} decimals)`;
 }
 
+/** USDC (6 decimals) from a plain atomic count, e.g. the approvals API's `amountAtomic`. */
+export function usdc(atomicUnits: number): MoneyLike {
+  return { atomicUnits, asset: "USDC", decimals: 6 };
+}
+
+/**
+ * `cap - sum(used)` clamped at zero, in BigInt. Null when an input is not renderable, the assets
+ * or decimals differ, or the result is not a safe integer.
+ */
+export function remainingMoney(cap: MoneyLike, ...used: MoneyLike[]): MoneyLike | null {
+  const all = [cap, ...used];
+  if (!all.every((m) => isRenderable(m) && m.asset === cap.asset && m.decimals === cap.decimals)) {
+    return null;
+  }
+  let left = BigInt(cap.atomicUnits);
+  for (const m of used) {
+    left -= BigInt(m.atomicUnits);
+  }
+  if (left < 0n) {
+    left = 0n;
+  }
+  return { asset: cap.asset, decimals: cap.decimals, atomicUnits: Number(left) };
+}
+
 const USDC_INPUT = /^(\d{1,6})(?:\.(\d{1,6}))?$/;
 
 /** Parses a typed USDC amount (`0.05`) into atomic units without floats; null when invalid. */

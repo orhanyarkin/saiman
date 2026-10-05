@@ -180,4 +180,22 @@ describe("fixture server", () => {
     expect((await fetch(`${url}/api/v1/nope`)).status).toBe(404);
     custom.close();
   });
+
+  it("derives payment intents and pending approvals from a started run", async () => {
+    const { runId } = await start();
+    let pending: { id: string; runId: string; amountAtomic: number }[] = [];
+    for (let i = 0; i < 100 && pending.length === 0; i++) {
+      pending = (await (
+        await fetch(`${base}/api/v1/approvals?status=PENDING`)
+      ).json()) as typeof pending;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const mine = pending.find((a) => a.runId === runId);
+    expect(mine?.amountAtomic).toBe(20000);
+    const payments = (await (await fetch(`${base}/api/v1/runs/${runId}/payments`)).json()) as {
+      items: { status: string }[];
+    };
+    expect(payments.items.map((i) => i.status)).toEqual(["AWAITING_APPROVAL"]);
+    expect((await fetch(`${base}/api/v1/runs/nope/payments`)).status).toBe(404);
+  });
 });

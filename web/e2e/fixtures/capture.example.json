@@ -6,6 +6,365 @@
       "service": "orchestrator",
       "dbTime": "2026-10-01T10:00:00Z",
       "traceId": null
+    },
+    "/api/v1/runs?limit=20": {
+      "items": [
+        {
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "status": "SUCCEEDED",
+          "question": "THYAO son özel durum açıklamaları neler?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 30000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 30000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 6923,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 36923,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T10:00:01Z",
+          "finishedAt": "2026-10-01T10:00:13Z",
+          "pendingApprovals": 0
+        },
+        {
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "status": "FAILED",
+          "question": "ASELS temettü kararları nelerdir?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 0,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T09:00:00Z",
+          "finishedAt": "2026-10-01T09:00:07Z",
+          "pendingApprovals": 0
+        }
+      ],
+      "next": "cursor-2"
+    },
+    "/api/v1/runs?limit=20&before=cursor-2": {
+      "items": [
+        {
+          "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+          "status": "SUCCEEDED",
+          "question": "GARAN bilanço duyuruları hangi tarihlerde yapıldı?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 20000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 5400,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 25400,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T08:00:00Z",
+          "finishedAt": "2026-10-01T08:00:11Z",
+          "pendingApprovals": 0
+        }
+      ]
+    },
+    "/api/v1/runs?limit=5": {
+      "items": [
+        {
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "status": "SUCCEEDED",
+          "question": "THYAO son özel durum açıklamaları neler?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 30000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 30000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 6923,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 36923,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T10:00:01Z",
+          "finishedAt": "2026-10-01T10:00:13Z",
+          "pendingApprovals": 0
+        },
+        {
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "status": "FAILED",
+          "question": "ASELS temettü kararları nelerdir?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 0,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T09:00:00Z",
+          "finishedAt": "2026-10-01T09:00:07Z",
+          "pendingApprovals": 0
+        },
+        {
+          "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+          "status": "SUCCEEDED",
+          "question": "GARAN bilanço duyuruları hangi tarihlerde yapıldı?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "committed": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "reserved": {
+            "atomicUnits": 0,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 20000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 5400,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 25400,
+              "asset": "USD",
+              "decimals": 6
+            }
+          },
+          "createdAt": "2026-10-01T08:00:00Z",
+          "finishedAt": "2026-10-01T08:00:11Z",
+          "pendingApprovals": 0
+        }
+      ]
+    },
+    "/api/v1/runs/6ad4354c-8e79-4b49-b5d9-d45eb9689b41/payments": {
+      "items": [
+        {
+          "paymentIntentId": "75f93933-72b5-4604-ad2c-063e3f4e6ed6",
+          "tool": "disclosure-questions",
+          "resource": "http://seller-api:8081/v1/disclosures/THYAO/questions",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 20000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "status": "SETTLED",
+          "txHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "createdAt": "2026-10-01T10:00:05Z",
+          "updatedAt": "2026-10-01T10:00:08Z"
+        },
+        {
+          "paymentIntentId": "b1c2d3e4-0000-4000-8000-000000000002",
+          "tool": "disclosure-search",
+          "resource": "http://seller-api:8081/v1/disclosures/search",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": {
+            "atomicUnits": 10000,
+            "asset": "USDC",
+            "decimals": 6
+          },
+          "status": "HELD",
+          "txHash": null,
+          "createdAt": "2026-10-01T10:00:09Z",
+          "updatedAt": "2026-10-01T10:00:09Z"
+        }
+      ]
+    },
+    "/api/v1/spend": {
+      "day": "2026-10-05",
+      "dailyCap": {
+        "atomicUnits": 1000000,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "dayReserved": {
+        "atomicUnits": 10000,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "dayCommitted": {
+        "atomicUnits": 50000,
+        "asset": "USDC",
+        "decimals": 6
+      },
+      "limits": {
+        "defaultRunBudget": {
+          "atomicUnits": 50000,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "maxRunBudget": {
+          "atomicUnits": 200000,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "approvalThreshold": {
+          "atomicUnits": 10000,
+          "asset": "USDC",
+          "decimals": 6
+        },
+        "perRequestMax": {
+          "atomicUnits": 100000,
+          "asset": "USDC",
+          "decimals": 6
+        }
+      },
+      "byTool": [
+        {
+          "tool": "disclosure-questions",
+          "status": "SETTLED",
+          "count": 2,
+          "amount": {
+            "atomicUnits": 40000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        },
+        {
+          "tool": "disclosure-search",
+          "status": "HELD",
+          "count": 1,
+          "amount": {
+            "atomicUnits": 10000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        },
+        {
+          "tool": "disclosure-search",
+          "status": "RELEASED",
+          "count": 1,
+          "amount": {
+            "atomicUnits": 10000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        }
+      ]
     }
   },
   "runEvents": {
@@ -18,7 +377,11 @@
         "occurredAt": "2026-10-01T10:00:01Z",
         "data": {
           "question": "THYAO son özel durum açıklamaları neler?",
-          "budget": { "atomicUnits": 50000, "asset": "USDC", "decimals": 6 }
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          }
         }
       },
       {
@@ -39,9 +402,118 @@
             ]
           },
           "cost": {
-            "paymentsUsdc": { "atomicUnits": 30000, "asset": "USDC", "decimals": 6 },
-            "llmUsd": { "atomicUnits": 6923, "asset": "USD", "decimals": 6 },
-            "totalUsd": { "atomicUnits": 36923, "asset": "USD", "decimals": 6 }
+            "paymentsUsdc": {
+              "atomicUnits": 30000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 6923,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 36923,
+              "asset": "USD",
+              "decimals": 6
+            }
+          }
+        }
+      }
+    ],
+    "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02": [
+      {
+        "eventId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02:1",
+        "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+        "seq": 1,
+        "type": "RUN_STARTED",
+        "occurredAt": "2026-10-01T09:00:00Z",
+        "data": {
+          "question": "ASELS temettü kararları nelerdir?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        }
+      },
+      {
+        "eventId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02:2",
+        "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+        "seq": 2,
+        "type": "RUN_FAILED",
+        "occurredAt": "2026-10-01T09:00:07Z",
+        "data": {
+          "failureCode": "NO_EVIDENCE",
+          "costSoFar": {
+            "paymentsUsdc": {
+              "atomicUnits": 0,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 1200,
+              "asset": "USD",
+              "decimals": 6
+            }
+          }
+        }
+      }
+    ],
+    "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03": [
+      {
+        "eventId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03:1",
+        "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+        "seq": 1,
+        "type": "RUN_STARTED",
+        "occurredAt": "2026-10-01T08:00:00Z",
+        "data": {
+          "question": "GARAN bilanço duyuruları hangi tarihlerde yapıldı?",
+          "budget": {
+            "atomicUnits": 50000,
+            "asset": "USDC",
+            "decimals": 6
+          }
+        }
+      },
+      {
+        "eventId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03:2",
+        "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+        "seq": 2,
+        "type": "RUN_COMPLETED",
+        "occurredAt": "2026-10-01T08:00:11Z",
+        "data": {
+          "report": {
+            "answer": "Örnek yanıt.",
+            "citations": [
+              {
+                "chunkId": "kap:1118495:0000",
+                "sourceUrl": "https://www.kap.org.tr/tr/Bildirim/1118495",
+                "title": "Özel Durum Açıklaması"
+              }
+            ]
+          },
+          "cost": {
+            "paymentsUsdc": {
+              "atomicUnits": 20000,
+              "asset": "USDC",
+              "decimals": 6
+            },
+            "llmUsd": {
+              "atomicUnits": 5400,
+              "asset": "USD",
+              "decimals": 6
+            },
+            "totalUsd": {
+              "atomicUnits": 25400,
+              "asset": "USD",
+              "decimals": 6
+            }
           }
         }
       }
