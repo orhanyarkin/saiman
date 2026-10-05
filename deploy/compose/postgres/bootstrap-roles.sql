@@ -5,6 +5,14 @@
 -- Grants inside the schemas (DML on tables, the ledger's INSERT-only postings, ...) are NOT
 -- here: each service versions them in its own Flyway migration, run by <svc>_owner.
 
+-- Keep every statement below (they carry passwords) out of the server log, whatever the cluster
+-- logging is set to. Superuser-only settings; they apply to this session.
+SET log_statement = 'none';
+SET log_min_duration_statement = -1;
+SET log_min_error_statement = 'panic';
+SET log_duration = off;
+
+\getenv pw_superuser PW_SUPERUSER
 \getenv pw_orchestrator_owner PW_ORCHESTRATOR_OWNER
 \getenv pw_orchestrator_app PW_ORCHESTRATOR_APP
 \getenv pw_ledger_owner PW_LEDGER_OWNER
@@ -25,6 +33,9 @@ INSERT INTO bootstrap_role (name, svc, pw) VALUES
   ('seller_api_app',     'seller_api',   :'pw_seller_api_app'),
   ('ingest_owner',       'ingest',       :'pw_ingest_owner'),
   ('ingest_app',         'ingest',       :'pw_ingest_app');
+
+-- 0. The superuser password follows the file secret (existing volumes still hold the legacy one).
+SELECT format('ALTER ROLE %I PASSWORD %L', current_user, :'pw_superuser') \gexec
 
 -- 1. Roles. CREATE ROLE has no IF NOT EXISTS; the attributes and the password are re-applied on
 --    every run, so a rotated secret file takes effect with `make db-roles`.

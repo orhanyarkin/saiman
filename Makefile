@@ -24,7 +24,7 @@ export X402_SELLER_PAYTO_ADDRESS
 	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check \
 	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask \
 	research-run research-approve research-status web-build e2e e2e-live lighthouse gen-api \
-	recon-run recon-report ledger-balance ledger-tamper-demo db-roles auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest
+	recon-run recon-report ledger-balance ledger-tamper-demo db-roles psql auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest
 
 help: ## Show this help.
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -50,6 +50,9 @@ db-roles: ## (Re)run the idempotent per-service Postgres role bootstrap (db-init
 	scripts/ensure-secret-files.sh
 	$(COMPOSE) up -d --wait postgres
 	$(COMPOSE) run --rm db-init
+
+psql: ## Open a psql shell as the superuser inside the postgres container (unix socket, no password in argv or env).
+	$(COMPOSE) exec postgres psql -U saiman -d saiman
 
 auth-tokens: ## Show where the API token files are (never prints a token) and how to use one (ADR-0023).
 	@scripts/auth-tokens.sh

@@ -1,6 +1,6 @@
 # Fixture for scripts/test-check-compose-policy.sh: must FAIL.
-# evals can write to the source tree.
-# expect: bind mount
+# A read-only bind of the repo root exposes secrets/.
+# expect: is not on the allowlist
 name: cptest-m6
 services:
   postgres:
@@ -76,6 +76,8 @@ services:
         target: spring.flyway.password
       - source: pg_ingest_app_password
         target: spring.datasource.password
+    volumes:
+      - ../..:/repo:ro
     environment:
       SPRING_DATASOURCE_USERNAME: ingest_app
       SPRING_FLYWAY_USER: ingest_owner
@@ -87,7 +89,7 @@ services:
       - source: seller_service_token_evals
         target: saiman.evals.seller.service-token
     volumes:
-      - ../../docs:/out
+      - ../../build/evals:/out
 secrets:
   pg_superuser_password:
     file: ../../secrets/pg_superuser_password
