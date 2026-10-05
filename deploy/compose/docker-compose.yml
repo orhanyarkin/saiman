@@ -118,7 +118,7 @@ services:
       start_period: 5s
 
   otel-collector:
-    image: otel/opentelemetry-collector:0.161.0
+    image: otel/opentelemetry-collector:0.162.0
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
