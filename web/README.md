@@ -47,3 +47,18 @@ e2e-live: web/node_modules
 ```
 
 Make echoes the recipe text with `$$(...)` unexpanded, so the token itself never reaches the log.
+
+## Corpus snapshot and recording notes
+
+The corpus is a frozen KAP snapshot (ADR-0010). The live landing page states it from the build-time
+constant `VITE_CORPUS_SNAPSHOT_LABEL` (default `KAP disclosures up to 29 Dec 2023`), because the live
+API has no data source for the date. Set it when the corpus changes, for example
+`VITE_CORPUS_SNAPSHOT_LABEL="KAP disclosures up to 31 Mar 2024" pnpm build`.
+
+A recording (`public/demo/capture.json`, format v1) may carry two optional fields. Malformed values
+are ignored, never an error, and old recordings without them keep working:
+
+- `corpus: { snapshotLabel, newestDisclosureAt }` adds "Answers come from a frozen KAP snapshot:
+  disclosures up to 29 Dec 2023." (the date, en-GB, UTC) to the replay banner on every route.
+- `annotations: { "<runId>": { label, detail, tone: "warning" | "info" } }` shows a plain-text note
+  on that run's page and in the runs list.

@@ -7,6 +7,8 @@ import { BudgetMeter } from "@/components/run/budget-meter";
 import { PaymentIntentsPanel } from "@/components/run/payment-intents-panel";
 import { PaymentsPanel } from "@/components/run/payments-panel";
 import { RunLedgerPanel } from "@/components/run/run-ledger-panel";
+import { AnnotationCallout } from "@/components/replay/run-annotation";
+import { runAnnotation } from "@/lib/run-annotation";
 import { StatusBadge } from "@/components/run/status-badge";
 import { ReplayOffer } from "@/components/replay/replay-offer";
 import { ReportPanel } from "@/components/run/report-panel";
@@ -84,6 +86,7 @@ function RunView({ runId }: { runId: string }) {
   const run = summary.data;
   const finished = isTerminalStatus(run.status);
   const report = run.report ?? view.report;
+  const annotation = runAnnotation(run.runId);
 
   return (
     <div className="space-y-6">
@@ -102,6 +105,8 @@ function RunView({ runId }: { runId: string }) {
           {run.question}
         </p>
       </header>
+
+      {annotation ? <AnnotationCallout annotation={annotation} /> : null}
 
       {/* Polite, throttled: step changes are announced calmly; approvals use their own alert. */}
       <p role="status" aria-live="polite" className="sr-only">

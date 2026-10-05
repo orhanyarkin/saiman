@@ -5,6 +5,7 @@
  * Capture format v1:
  *   { schemaVersion: 1, capturedAt, environment, network, sourceCommit,
  *     responses: { "<GET path+query>": body }, runEvents: { "<runId>": [Envelope] } }
+ * Optional: corpus { snapshotLabel, newestDisclosureAt }, annotations { "<runId>": { label, detail, tone } }.
  * The M5 fixture shape (no `schemaVersion`, no `network`/`sourceCommit`) is accepted too.
  */
 import { ApiError } from "@/lib/api/errors";
@@ -19,6 +20,68 @@ export interface Capture {
   sourceCommit: string | null;
   responses: Record<string, unknown>;
   runEvents: Record<string, RunEvent[]>;
+  /** Optional: which KAP snapshot the answers come from. Null when absent or malformed. */
+  corpus: CorpusSnapshot | null;
+  /** Optional: per-run notes (`label`, `detail`, `tone`), keyed by run id. Plain text only. */
+  annotations: Record<string, RunAnnotation>;
+}
+
+export interface CorpusSnapshot {
+  snapshotLabel: string;
+  /** ISO-8601 instant of the newest disclosure in the corpus. */
+  newestDisclosureAt: string;
+}
+
+export interface RunAnnotation {
+  label: string;
+  detail: string;
+  tone: "warning" | "info";
+}
+
+const MAX_LABEL = 120;
+const MAX_DETAIL = 600;
+
+const isText = (v: unknown, max: number): v is string =>
+  typeof v === "string" && v.trim() !== "" && v.length <= max;
+
+/** `corpus` or null; a malformed value is ignored, never thrown on. */
+export function parseCorpus(value: unknown): CorpusSnapshot | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { snapshotLabel, newestDisclosureAt } = value;
+  if (
+    !isText(snapshotLabel, MAX_LABEL) ||
+    typeof newestDisclosureAt !== "string" ||
+    Number.isNaN(Date.parse(newestDisclosureAt))
+  ) {
+    return null;
+  }
+  return { snapshotLabel, newestDisclosureAt };
+}
+
+/** Valid annotations only; each malformed entry is dropped on its own. No prototype, like runEvents. */
+export function parseAnnotations(value: unknown): Record<string, RunAnnotation> {
+  const out: Record<string, RunAnnotation> = Object.create(null) as Record<string, RunAnnotation>;
+  if (!isRecord(value)) {
+    return out;
+  }
+  for (const [runId, raw] of Object.entries(value)) {
+    if (
+      isRecord(raw) &&
+      isText(raw.label, MAX_LABEL) &&
+      isText(raw.detail, MAX_DETAIL) &&
+      (raw.tone === "warning" || raw.tone === "info")
+    ) {
+      Object.defineProperty(out, runId, {
+        value: { label: raw.label, detail: raw.detail, tone: raw.tone },
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+  }
+  return out;
 }
 
 export const DEFAULT_CAPTURE_URL = "/demo/capture.json";
@@ -66,6 +129,8 @@ export function normalizeCapture(json: unknown): Capture {
     sourceCommit: typeof json.sourceCommit === "string" ? json.sourceCommit : null,
     responses: json.responses,
     runEvents,
+    corpus: parseCorpus(json.corpus),
+    annotations: parseAnnotations(json.annotations),
   };
 }
 
@@ -222,4 +287,9 @@ export function replayRunEvents(runId: string, handlers: ReplayHandlers): { clos
       }
     },
   };
+}
+
+/** The annotation of a run in the loaded recording; null in live mode or when there is none. */
+export function annotationFor(runId: string): RunAnnotation | null {
+  return loaded?.annotations[runId] ?? null;
 }

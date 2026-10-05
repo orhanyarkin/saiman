@@ -13,6 +13,9 @@ const RECON = "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61";
 const BANNER =
   "Recorded on SAMPLE DATA from the e2e fixtures - not a real recording, 2026-10-01 - Base Sepolia testnet. Nothing on this page is live.";
 
+const CORPUS = "Answers come from a frozen KAP snapshot: disclosures up to 29 Dec 2023.";
+const FAILED_RUN = "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02";
+
 const ROUTES = [
   "/",
   "/runs",
@@ -40,7 +43,8 @@ for (const route of ROUTES) {
     });
 
     await page.goto(route);
-    await expect(page.getByTestId("replay-banner")).toHaveText(BANNER);
+    await expect(page.getByTestId("replay-banner")).toContainText(BANNER);
+    await expect(page.getByTestId("replay-corpus")).toHaveText(CORPUS);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
     // No token UI, no live actions, no calls to an API.
@@ -68,4 +72,29 @@ test("replay build: a page that is not in the recording says so", async ({ page 
   await page.goto("/runs/00000000-0000-4000-8000-000000000000");
   await expect(page.getByRole("alert")).toContainText("not in this recording");
   await expect(page.getByTestId("replay-banner")).toBeVisible();
+});
+
+test("replay build: an annotated failed run shows its callout in the run view and the list", async ({
+  page,
+}) => {
+  await page.goto(`/runs/${FAILED_RUN}`);
+  const note = page.getByTestId("run-annotation");
+  await expect(note).toHaveAttribute("role", "note");
+  await expect(note).toContainText("SAMPLE note: expected failure");
+  await expect(note).toContainText("frozen corpus");
+  await expect(note.getByRole("link")).toHaveCount(0);
+  await expectNoSeriousA11yViolations(page);
+
+  await page.goto("/runs");
+  const row = page.getByRole("row").filter({ hasText: "ASELS" });
+  await expect(row).toContainText("Failed");
+  await expect(row.getByTestId("run-annotation")).toContainText("SAMPLE note: expected failure");
+  await expectNoSeriousA11yViolations(page);
+});
+
+test("replay build: the landing page names the frozen snapshot", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("corpus-snapshot")).toContainText(
+    "KAP disclosures up to 29 Dec 2023",
+  );
 });
