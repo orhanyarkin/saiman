@@ -1,25 +1,44 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * Run only via `pnpm e2e`. Never invoked by `pnpm test`, `pnpm lint` or `pnpm build`, and
- * Playwright browsers are not installed by this task — see the frontend engineer's task report
- * for the exact `playwright install` command to run once, locally.
+ * Run only via `pnpm e2e`. Never invoked by `pnpm test`, `pnpm lint` or `pnpm build`. Playwright's
+ * Chromium must be installed once (`pnpm exec playwright install chromium`).
+ *
+ * Fixture mode: two web servers. The fixture server (e2e/fixture-server.ts) stands in for the
+ * orchestrator; Vite serves the app and proxies /api to it (SAIMAN_API_TARGET). The ports differ
+ * from the dev defaults so a running `pnpm dev` or `make up` never gets mixed up with the tests.
  */
+const FIXTURE_PORT = Number(process.env.SAIMAN_FIXTURE_PORT ?? 4010);
+const APP_PORT = Number(process.env.SAIMAN_E2E_APP_PORT ?? 5174);
+
 export default defineConfig({
   testDir: "./e2e",
+  testMatch: "**/*.spec.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: "list",
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: `http://localhost:${String(APP_PORT)}`,
     trace: "on-first-retry",
   },
-  webServer: {
-    command: "pnpm dev",
-    url: "http://localhost:5173",
-    reuseExistingServer: !process.env.CI,
-  },
+  webServer: [
+    {
+      command: "node e2e/fixture-server.ts",
+      url: `http://127.0.0.1:${String(FIXTURE_PORT)}/api/v1/ping`,
+      env: { SAIMAN_FIXTURE_PORT: String(FIXTURE_PORT), SAIMAN_STEP_MS: "100" },
+      reuseExistingServer: false,
+    },
+    {
+      command: `pnpm exec vite --port ${String(APP_PORT)} --strictPort`,
+      url: `http://localhost:${String(APP_PORT)}`,
+      env: {
+        SAIMAN_API_TARGET: `http://127.0.0.1:${String(FIXTURE_PORT)}`,
+        VITE_OTEL_ENABLED: "false",
+      },
+      reuseExistingServer: false,
+    },
+  ],
   projects: [
     {
       name: "chromium",

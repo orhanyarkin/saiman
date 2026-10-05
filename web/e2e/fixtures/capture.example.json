@@ -1,0 +1,50 @@
+{
+  "capturedAt": "2026-10-01T10:00:00Z",
+  "environment": "local fixture example (format of `make capture-demo` output, ADR-0004)",
+  "responses": {
+    "/api/v1/ping": {
+      "service": "orchestrator",
+      "dbTime": "2026-10-01T10:00:00Z",
+      "traceId": null
+    }
+  },
+  "runEvents": {
+    "6ad4354c-8e79-4b49-b5d9-d45eb9689b41": [
+      {
+        "eventId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:1",
+        "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+        "seq": 1,
+        "type": "RUN_STARTED",
+        "occurredAt": "2026-10-01T10:00:01Z",
+        "data": {
+          "question": "THYAO son özel durum açıklamaları neler?",
+          "budget": { "atomicUnits": 50000, "asset": "USDC", "decimals": 6 }
+        }
+      },
+      {
+        "eventId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41:2",
+        "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+        "seq": 2,
+        "type": "RUN_COMPLETED",
+        "occurredAt": "2026-10-01T10:00:13Z",
+        "data": {
+          "report": {
+            "answer": "Örnek yanıt.",
+            "citations": [
+              {
+                "chunkId": "kap:1118495:0000",
+                "sourceUrl": "https://www.kap.org.tr/tr/Bildirim/1118495",
+                "title": "Özel Durum Açıklaması"
+              }
+            ]
+          },
+          "cost": {
+            "paymentsUsdc": { "atomicUnits": 30000, "asset": "USDC", "decimals": 6 },
+            "llmUsd": { "atomicUnits": 6923, "asset": "USD", "decimals": 6 },
+            "totalUsd": { "atomicUnits": 36923, "asset": "USD", "decimals": 6 }
+          }
+        }
+      }
+    ]
+  }
+}

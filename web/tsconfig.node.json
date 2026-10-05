@@ -13,7 +13,8 @@
 
     "strict": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "noUnusedParameters": true,
+    "noUncheckedIndexedAccess": true
   },
-  "include": ["vite.config.ts", "playwright.config.ts", "e2e"]
+  "include": ["vite.config.ts", "proxy.ts", "proxy.test.ts", "playwright.config.ts", "e2e"]
 }
