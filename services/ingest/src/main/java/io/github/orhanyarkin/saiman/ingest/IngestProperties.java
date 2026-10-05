@@ -12,6 +12,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param tickers BIST tickers to ingest; unknown ones are logged and skipped
  * @param classes KAP disclosure classes to keep (ODA material events, DG other; FR is skipped, ADR-0010)
  * @param maxAttempts a document failing this many times is parked in the DLQ
+ * @param retrieval query-time settings
  */
 @ConfigurationProperties("saiman.ingest")
 public record IngestProperties(
@@ -20,7 +21,8 @@ public record IngestProperties(
         @DefaultValue({"ODA", "DG"}) Set<String> classes,
         @DefaultValue Chunk chunk,
         @DefaultValue("3") int maxAttempts,
-        @DefaultValue Backfill backfill) {
+        @DefaultValue Backfill backfill,
+        @DefaultValue Retrieval retrieval) {
 
     /**
      * MKK API client settings. The credential is the base64 Basic value; {@code toString} never prints it.
@@ -59,6 +61,12 @@ public record IngestProperties(
      * @param targetTokens approximate chunk size for the token splitter
      */
     public record Chunk(@DefaultValue("400") int targetTokens) {}
+
+    /**
+     * @param recencyWeight multiplier of the recency leg's RRF term for "latest ..." questions (ADR-0025); 1.0 is
+     *     plain RRF, 0 switches the leg's influence off
+     */
+    public record Retrieval(@DefaultValue("3.0") double recencyWeight) {}
 
     /**
      * @param enabled start the backfill in the background at startup

@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.ingest.retrieval;
 
+import io.github.orhanyarkin.saiman.ingest.IngestProperties;
 import io.github.orhanyarkin.saiman.modelrouter.DataClass;
 import io.github.orhanyarkin.saiman.modelrouter.ModelRouter;
 import io.github.orhanyarkin.saiman.shared.retrieval.RetrieveRequest;
@@ -19,33 +20,37 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Hybrid retrieval: a vector leg (query embedded through the router, {@link DataClass#INTERNAL}
  * because it derives from a buyer's question) and a Turkish full-text leg, each top 40, fused with
  * reciprocal rank fusion. A "latest ..." question (see {@link RecencyIntent}) about given tickers adds a
- * third leg that ranks those tickers' documents by publication time (ADR-0025). The query embedding is a network call, so it happens before the read
- * transaction opens. Query text is never logged.
+ * third leg that ranks those tickers' documents by publication time (ADR-0025). The query embedding is a network
+ * call, so it happens before the read transaction opens. Query text is never logged.
  */
 @Service
 public class HybridRetriever {
 
     /**
      * Weight of the recency leg's RRF term. Chosen on the golden set's FRESHNESS items (docs/evals/README.md):
-     * an SQL replay of the legs gave mean recency@5 0.07 (no leg), 0.20 (weight 1), 0.73 (weight 3).
+     * an SQL replay of the legs gave mean recency@5 0.07 (no leg), 0.20 (weight 1), 0.73 (weight 3). Configurable
+     * as {@code saiman.ingest.retrieval.recency-weight}; this is the default.
      */
-    static final double RECENCY_WEIGHT = 3.0;
+    static final double DEFAULT_RECENCY_WEIGHT = 3.0;
 
     private final ModelRouter router;
     private final RetrievalRepository repository;
     private final TransactionTemplate readOnly;
     private final ObservationRegistry observations;
+    private final double recencyWeight;
 
     public HybridRetriever(
             ModelRouter router,
             RetrievalRepository repository,
             PlatformTransactionManager transactionManager,
-            ObservationRegistry observations) {
+            ObservationRegistry observations,
+            IngestProperties properties) {
         this.router = router;
         this.repository = repository;
         this.readOnly = new TransactionTemplate(transactionManager);
         this.readOnly.setReadOnly(true);
         this.observations = observations;
+        this.recencyWeight = properties.retrieval().recencyWeight();
     }
 
     public RetrieveResponse retrieve(RetrieveRequest request) {
@@ -71,7 +76,7 @@ public class HybridRetriever {
             // Third leg only for "latest ..." questions scoped to tickers; otherwise exactly the two-leg result.
             List<String> recency = RecencyIntent.detect(request.query()) ? repository.recencyLeg(tickers) : List.of();
             List<RrfFusion.Fused> fused =
-                    RrfFusion.fuse(vector, lexical, recency, RECENCY_WEIGHT, RrfFusion.DEFAULT_K, request.topK());
+                    RrfFusion.fuse(vector, lexical, recency, recencyWeight, RrfFusion.DEFAULT_K, request.topK());
             Map<String, RetrievedChunk> loaded =
                     repository.load(fused.stream().map(RrfFusion.Fused::id).toList());
             List<RetrievedChunk> chunks = new ArrayList<>(fused.size());

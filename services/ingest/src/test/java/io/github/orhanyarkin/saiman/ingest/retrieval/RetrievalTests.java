@@ -221,7 +221,7 @@ class RetrievalTests extends IngestIntegrationTests {
                         repository.vectorLeg(embedding, tickers),
                         repository.lexicalLeg(query, tickers),
                         repository.recencyLeg(tickers),
-                        HybridRetriever.RECENCY_WEIGHT,
+                        HybridRetriever.DEFAULT_RECENCY_WEIGHT,
                         RrfFusion.DEFAULT_K,
                         20)
                 .stream()
