@@ -78,7 +78,7 @@ lint: web/node_modules ## Run backend + web linters (no formatting changes).
 	./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer spotlessCheck
 	pnpm --dir web lint
 	pnpm --dir web typecheck
-	@if grep -q '"gen:api"' web/package.json; then pnpm --dir web gen:api --check; else echo "lint: web has no gen:api script yet; skipping the generated-client check."; fi
+	pnpm --dir web gen:api --check
 
 format: web/node_modules ## Apply backend + web formatting.
 	./gradlew spotlessApply
@@ -98,15 +98,12 @@ e2e: web/node_modules ## Playwright e2e against the fixture server (no stack nee
 	pnpm --dir web e2e
 
 e2e-live: web/node_modules ## Playwright e2e against the running stack at http://localhost:8088 (needs `make up`).
-	@grep -q '"e2e:live"' web/package.json || { echo "e2e-live: web has no e2e:live script yet (added by the frontend task, M5 T5)." >&2; exit 1; }
 	SAIMAN_E2E_BASE_URL=http://localhost:8088 pnpm --dir web e2e:live
 
 lighthouse: web/node_modules ## Lighthouse accessibility audit of the dashboard routes (needs Chromium).
-	@grep -q '"lighthouse"' web/package.json || { echo "lighthouse: web has no lighthouse script yet (added by the frontend task, M5 T3c)." >&2; exit 1; }
 	pnpm --dir web lighthouse
 
 gen-api: web/node_modules ## Regenerate the typed API clients from docs/api/*.openapi.json.
-	@grep -q '"gen:api"' web/package.json || { echo "gen-api: web has no gen:api script yet (added by the frontend task, M5 T3)." >&2; exit 1; }
 	pnpm --dir web gen:api
 
 verify-trace: ## Verify a trace in Jaeger. Usage: make verify-trace TRACE_ID=<id> (or omit to self-generate one).

@@ -186,7 +186,8 @@ const shapes: Record<RunEventType, Record<string, Check>> = {
 /**
  * Validates one envelope. Returns the typed event, or null for anything that is not exactly an
  * `agent.run-step.v1` event (unknown type, wrong field type, `eventId` not `<runId>:<seq>`).
- * Extra fields are tolerated (forward compatible) but never copied into the result.
+ * Extra fields are tolerated (forward compatible) and stay on the returned object; the app only reads the
+ * validated, typed fields. Callers that follow one run must also compare `runId` (see `subscribeRunEvents`).
  */
 export function parseRunEvent(json: unknown): RunEvent | null {
   if (!isObject(json)) {

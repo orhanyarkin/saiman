@@ -114,7 +114,7 @@ class RunEventController {
                 subscription.close();
             }
         });
-        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body(emitter);
+        return sse(emitter);
     }
 
     /**
@@ -135,7 +135,7 @@ class RunEventController {
                     .data(codec.encodeEnvelope(event)));
         }
         emitter.complete();
-        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body(emitter);
+        return sse(emitter);
     }
 
     @Operation(
@@ -216,5 +216,16 @@ class RunEventController {
 
     private static ErrorResponseException problem(HttpStatus status, String detail) {
         return new ErrorResponseException(status, ProblemDetail.forStatusAndDetail(status, detail), null);
+    }
+
+    /**
+     * The SSE response. {@code X-Accel-Buffering: no} tells nginx (the dashboard's reverse proxy) not to buffer
+     * the stream, so an approval request reaches the browser at once even if a proxy location is misconfigured.
+     */
+    private static ResponseEntity<SseEmitter> sse(SseEmitter emitter) {
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .header("X-Accel-Buffering", "no")
+                .body(emitter);
     }
 }

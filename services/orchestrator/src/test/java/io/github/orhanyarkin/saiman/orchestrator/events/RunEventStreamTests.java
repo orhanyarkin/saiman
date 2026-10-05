@@ -146,6 +146,22 @@ class RunEventStreamTests extends RunTestSupport {
     }
 
     @Test
+    void theStreamAsksProxiesNotToBufferIt() {
+        UUID run = createRun(50_000);
+        eventLog.append(run, RunEventType.STEP_STARTED, step());
+        eventLog.append(run, RunEventType.RUN_FAILED, failed());
+
+        http.get()
+                .uri("/api/v1/runs/{id}/events", run)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectHeader()
+                .valueEquals("X-Accel-Buffering", "no");
+    }
+
+    @Test
     void unknownRunsAre404AndABadLastEventIdIs400() {
         http.get()
                 .uri("/api/v1/runs/{id}/events", UUID.randomUUID())

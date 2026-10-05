@@ -1,1 +1,2 @@
 - [M4b close audit](m4b-close-audit.md) — upfront flow: forged credit note invisible to recon (Med), deadline cut dropped after settle, no pre-settle per-payer limit (2026-10-01)
+- [M5 close audit](m5-close-audit.md) — dashboard/nginx: SSE regex location dead (^~ /api/), proxied SSE buffered, no Crit/High/Med (2026-10-05)
