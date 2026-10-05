@@ -6,8 +6,8 @@
 #   - the words nonce, signature, paymentKey, privateKey, Bearer (case-insensitive, anywhere);
 #   - a bare 64-hex string (a private-key or hash lookalike) that is not part of a 0x-prefixed
 #     64-hex transaction hash; a 0x-prefixed hex run longer than 64 digits (a signature);
-#   - the content of any secret file under $SECRETS_DIR (default: secrets), for files of at least
-#     16 characters (DB passwords, API tokens, API keys, the buyer key).
+#   - any line (16+ chars, so multi-line files are covered) of any file under $SECRETS_DIR (default:
+#     secrets) and any value (16+ chars) of $ENV_FILE (default .env).
 # Tx hashes (0x + exactly 64 hex) are public chain data and pass.
 
 scrub_check() {
@@ -31,19 +31,32 @@ scrub_check() {
     rc=1
   fi
 
+  # Secret material: every line (>= 16 chars) of every file under $SECRETS_DIR, plus the values
+  # of $ENV_FILE (default .env, read-only). The patterns go through a 0600 temp file and
+  # `grep -F -f`, never through argv, and are never printed.
+  local patterns env_file="${ENV_FILE:-.env}"
+  patterns="$(umask 077 && mktemp "${TMPDIR:-/tmp}/saiman-scrub.XXXXXX")"
   if [[ -d "${secrets_dir}" ]]; then
     for secret_file in "${secrets_dir}"/*; do
       [[ -f "${secret_file}" && -s "${secret_file}" ]] || continue
-      # Only whole-file content of reasonable length; trailing newline removed.
-      local content
-      content="$(tr -d '\r\n' <"${secret_file}")"
-      [[ ${#content} -ge 16 ]] || continue
-      if grep -qF -- "${content}" "${file}"; then
-        echo "scrub: FAIL: the capture contains the content of ${secret_file}" >&2
-        rc=1
-      fi
+      tr -d '\r' <"${secret_file}" | awk 'length($0) >= 16' >>"${patterns}"
     done
   fi
+  if [[ -r "${env_file}" ]]; then
+    # KEY=value lines: value without export/quotes/trailing comment.
+    awk '
+      { line = $0; sub(/^[ \t]*(export[ \t]+)?/, "", line) }
+      line ~ /^[A-Za-z_][A-Za-z0-9_]*=/ {
+        v = substr(line, index(line, "=") + 1)
+        sub(/[ \t]+#.*$/, "", v); gsub(/^[ \t"\047]+|[ \t"\047\r]+$/, "", v)
+        if (length(v) >= 16) print v
+      }' "${env_file}" >>"${patterns}"
+  fi
+  if [[ -s "${patterns}" ]] && grep -qFf "${patterns}" "${file}"; then
+    echo "scrub: FAIL: the capture contains a value from a secrets file or the env file" >&2
+    rc=1
+  fi
+  rm -f "${patterns}"
 
   return "${rc}"
 }

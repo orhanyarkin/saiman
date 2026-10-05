@@ -66,6 +66,7 @@ auth-token-show: ## Print a human API token to stdout (explicit request). Usage:
 up: ## Verify payTo, create secret files (generates DB passwords and API tokens), build images and the dashboard, start the full stack, wait for app health.
 	scripts/check-x402-env.sh
 	scripts/ensure-secret-files.sh
+	@[ "$$(stat -c %a secrets)" = "700" ] || { echo "up: secrets/ must be mode 700 (it is what protects the 0644 secret files inside); run: chmod 700 secrets" >&2; exit 1; }
 	$(MAKE) images
 	$(MAKE) web-build
 	scripts/with-auth-digests.sh $(COMPOSE) --profile apps up -d
@@ -174,7 +175,7 @@ secrets-from-dotenv: ## HUMAN ONLY: copy OPENAI_API_KEY from .env into secrets/o
 ingest-backfill: ## Run ingest locally in backfill mode against `make infra-up` (needs secrets/mkk_credentials + openai_api_key; connects as ingest_app, migrates as ingest_owner).
 	@bash -c '(exec 3<>/dev/tcp/127.0.0.1/5432)' 2>/dev/null || { echo "Postgres is not reachable on 127.0.0.1:5432; run 'make infra-up' first." >&2; exit 1; }
 	scripts/prepare-ingest-secrets.sh $(CURDIR)/secrets $(CURDIR)/build/ingest-secrets
-	SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=ingest_app SPRING_FLYWAY_USER=ingest_owner SPRING_DATA_REDIS_URL=redis://localhost:$${REDIS_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=$(CURDIR)/build/ingest-secrets/"
+	set +e; SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/saiman SPRING_DATASOURCE_USERNAME=ingest_app SPRING_FLYWAY_USER=ingest_owner SPRING_DATA_REDIS_URL=redis://localhost:$${REDIS_HOST_PORT:-16380} ./gradlew :services:ingest:bootRun --args="--saiman.ingest.backfill.enabled=true --saiman.secrets-dir=$(CURDIR)/build/ingest-secrets/"; rc=$$?; rm -rf $(CURDIR)/build/ingest-secrets; exit $$rc
 
 ingest-status: ## Show per-ticker ingest status from the running ingest container (loopback only).
 	@out=$$(curl -sf $(INGEST_URL)/internal/v1/tickers) || { echo "ingest not reachable on $(INGEST_URL) (is 'make up' running?)" >&2; exit 1; }; \
@@ -209,7 +210,7 @@ research-run: ## Start a research run and stream its events. Usage: make researc
 		| scripts/curl-auth.sh operator -sS --fail-with-body -X POST -H 'Content-Type: application/json' -H 'X-Saiman-Csrf: 1' --data @- $(ORCH_URL)/api/v1/runs) || { echo "$$resp" >&2; exit 1; }; \
 	printf '%s\n' "$$resp" | jq .; \
 	url=$$(printf '%s' "$$resp" | jq -r '.eventsUrl'); \
-	case "$$url" in /*) url="$(ORCH_URL)$$url";; esac; \
+	case "$$url" in /[!/]*) url="$(ORCH_URL)$$url";; *) echo "research-run: refusing eventsUrl that is not a path on $(ORCH_URL) (the token is never sent elsewhere)" >&2; exit 1;; esac; \
 	echo "--- streaming $$url (ends with the run's terminal event; approve with make research-approve) ---"; \
 	scripts/curl-auth.sh reader -sS -N -H 'Accept: text/event-stream' "$$url"
 

@@ -57,6 +57,34 @@ if grep -qiE '(seller-api|ingest)(:[0-9]+)?' <<<"${conf}"; then
   violations=1
 fi
 
+# Upstream allowlist: the only places nginx may send traffic are the orchestrator, the ledger and
+# the OTel collector, spelled exactly (a variable holding one of them, or the literal URL).
+allowed_upstreams=(http://ledger:8082 http://orchestrator:8080 http://otel-collector:4318)
+is_allowed_upstream() {
+  local u
+  for u in "${allowed_upstreams[@]}"; do [[ "$1" == "${u}" ]] && return 0; done
+  return 1
+}
+while read -r _ name value; do
+  value="${value%;}"
+  if ! is_allowed_upstream "${value}"; then
+    fail_check "'set ${name} ${value}': only ${allowed_upstreams[*]} may be upstream values"
+    violations=1
+  fi
+done < <(grep -E '^[[:space:]]*set[[:space:]]+\$[A-Za-z_]+[[:space:]]+[^;]+;' <<<"${conf}" | sed -E 's/^[[:space:]]+//')
+while read -r _ target; do
+  target="${target%;}"
+  case "${target}" in
+    '$ledger' | '$orchestrator' | '$collector') ;;
+    *)
+      if ! is_allowed_upstream "${target}"; then
+        fail_check "proxy_pass ${target}: only the exact orchestrator, ledger and collector upstreams are allowed"
+        violations=1
+      fi
+      ;;
+  esac
+done < <(grep -E '^[[:space:]]*proxy_pass[[:space:]]+[^;]+;' <<<"${conf}" | sed -E 's/^[[:space:]]+//')
+
 host_lines="$(grep -iE 'proxy_set_header[[:space:]]+Host\b' <<<"${conf}" || true)"
 if [[ -z "${host_lines}" ]]; then
   fail_check "no 'proxy_set_header Host \$http_host;' found: the original Host must reach the backends"
