@@ -2,10 +2,13 @@ package io.github.orhanyarkin.saiman.evals.answers;
 
 import io.github.orhanyarkin.saiman.evals.metrics.Disclosures;
 import io.github.orhanyarkin.saiman.shared.eval.EvalOutcome;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.MatchResult;
@@ -48,7 +51,57 @@ public final class AnswerScoring {
     private static final Pattern PERCENT_SUFFIX = Pattern.compile("(\\d+(?:[.,]\\d+)?)\\s*%");
     private static final Pattern DECIMAL_COMMA_PERCENT = Pattern.compile("(\\d+),(\\d+)%");
 
+    private static final String B = "(?<![\\p{L}\\p{N}])";
+    private static final String E = "(?![\\p{L}\\p{N}])";
+
+    /**
+     * Relative-time expressions, on text folded like {@link #normalize} (lower case, no diacritics, so
+     * {@code bugün}, {@code Bugün} and {@code bugun} are one). Word-bounded, with Turkish case suffixes allowed
+     * where the stem is unambiguous ({@code son 7 günde}). The corpus is a frozen snapshot, so every one of
+     * these is wrong or meaningless in an answer. Keyed by an id that the report prints instead of the matched
+     * text.
+     */
+    private static final Map<String, Pattern> RELATIVE_TIME = relativeTimePatterns();
+
     private AnswerScoring() {}
+
+    private static Map<String, Pattern> relativeTimePatterns() {
+        Map<String, String> raw = new LinkedHashMap<>();
+        raw.put("son-N-gun/hafta/ay", "son (?:\\d+|bir|iki|uc|dort|bes|birkac) (?:gun|hafta|ay|saat|dakika)\\p{L}*");
+        raw.put("son-gunlerde", "son (?:gunler|haftalar|aylar)\\p{L}*");
+        raw.put("bugun", "bugun\\p{L}*");
+        raw.put("dun", "dun(?:ku)?");
+        raw.put("bu-hafta/ay/yil", "bu (?:hafta|ay|yil|sabah|aksam)\\p{L}*");
+        raw.put("gecen", "gecen (?:hafta|ay|yil|gun|seneden)\\p{L}*");
+        raw.put("yakin-zamanda", "yakin zamanda");
+        raw.put("su-anda", "su anda|su anki");
+        raw.put("recently", "recent(?:ly)?");
+        raw.put("today", "today|tonight");
+        raw.put("yesterday", "yesterday");
+        raw.put("currently", "currently");
+        raw.put("last-N-days", "(?:last|past) (?:\\d+|few|couple of) (?:days|weeks|months|hours)");
+        raw.put("last-week/month", "last (?:week|month|year|night)");
+        raw.put("this-week/month", "this (?:week|month|year|morning|afternoon|evening)");
+        Map<String, Pattern> out = new LinkedHashMap<>();
+        raw.forEach((id, regex) -> out.put(id, Pattern.compile(B + "(?:" + regex + ")" + E)));
+        return out;
+    }
+
+    /** Ids of the relative-time patterns found in the text, in a fixed order; empty when it is free of them. */
+    public static List<String> relativeTimeHits(String text) {
+        String folded = fold(text);
+        List<String> hits = new ArrayList<>();
+        RELATIVE_TIME.forEach((id, pattern) -> {
+            if (pattern.matcher(folded).find()) {
+                hits.add(id);
+            }
+        });
+        return hits;
+    }
+
+    public static boolean relativeTimeFree(String text) {
+        return relativeTimeHits(text).isEmpty();
+    }
 
     /**
      * Case, diacritic, date and percent normalisation applied to both the answer and the expected spellings.
@@ -57,7 +110,20 @@ public final class AnswerScoring {
      * {@code yüzde 12,5}, {@code 12,5 %}).
      */
     public static String normalize(String text) {
-        String s = text.toLowerCase(TR)
+        String s = fold(text);
+        s = replaceDates(NUMERIC_DATE, s, m -> iso(m.group(3), m.group(2), m.group(1)));
+        s = replaceDates(LONG_DATE, s, m -> iso(m.group(3), String.valueOf(monthNumber(m.group(2))), m.group(1)));
+        s = replaceDates(ISO_DATE, s, m -> iso(m.group(1), m.group(2), m.group(3)));
+        s = PERCENT_PREFIX.matcher(s).replaceAll("$1%");
+        s = PERCENT_WORD.matcher(s).replaceAll("$1%");
+        s = PERCENT_SUFFIX.matcher(s).replaceAll("$1%");
+        s = DECIMAL_COMMA_PERCENT.matcher(s).replaceAll("$1.$2%");
+        return s.replaceAll("\\s+", " ").strip();
+    }
+
+    /** Turkish-locale lower case with diacritics folded to ASCII and non-breaking spaces made plain. */
+    static String fold(String text) {
+        return text.toLowerCase(TR)
                 .replace('ı', 'i')
                 .replace('ş', 's')
                 .replace('ğ', 'g')
@@ -68,14 +134,6 @@ public final class AnswerScoring {
                 .replace('î', 'i')
                 .replace('û', 'u')
                 .replace(' ', ' ');
-        s = replaceDates(NUMERIC_DATE, s, m -> iso(m.group(3), m.group(2), m.group(1)));
-        s = replaceDates(LONG_DATE, s, m -> iso(m.group(3), String.valueOf(monthNumber(m.group(2))), m.group(1)));
-        s = replaceDates(ISO_DATE, s, m -> iso(m.group(1), m.group(2), m.group(3)));
-        s = PERCENT_PREFIX.matcher(s).replaceAll("$1%");
-        s = PERCENT_WORD.matcher(s).replaceAll("$1%");
-        s = PERCENT_SUFFIX.matcher(s).replaceAll("$1%");
-        s = DECIMAL_COMMA_PERCENT.matcher(s).replaceAll("$1.$2%");
-        return s.replaceAll("\\s+", " ").strip();
     }
 
     /** True when any of the acceptable spellings occurs in the answer (after normalisation, on digit boundaries). */

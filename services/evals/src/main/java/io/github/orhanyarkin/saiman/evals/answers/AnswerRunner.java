@@ -48,7 +48,7 @@ public class AnswerRunner {
 
     public AnswerReport run(GoldenSet golden) {
         List<GoldenItem> selected = golden.items().stream()
-                .filter(i -> i.kind() == Kind.ANSWER || i.kind() == Kind.UNANSWERABLE)
+                .filter(i -> i.kind() != Kind.RETRIEVAL && i.kind() != Kind.FRESHNESS)
                 .limit(Math.max(0, properties.answers().maxQuestions()))
                 .toList();
         Set<Long> goldenIndexes = goldenIndexes(golden);
@@ -129,7 +129,14 @@ public class AnswerRunner {
         Double citationRecall = null;
         Double factRecall = null;
         Boolean correct;
-        if (item.kind() == Kind.ANSWER) {
+        Boolean relativeTimeFree = response.answer() == null ? null : AnswerScoring.relativeTimeFree(answer);
+        List<String> hits = response.answer() == null ? List.of() : AnswerScoring.relativeTimeHits(answer);
+        if (item.kind() == Kind.TEMPORAL) {
+            // only an answer is judged; a refusal or a missing citation is reported, not a violation
+            correct = response.outcome() == EvalOutcome.ANSWERED
+                    ? !cited.isEmpty() && valid == cited.size() && Boolean.TRUE.equals(relativeTimeFree)
+                    : null;
+        } else if (item.kind() == Kind.ANSWER) {
             citationRecall = AnswerScoring.citationRecall(item.expected().sources(), cited);
             factRecall = AnswerScoring.factRecall(answer, item.expected().requiredFacts());
             boolean scorable = response.outcome() != EvalOutcome.LLM_CAP && response.outcome() != EvalOutcome.ERROR;
@@ -156,6 +163,8 @@ public class AnswerRunner {
                 citationRecall,
                 factRecall,
                 correct,
+                relativeTimeFree,
+                hits,
                 response.modelCostUsdMicros(),
                 millis);
     }
@@ -204,6 +213,8 @@ public class AnswerRunner {
                 null,
                 null,
                 null,
+                null,
+                List.of(),
                 0,
                 0);
     }
@@ -222,13 +233,15 @@ public class AnswerRunner {
                 null,
                 null,
                 null,
+                null,
+                List.of(),
                 0,
                 millis);
     }
 
     static Map<Kind, Map<String, Double>> summarize(List<AnswerItem> items) {
         Map<Kind, Map<String, Double>> summary = new EnumMap<>(Kind.class);
-        for (Kind kind : List.of(Kind.ANSWER, Kind.UNANSWERABLE)) {
+        for (Kind kind : List.of(Kind.ANSWER, Kind.UNANSWERABLE, Kind.TEMPORAL)) {
             List<AnswerItem> ofKind =
                     items.stream().filter(i -> i.kind() == kind).toList();
             if (ofKind.isEmpty()) {
@@ -243,11 +256,27 @@ public class AnswerRunner {
                 double success = scored.stream()
                         .filter(i -> Boolean.TRUE.equals(i.correct()))
                         .count();
-                row.put(kind == Kind.ANSWER ? "taskSuccess" : "refusalCorrect", success / scored.size());
+                row.put(
+                        switch (kind) {
+                            case ANSWER -> "taskSuccess";
+                            case UNANSWERABLE -> "refusalCorrect";
+                            default -> "temporalSuccess";
+                        },
+                        success / scored.size());
                 if (kind == Kind.ANSWER) {
                     row.put("factRecall", mean(scored, true));
                     row.put("citationRecall", mean(scored, false));
                 }
+            }
+            List<AnswerItem> withText =
+                    ofKind.stream().filter(i -> i.relativeTimeFree() != null).toList();
+            if (kind != Kind.UNANSWERABLE && !withText.isEmpty()) {
+                row.put(
+                        "relativeTimeFree",
+                        (double) withText.stream()
+                                        .filter(i -> Boolean.TRUE.equals(i.relativeTimeFree()))
+                                        .count()
+                                / withText.size());
             }
             int citations = ofKind.stream().mapToInt(AnswerItem::citations).sum();
             if (citations > 0) {

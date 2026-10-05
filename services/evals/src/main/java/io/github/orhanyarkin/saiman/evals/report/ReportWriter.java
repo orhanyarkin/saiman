@@ -185,13 +185,19 @@ public class ReportWriter {
                 + "(Europe/Istanbul offset); it does not test reading the date out of the disclosure text.\n");
 
         md.append("\n### Summary by kind\n\n| Kind | n | scored | metric | value |\n|---|---:|---:|---|---:|\n");
-        for (Kind kind : List.of(Kind.ANSWER, Kind.UNANSWERABLE)) {
+        for (Kind kind : List.of(Kind.ANSWER, Kind.UNANSWERABLE, Kind.TEMPORAL)) {
             Map<String, Double> row = a.summary().get(kind);
             if (row == null) {
                 continue;
             }
-            for (String metric :
-                    List.of("taskSuccess", "factRecall", "citationRecall", "refusalCorrect", "citationValidity")) {
+            for (String metric : List.of(
+                    "taskSuccess",
+                    "factRecall",
+                    "citationRecall",
+                    "refusalCorrect",
+                    "temporalSuccess",
+                    "relativeTimeFree",
+                    "citationValidity")) {
                 if (row.containsKey(metric)) {
                     md.append("| ")
                             .append(kind)
@@ -231,8 +237,9 @@ public class ReportWriter {
                 .append(a.latencyP95Ms())
                 .append(" ms\n");
 
-        md.append("\n### Items\n\n| id | ticker | status | outcome | citations (valid/total) | basis | citation recall "
-                + "| fact recall | correct | USD | ms |\n|---|---|---|---|---:|---|---:|---:|---|---:|---:|\n");
+        md.append(
+                "\n### Items\n\n| id | ticker | status | outcome | citations (valid/total) | basis | citation recall "
+                        + "| fact recall | relative time | correct | USD | ms |\n|---|---|---|---|---:|---|---:|---:|---|---|---:|---:|\n");
         for (AnswerReport.AnswerItem i : a.items()) {
             md.append("| ")
                     .append(i.id())
@@ -252,6 +259,11 @@ public class ReportWriter {
                     .append(number(i.citationRecall()))
                     .append(" | ")
                     .append(number(i.factRecall()))
+                    .append(" | ")
+                    .append(
+                            i.relativeTimeFree() == null
+                                    ? "-"
+                                    : i.relativeTimeFree() ? "none" : String.join(", ", i.relativeTimeHits()))
                     .append(" | ")
                     .append(i.correct() == null ? "-" : i.correct().toString())
                     .append(" | ")

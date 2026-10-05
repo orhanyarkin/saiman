@@ -39,7 +39,11 @@ public record AnswerReport(
      * @param citationBasis {@code RETRIEVAL} or {@code GOLDEN_INDEXES} (fallback), see {@code AnswerScoring}
      * @param citationRecall ANSWER only: share of {@code expected.sources} cited
      * @param factRecall ANSWER only: share of required facts found in the answer
-     * @param correct ANSWER: task success; UNANSWERABLE: refusal correct; null when not scorable
+     * @param correct ANSWER: task success; UNANSWERABLE: refusal correct; TEMPORAL: answered with valid citations
+     *     and no relative-time expression; null when not scorable
+     * @param relativeTimeFree true when the answer text has no relative-time expression, null when no answer text
+     *     came back; the text itself is never stored
+     * @param relativeTimeHits ids of the relative-time patterns found (never the matched text)
      */
     public record AnswerItem(
             String id,
@@ -54,6 +58,8 @@ public record AnswerReport(
             @Nullable Double citationRecall,
             @Nullable Double factRecall,
             @Nullable Boolean correct,
+            @Nullable Boolean relativeTimeFree,
+            List<String> relativeTimeHits,
             long costUsdMicros,
             long latencyMs) {}
 

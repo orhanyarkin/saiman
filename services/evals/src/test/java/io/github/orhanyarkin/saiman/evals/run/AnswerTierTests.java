@@ -143,7 +143,7 @@ class AnswerTierTests {
                 .contains("Date caveat")
                 .contains("Total model cost: $0.030000")
                 .contains("| ANSWER | 1 | 1 | taskSuccess | 1.000 |")
-                .contains("| A-1 | THYAO | OK | ANSWERED | 2/2 | RETRIEVAL | 1.000 | 1.000 | true |");
+                .contains("| A-1 | THYAO | OK | ANSWERED | 2/2 | RETRIEVAL | 1.000 | 1.000 | none | true |");
         assertThat(Files.readString(out.resolve("latest.json"), StandardCharsets.UTF_8))
                 .contains("\"totalCostUsdMicros\" : 30000");
         assertTokenNowhere();

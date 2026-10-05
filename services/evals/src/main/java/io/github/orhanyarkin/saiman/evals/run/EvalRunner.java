@@ -88,7 +88,7 @@ public class EvalRunner {
         AnswerRunner answerRunner = answers.getIfAvailable();
         AnswerReport answerReport = answerRunner == null ? null : answerRunner.run(golden);
         Map<Kind, Integer> skipped = new EnumMap<>(Kind.class);
-        for (Kind kind : List.of(Kind.ANSWER, Kind.UNANSWERABLE)) {
+        for (Kind kind : List.of(Kind.ANSWER, Kind.UNANSWERABLE, Kind.TEMPORAL)) {
             int n = golden.items(kind).size();
             if (n > 0 && answerReport == null) {
                 skipped.put(kind, n);

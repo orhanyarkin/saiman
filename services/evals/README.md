@@ -22,11 +22,15 @@ ANSWER and UNANSWERABLE items are scored by Tier A (below) when it is switched o
 | citation recall (ANSWER) | cited disclosures that are in `expected.sources`, over `expected.sources` |
 | fact recall (ANSWER) | `requiredFacts` entries with at least one accepted spelling in the answer, over all entries. Both sides are normalised: Turkish-locale lower-casing, diacritics folded, dates to `yyyy-MM-dd` (`15.11.2023`, `15/11/2023`, `15 Kasım 2023`, ISO timestamps), percentages to `12.5%` (`%12,5`, `yüzde 12,5`); digits must not match inside longer numbers |
 | task success (ANSWER) | outcome ANSWERED and all facts and all expected sources found and every citation valid; LLM_CAP/ERROR items are not scored |
+| relative-time free (TEMPORAL, extra on ANSWER) | the answer text, kept in memory only and never written to the report, contains none of the relative-time patterns below; the report lists per item the pattern ids found, not the text |
+| temporal success (TEMPORAL) | outcome ANSWERED with at least one citation, every citation valid, and relative-time free. REFUSED / NO_VALID_CITATIONS are reported but are not violations (not scored); LLM_CAP/ERROR not scored |
 | refusal correct (UNANSWERABLE) | REFUSED or NO_VALID_CITATIONS is correct; ANSWERED is wrong; LLM_CAP/ERROR not scored |
 | cost | sum of the seller-reported `modelCostUsdMicros` (integer micro-USD) and the mean per question that got a response; formatted as USD only in the report |
 | p95 latency | nearest rank over per-question wall time, retries included |
 
 Expect about **$0.06 for 30 questions** (about 9 % of the $0.70 router day cap); the golden set has 7 such items, so a full Tier A run costs a few cents.
+
+**TEMPORAL items** (`kind: TEMPORAL`, `expected: {}`; "SISE güncel bildirimlerinde neler var?", "KCHOL en son açıklamaları neler?") exist because a live run answered a recency question with "son 7 günde yeni özel durum bulunmamaktadır", an invented relative-time claim: the corpus is a frozen snapshot (newest disclosure 2023-12-29), so words like "recently" are meaningless. The seller prompt now forbids them and states the snapshot date; this item kind checks it. Patterns (matched on Turkish-locale lower-cased, diacritic-folded text, word-bounded, Turkish case suffixes allowed on the stem): `son <N|bir|iki|birkaç...> gün/hafta/ay/saat`, `son günlerde/haftalarda`, `bugün`, `dün(kü)`, `bu hafta/ay/yıl/sabah/akşam`, `geçen hafta/ay/yıl/gün`, `yakın zamanda`, `şu anda`/`şu anki`, `recent(ly)`, `today`, `tonight`, `yesterday`, `currently`, `last/past <N|few> days/weeks/months/hours`, `last week/month/year/night`, `this week/month/year/morning/afternoon/evening`. Absolute dates, "son bildirim" and "güncel" alone are fine ("dünya" does not match "dün").
 
 **Caveat for the date questions.** The ANSWER items ask for publication dates. The answer service puts each excerpt's `published` timestamp (document metadata, Europe/Istanbul offset) into the model context, so the model reads the date from metadata, not from the disclosure text. The report repeats this next to the table.
 

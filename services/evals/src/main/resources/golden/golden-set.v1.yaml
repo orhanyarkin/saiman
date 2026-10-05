@@ -225,3 +225,13 @@ items:
     question: "THYAO 2025 yılında dağıttığı temettü tutarı nedir?"
     expected:
       reason: AFTER_CORPUS_WATERMARK
+  - id: T-SISE-GUNCEL
+    kind: TEMPORAL
+    ticker: SISE
+    question: "SISE güncel bildirimlerinde neler var?"
+    expected: {}
+  - id: T-KCHOL-ENSON
+    kind: TEMPORAL
+    ticker: KCHOL
+    question: "KCHOL en son açıklamaları neler?"
+    expected: {}

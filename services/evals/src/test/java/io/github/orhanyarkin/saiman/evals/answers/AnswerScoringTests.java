@@ -97,4 +97,30 @@ class AnswerScoringTests {
         assertThat(AnswerScoring.formatUsd(60_000)).isEqualTo("$0.060000");
         assertThat(AnswerScoring.formatUsd(2_500_000)).isEqualTo("$2.500000");
     }
+
+    @Test
+    void relativeTimeExpressionsAreFoundInTurkishAndEnglish() {
+        // the sentence from the live demo run
+        assertThat(AnswerScoring.relativeTimeHits("SISE için son 7 günde yeni özel durum bulunmamaktadır."))
+                .containsExactly("son-N-gun/hafta/ay");
+        assertThat(AnswerScoring.relativeTimeHits("Son bir haftada bildirim yok"))
+                .containsExactly("son-N-gun/hafta/ay");
+        assertThat(AnswerScoring.relativeTimeHits("BUGÜN ve dün açıklandı")).containsExactly("bugun", "dun");
+        assertThat(AnswerScoring.relativeTimeHits("Bu hafta, geçen ay ve yakın zamanda; şu anda"))
+                .containsExactly("bu-hafta/ay/yil", "gecen", "yakin-zamanda", "su-anda");
+        assertThat(AnswerScoring.relativeTimeHits("Recently, today and yesterday; in the last 30 days, this week"))
+                .containsExactly("recently", "today", "yesterday", "last-N-days", "this-week/month");
+        assertThat(AnswerScoring.relativeTimeHits("bugun")).containsExactly("bugun");
+    }
+
+    @Test
+    void absoluteDatesAndLookalikeWordsAreNotRelativeTime() {
+        assertThat(AnswerScoring.relativeTimeFree(
+                        "KAP'a göre 29.12.2023 tarihli son bildirim, 18 Ekim 2023 tarihinde yayımlandı [kap:1:0000]."))
+                .isTrue();
+        assertThat(AnswerScoring.relativeTimeFree("dünya genelinde güncel kur; son bildirim 2023-12-29"))
+                .isTrue();
+        assertThat(AnswerScoring.relativeTimeFree("Bugünlük")).isFalse(); // a Turkish suffix does not hide the stem
+        assertThat(AnswerScoring.relativeTimeFree("")).isTrue();
+    }
 }
