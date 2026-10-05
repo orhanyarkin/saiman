@@ -37,6 +37,19 @@ const capture = {
   sourceCommit: "sample",
   responses,
   runEvents,
+  // SAMPLE values that demonstrate the two optional fields; a real capture supplies its own.
+  corpus: {
+    snapshotLabel: "SAMPLE: KAP disclosures up to 2023-12-29 (frozen MKK snapshot, ADR-0010)",
+    newestDisclosureAt: "2023-12-29T20:46:52Z",
+  },
+  annotations: {
+    "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02": {
+      label: "SAMPLE note: expected failure",
+      detail:
+        "SAMPLE text. This question asks about a period newer than the frozen corpus, so the run ends without evidence.",
+      tone: "warning",
+    },
+  },
 };
 
 const out = resolve(HERE, "../public/demo/capture.json");

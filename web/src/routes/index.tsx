@@ -7,6 +7,7 @@ import { SystemCheckCard } from "@/components/system-check-card";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { recentRunsQuery } from "@/lib/api/queries";
+import { corpusLabel } from "@/lib/corpus";
 import { useDocumentTitle } from "@/lib/hooks";
 
 export const Route = createFileRoute("/")({
@@ -60,6 +61,9 @@ function Index() {
           each data call over x402 (HTTP 402 plus testnet stablecoin). Every payment passes
           deterministic spend limits that no prompt can change, and lands in a double-entry ledger
           that is reconciled against the chain.
+        </p>
+        <p data-testid="corpus-snapshot" className="text-muted-foreground max-w-prose text-sm">
+          Answers come from a frozen snapshot of the corpus: {corpusLabel()}.
         </p>
         <Link to="/runs/new" className={buttonVariants({ size: "lg" })}>
           Start a research run
