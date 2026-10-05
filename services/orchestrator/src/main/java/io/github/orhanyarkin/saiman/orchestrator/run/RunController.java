@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -22,6 +23,9 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 class RunController {
+
+    private static final int DEFAULT_LIMIT = 20;
+    private static final int MAX_LIMIT = 100;
 
     private final RunService runs;
 
@@ -43,6 +47,31 @@ class RunController {
     @GetMapping(path = "/api/v1/runs/{runId}", produces = MediaType.APPLICATION_JSON_VALUE)
     RunSummary summary(@PathVariable UUID runId) {
         return runs.summary(runId).orElseThrow(() -> problem(HttpStatus.NOT_FOUND, "run not found"));
+    }
+
+    /**
+     * Newest-first keyset page. Parameters are read as text and validated here, so a bad value gets a
+     * fixed message instead of Spring's type-mismatch detail (which would echo the input).
+     */
+    @GetMapping(path = "/api/v1/runs", produces = MediaType.APPLICATION_JSON_VALUE)
+    RunPage list(
+            @RequestParam(required = false) @Nullable String limit,
+            @RequestParam(required = false) @Nullable String before) {
+        int size = DEFAULT_LIMIT;
+        if (limit != null) {
+            if (!limit.matches("\\d{1,3}") || Integer.parseInt(limit) < 1 || Integer.parseInt(limit) > MAX_LIMIT) {
+                throw problem(HttpStatus.BAD_REQUEST, "limit must be an integer between 1 and " + MAX_LIMIT);
+            }
+            size = Integer.parseInt(limit);
+        }
+        RunCursor cursor = null;
+        if (before != null) {
+            cursor = RunCursor.decode(before);
+            if (cursor == null) {
+                throw problem(HttpStatus.BAD_REQUEST, "before must be a cursor returned by this endpoint");
+            }
+        }
+        return runs.page(cursor, size);
     }
 
     @ExceptionHandler(RunAdmissionException.class)

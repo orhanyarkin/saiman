@@ -1,14 +1,17 @@
 package io.github.orhanyarkin.saiman.orchestrator.approval;
 
+import java.util.List;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.ErrorResponseException;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -21,6 +24,8 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 class ApprovalController {
+
+    static final int MAX_LIST = 100;
 
     private final ApprovalService approvals;
 
@@ -47,6 +52,24 @@ class ApprovalController {
                             : "approval was already decided");
         }
         return new ApprovalResponse(approvalId, outcome.approval().status());
+    }
+
+    /**
+     * {@code GET /api/v1/approvals?status=PENDING}: approvals in one status (default PENDING), newest
+     * first, at most {@value #MAX_LIST} rows. The status is read as text so a bad value gets a fixed
+     * message.
+     */
+    @GetMapping(path = "/api/v1/approvals", produces = MediaType.APPLICATION_JSON_VALUE)
+    List<ApprovalView> list(@RequestParam(required = false) @Nullable String status) {
+        ApprovalStatus wanted = ApprovalStatus.PENDING;
+        if (status != null) {
+            try {
+                wanted = ApprovalStatus.valueOf(status);
+            } catch (IllegalArgumentException e) {
+                throw problem(HttpStatus.BAD_REQUEST, "status must be PENDING, APPROVED, REJECTED or EXPIRED");
+            }
+        }
+        return approvals.listByStatus(wanted, MAX_LIST);
     }
 
     private static ErrorResponseException problem(HttpStatus status, String detail) {

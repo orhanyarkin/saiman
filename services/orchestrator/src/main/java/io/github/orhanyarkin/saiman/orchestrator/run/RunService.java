@@ -20,6 +20,7 @@ import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -162,6 +163,21 @@ public class RunService {
 
     public Optional<RunSummary> summary(UUID runId) {
         return runs.summary(runId);
+    }
+
+    /** A newest-first page of runs; {@code limit} is already validated (1..100). */
+    RunPage page(@Nullable RunCursor after, int limit) {
+        List<RunListItem> rows = runs.page(after, limit);
+        if (rows.size() <= limit) {
+            return new RunPage(rows, null);
+        }
+        List<RunListItem> items = List.copyOf(rows.subList(0, limit));
+        RunListItem last = items.getLast();
+        return new RunPage(items, new RunCursor(last.createdAt(), last.runId()).encode());
+    }
+
+    public boolean exists(UUID runId) {
+        return runs.exists(runId);
     }
 
     /** Runs executing now (for tests and metrics). */
