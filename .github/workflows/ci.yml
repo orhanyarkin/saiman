@@ -84,8 +84,11 @@ jobs:
       - name: Generated API client is up to date
         run: |
           if grep -q '"gen:api"' package.json; then pnpm gen:api --check; else echo "no gen:api script yet, skipping"; fi
-      # No actions/cache step: there is no pinned cache action in this repo yet and I did not
-      # invent a SHA; add one (key: ~/.cache/ms-playwright on web/pnpm-lock.yaml) when pinned.
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
       - name: E2E (fixture server)
