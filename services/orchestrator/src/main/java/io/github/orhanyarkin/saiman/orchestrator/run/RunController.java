@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.orchestrator.run;
 
+import io.github.orhanyarkin.saiman.orchestrator.dashboard.BoundedReads;
 import io.github.orhanyarkin.saiman.orchestrator.openapi.ProblemDetailSchema;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -35,8 +36,11 @@ class RunController {
 
     private final RunService runs;
 
-    RunController(RunService runs) {
+    private final BoundedReads reads;
+
+    RunController(RunService runs, BoundedReads reads) {
         this.runs = runs;
+        this.reads = reads;
     }
 
     @Operation(operationId = "startRun", summary = "Start a research run")
@@ -129,7 +133,9 @@ class RunController {
                 throw problem(HttpStatus.BAD_REQUEST, "before must be a cursor returned by this endpoint");
             }
         }
-        return runs.page(cursor, size);
+        RunCursor position = cursor;
+        int pageSize = size;
+        return reads.read(() -> runs.page(position, pageSize));
     }
 
     @ExceptionHandler(RunAdmissionException.class)

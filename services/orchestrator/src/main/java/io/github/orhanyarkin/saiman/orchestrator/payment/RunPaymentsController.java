@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.orchestrator.payment;
 
+import io.github.orhanyarkin.saiman.orchestrator.dashboard.BoundedReads;
 import io.github.orhanyarkin.saiman.orchestrator.openapi.ProblemDetailSchema;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -23,9 +24,11 @@ import org.springframework.web.bind.annotation.RestController;
 class RunPaymentsController {
 
     private final PaymentIntentService intents;
+    private final BoundedReads reads;
 
-    RunPaymentsController(PaymentIntentService intents) {
+    RunPaymentsController(PaymentIntentService intents, BoundedReads reads) {
         this.intents = intents;
+        this.reads = reads;
     }
 
     @Operation(operationId = "listRunPayments", summary = "Current state of the run's payment intents")
@@ -42,12 +45,14 @@ class RunPaymentsController {
             content = @Content(schema = @Schema(implementation = RunPayments.class)))
     @GetMapping(path = "/api/v1/runs/{runId}/payments", produces = MediaType.APPLICATION_JSON_VALUE)
     RunPayments payments(@PathVariable UUID runId) {
-        if (!intents.runExists(runId)) {
+        RunPayments found =
+                reads.read(() -> intents.runExists(runId) ? new RunPayments(intents.listForRun(runId)) : null);
+        if (found == null) {
             throw new ErrorResponseException(
                     HttpStatus.NOT_FOUND,
                     ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "run not found"),
                     null);
         }
-        return new RunPayments(intents.listForRun(runId));
+        return found;
     }
 }

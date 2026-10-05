@@ -1,5 +1,6 @@
 package io.github.orhanyarkin.saiman.orchestrator.approval;
 
+import io.github.orhanyarkin.saiman.orchestrator.dashboard.BoundedReads;
 import io.github.orhanyarkin.saiman.orchestrator.openapi.ProblemDetailSchema;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -34,9 +35,11 @@ class ApprovalController {
     static final int MAX_LIST = 100;
 
     private final ApprovalService approvals;
+    private final BoundedReads reads;
 
-    ApprovalController(ApprovalService approvals) {
+    ApprovalController(ApprovalService approvals, BoundedReads reads) {
         this.approvals = approvals;
+        this.reads = reads;
     }
 
     @Operation(operationId = "decideApproval", summary = "Approve or reject one payment above the approval threshold")
@@ -113,7 +116,8 @@ class ApprovalController {
                 throw problem(HttpStatus.BAD_REQUEST, "status must be PENDING, APPROVED, REJECTED or EXPIRED");
             }
         }
-        return approvals.listByStatus(wanted, MAX_LIST);
+        ApprovalStatus requested = wanted;
+        return reads.read(() -> approvals.listByStatus(requested, MAX_LIST));
     }
 
     private static ErrorResponseException problem(HttpStatus status, String detail) {
