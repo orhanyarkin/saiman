@@ -78,6 +78,61 @@ class DashboardInputHardeningTests extends RunTestSupport {
     }
 
     @Test
+    void aHostileContentTypeIsNeverEchoedInBodyOrHeaders() {
+        for (String contentType : List.of("application/json;x=\"ZZMARK\"", "application/x-ZZMARK")) {
+            var result = http.post()
+                    .uri("/api/v1/runs")
+                    .header("Content-Type", contentType)
+                    .header(ApiRequestGuardFilter.CSRF_HEADER, "1")
+                    .body("{\"question\":\"hello there\"}")
+                    .exchange()
+                    .returnResult(String.class);
+            assertThat(String.valueOf(result.getResponseBody())).doesNotContain(MARKER);
+            assertThat(result.getResponseHeaders().toString()).doesNotContain(MARKER);
+        }
+    }
+
+    @Test
+    void theErrorDispatchEchoesNeitherPathNorMessage() {
+        assertThat(context.getEnvironment().getProperty("server.error.include-path"))
+                .isEqualTo("never");
+        assertThat(context.getEnvironment().getProperty("server.error.include-message"))
+                .isEqualTo("never");
+        String body = http.get()
+                .uri("/error?x=" + MARKER)
+                .exchange()
+                .expectBody(String.class)
+                .returnResult()
+                .getResponseBody();
+        assertThat(body).isNotNull().doesNotContain(MARKER).doesNotContain("\"path\"");
+    }
+
+    @Test
+    void anAdmissionRejectionCarriesTheRouteTemplateAsInstance() {
+        http.post()
+                .uri("/api/v1/runs")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(ApiRequestGuardFilter.CSRF_HEADER, "1")
+                .body("{\"question\":\"x\"}")
+                .exchange()
+                .expectStatus()
+                .isBadRequest()
+                .expectBody()
+                .jsonPath("$.instance")
+                .isEqualTo("/api/v1/runs");
+    }
+
+    @Test
+    void the429And503AdmissionProblemsCarryTheRouteTemplateToo() {
+        RunController controller = new RunController(null, null, java.time.Clock.systemUTC());
+        for (RunAdmissionException.Reason reason : RunAdmissionException.Reason.values()) {
+            var response = controller.rejected(new RunAdmissionException(reason));
+            assertThat(response.getBody()).isNotNull();
+            assertThat(response.getBody().getInstance()).hasToString("/api/v1/runs");
+        }
+    }
+
+    @Test
     void anUnknownPathDoesNotEchoItEither() {
         String body = http.get()
                 .uri("/api/v1/" + MARKER)
