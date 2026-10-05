@@ -66,6 +66,22 @@ class PaymentContractTests {
     }
 
     @Test
+    void aSellersSettledEventAlwaysCarriesATransactionHash() {
+        assertThatThrownBy(() -> new PaymentSettled(
+                        META,
+                        auth(),
+                        Money.usdc(10_000),
+                        PAYER,
+                        "r",
+                        Book.SELLER,
+                        null,
+                        SettlementEvidence.CHAIN,
+                        null,
+                        null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void failureReasonIsABoundedCode() {
         assertThatThrownBy(() -> new PaymentFailed(
                         META,

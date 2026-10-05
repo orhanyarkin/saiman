@@ -12,3 +12,4 @@
 - [Redis/Kafka swap audit](infra-redis-kafka-swap-audit.md) — no Crit/High/Med; Kafka admin-API suppression undocumented, JMX local connector, Redis 8 modules (2026-10-01)
 - [M4b fix re-audit](m4b-fix-reaudit.md) — corroboration sound vs Kafka-only attacker; shared superuser role residual; claim release safe
 - [M5 T1/T2 dashboard reads audit](m5-t1-t2-dashboard-reads-audit.md) — type-mismatch echo in 400s, revenue not chain-qualified, payer in accountCode, no orch indexes (2026-10-05)
+- [M5 dashboard fix re-review](m5-dashboard-fix-reaudit.md) — echo closed; chainVerified forgeable via TX_UNKNOWN (USED, null tx, no finding); ledger reads no timeout (2026-10-05)
