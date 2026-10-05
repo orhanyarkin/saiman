@@ -15,3 +15,5 @@
 - [M5 dashboard fix re-review](m5-dashboard-fix-reaudit.md) — echo closed; chainVerified forgeable via TX_UNKNOWN (USED, null tx, no finding); ledger reads no timeout (2026-10-05)
 - [M6 T1+T4 auth/infra audit](m6-t1-t4-auth-infra-audit.md) — superuser literal pw, owner pw in app, auth.enabled hatch, evals symlink->docs, scrub argv (2026-10-05)
 - [M6 T7+T5a audit](m6-t7-t5a-audit.md) — settle null body escapes PaymentSettler (no failed event), verify null releases claim, SSE buffer unbounded (2026-10-05)
+- [M6 T3 ledger audit](m6-t3-ledger-audit.md) — owner cred residual undocumented/overstated, audit tables over-granted, 401 suppression signal (2026-10-05)
+- [M6 T2 orchestrator auth audit](m6-t2-orchestrator-auth-audit.md) — no Crit/High/Med; app DELETE resets spend_day, decided_by digest prefix to READER, auth-off locked closed (2026-10-05)
