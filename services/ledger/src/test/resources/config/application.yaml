@@ -11,6 +11,10 @@ logging:
     org.springframework.kafka: warn
 
 saiman:
+  # The pool runs as ledger_app and Flyway as ledger_owner, as in compose (ADR-0024, libs/test-support).
+  test:
+    db:
+      runtime-role: app
   ledger:
     reconciliation:
       # Tests start runs themselves; a scheduled run must never race them.
