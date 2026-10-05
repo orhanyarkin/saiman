@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { test as cold, expect as coldExpect } from "@playwright/test";
 
 import {
@@ -8,6 +11,10 @@ import {
   test,
   expect,
 } from "./helpers";
+
+const SAMPLE_CAPTURE = readFileSync(
+  resolve(import.meta.dirname, "fixtures/replay-capture.sample.json"),
+);
 
 /** Starts a run through the API as the operator and returns its id (no UI involved). */
 async function startRunViaApi(
@@ -244,6 +251,10 @@ test("a live run streams over fetch SSE with the Authorization header and no tok
 test("a 503 daily-cap answer offers the recorded demo, which switches the session to replay", async ({
   page,
 }) => {
+  // The recording this test switches to is the SAMPLE one; the published one is real.
+  await page.route("**/demo/capture.json", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: SAMPLE_CAPTURE }),
+  );
   await page.goto("/runs/new");
   await page.getByLabel("Your question").fill("__LLM_CAP__ THYAO son açıklamalar?");
   await page.getByRole("button", { name: "Start run" }).click();

@@ -1,5 +1,5 @@
 /**
- * Builds `public/demo/capture.json`, the SAMPLE recording bundled with every build (ADR-0026), from
+ * Builds `e2e/fixtures/replay-capture.sample.json`, the SAMPLE recording used by the replay e2e and Lighthouse runs (the real recording is public/demo/capture.json, ADR-0026), from
  * the e2e example captures. It is not a real recording: the `environment` field says so and the
  * replay banner shows it. A real recording replaces it (`CAPTURE_OUT=web/public/demo/capture.json
  * make capture-demo`). Run with `pnpm demo:sample`; Node >= 22.19 runs this TypeScript file as is.
@@ -52,7 +52,7 @@ const capture = {
   },
 };
 
-const out = resolve(HERE, "../public/demo/capture.json");
+const out = resolve(HERE, "../e2e/fixtures/replay-capture.sample.json");
 mkdirSync(dirname(out), { recursive: true });
 // Internal service hosts (http://seller-api:8081) say nothing useful to a visitor and expose the
 // topology: replace them with a neutral placeholder before anything is published.

@@ -31,6 +31,7 @@ const v1 = {
   responses: {
     "/api/v1/ping": { service: "orchestrator" },
     "/api/v1/spend": { day: "2026-10-01" },
+    "/api/v1/runs?limit=10": { items: ["first-page"], next: null },
   },
   runEvents: { [RUN]: [event(1, 0), event(2, 10), event(3, 5000), { junk: true }] },
 };
@@ -124,6 +125,12 @@ describe("replay source in a replay build", () => {
     await expect(apiGet("/api/v1/spend?day=2099-01-01")).resolves.toEqual({ day: "2026-10-01" });
     const urls = vi.mocked(fetch).mock.calls.map(([url]) => url as unknown);
     expect(urls.every((url) => url === "/demo/capture.json")).toBe(true);
+  });
+
+  it("answers a first page captured with another page size, but never a cursor page", async () => {
+    const { apiGet } = await import("@/lib/api/source");
+    await expect(apiGet("/api/v1/runs?limit=20")).resolves.toMatchObject({ items: ["first-page"] });
+    await expect(apiGet("/api/v1/runs?limit=20&before=abc")).rejects.toThrow();
   });
 
   it("reports a path that is not in the recording", async () => {

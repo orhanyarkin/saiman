@@ -6,9 +6,9 @@ import { describe, expect, it } from "vitest";
 
 import { normalizeCapture } from "@/lib/api/replay";
 
-describe("bundled sample capture", () => {
+describe("sample capture fixture", () => {
   const text = readFileSync(
-    resolve(import.meta.dirname, "../../../public/demo/capture.json"),
+    resolve(import.meta.dirname, "../../../e2e/fixtures/replay-capture.sample.json"),
     "utf8",
   );
 
