@@ -85,7 +85,42 @@ class CreditNoteApiSecurityTests extends SettlementTestBase {
     }
 
     @Test
-    void thePaidPathNeverPassesThroughTheSecurityChain() throws IOException {
+    void eachInternalRouteAcceptsOnlyItsMethod() throws IOException {
+        Map<String, String> ledger = Map.of("Authorization", TestTokens.bearer(TestTokens.SERVICE_LEDGER));
+        Map<String, String> evals = Map.of("Authorization", TestTokens.bearer(TestTokens.SERVICE_EVALS));
+        for (String method : new String[] {"HEAD", "OPTIONS", "PUT", "POST", "DELETE"}) {
+            assertThat(RawHttp.exchange(port, method, "/internal/credit-notes/" + KEY, SELLER_HOST, ledger, null)
+                            .status())
+                    .as(method)
+                    .isEqualTo(403);
+        }
+        for (String method : new String[] {"HEAD", "OPTIONS", "PUT", "GET", "DELETE"}) {
+            assertThat(RawHttp.exchange(port, method, "/internal/v1/eval/questions", SELLER_HOST, evals, null)
+                            .status())
+                    .as(method)
+                    .isEqualTo(403);
+        }
+    }
+
+    @Test
+    void theFirewallRefusesOddPaidPathFormsBeforeX402() throws IOException {
+        for (String path : new String[] {"/v1/disclosures/THYAO/summary;x=1", "/v1//disclosures/THYAO/summary"}) {
+            RawHttp.Response response = RawHttp.exchange(
+                    port,
+                    "GET",
+                    path,
+                    "localhost:" + port,
+                    Map.of(X402Headers.PAYMENT_SIGNATURE, PaymentPayloads.header(codec, newPayload())),
+                    null);
+            assertThat(response.status()).as(path).isEqualTo(400);
+        }
+        assertThat(FACILITATOR.verifyCallCount()).isZero();
+        assertThat(FACILITATOR.settleCallCount()).isZero();
+        assertThat(settlementRows()).isZero();
+    }
+
+    @Test
+    void thePaidPathMatchesNoSecurityChain() throws IOException {
         // A paid request with a (wrong-route) bearer token is still answered by x402 alone: 200, settled, and none of
         // the response headers Spring Security's chain writes.
         RawHttp.Response paid = RawHttp.exchange(
