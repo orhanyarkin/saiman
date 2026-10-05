@@ -25,7 +25,18 @@ make test && make lint         # Gradle check (incl. Testcontainers) + web tests
 make web-dev                   # Vite on http://localhost:5173, proxies /api and /otlp
 ```
 
-Open http://localhost:5173, press **Check again** on the System check card, then verify the
+`make up` also builds the dashboard and serves it, with the APIs behind one origin, at
+**http://localhost:8088** (nginx; local and testnet only). Start a research run on **Start a research
+run**, approve the payment when asked (payments above 0.01 USDC wait for you, and approval never raises the
+run budget), then follow it on the run page: payments, the report with citations and, a few seconds
+later, **In the ledger**. The other pages show runs, approvals, spend control, the ledger with its
+balance check, reconciliation against Base Sepolia and seller revenue (per books next to the
+chain-verified figure). `make e2e` runs the browser tests against a fixture server, `make lighthouse`
+the accessibility gate and `make e2e-live` the acceptance flow against the running stack (a real, tiny
+testnet payment).
+
+For development, `pnpm --dir web dev` serves http://localhost:5173 with the same proxy. Press **Check
+again** on the System check card, then verify the
 trace (browser → orchestrator → Postgres) in Jaeger:
 
 ```bash
