@@ -14,6 +14,7 @@ const APP_PORT = Number(process.env.SAIMAN_E2E_APP_PORT ?? 5174);
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.spec.ts",
+  testIgnore: "**/live/**", // the live acceptance spec runs via `pnpm e2e:live` against a real stack
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

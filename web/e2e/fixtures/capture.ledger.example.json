@@ -1,0 +1,503 @@
+{
+  "capturedAt": "2026-10-01T10:00:00Z",
+  "environment": "local fixture example, ledger service (format of `make capture-demo` output, ADR-0004)",
+  "responses": {
+    "/api/v1/ledger/trial-balance": [
+      {
+        "book": "BUYER",
+        "account": "buyer:0x2222222222222222222222222222222222222222:wallet:available",
+        "type": "ASSET",
+        "asset": "USDC",
+        "decimals": 6,
+        "debit": 0,
+        "credit": 60000,
+        "balance": -60000
+      },
+      {
+        "book": "BUYER",
+        "account": "buyer:0x2222222222222222222222222222222222222222:wallet:encumbered",
+        "type": "ASSET",
+        "asset": "USDC",
+        "decimals": 6,
+        "debit": 60000,
+        "credit": 40000,
+        "balance": 20000
+      },
+      {
+        "book": "BUYER",
+        "account": "buyer:0x2222222222222222222222222222222222222222:expense:data",
+        "type": "EXPENSE",
+        "asset": "USDC",
+        "decimals": 6,
+        "debit": 40000,
+        "credit": 0,
+        "balance": 40000
+      },
+      {
+        "book": "SELLER",
+        "account": "seller:0x1111111111111111111111111111111111111111:wallet",
+        "type": "ASSET",
+        "asset": "USDC",
+        "decimals": 6,
+        "debit": 40000,
+        "credit": 0,
+        "balance": 40000
+      },
+      {
+        "book": "SELLER",
+        "account": "seller:0x1111111111111111111111111111111111111111:revenue:data",
+        "type": "REVENUE",
+        "asset": "USDC",
+        "decimals": 6,
+        "debit": 0,
+        "credit": 40000,
+        "balance": -40000
+      }
+    ],
+    "/api/v1/ledger/payments?limit=20": {
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "buyerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "sellerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "chainTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "createdAt": "2026-10-01T10:00:10Z",
+          "updatedAt": "2026-10-01T10:05:00Z"
+        },
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52",
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "buyerTxHash": null,
+          "sellerTxHash": null,
+          "chainTxHash": null,
+          "createdAt": "2026-10-01T09:00:10Z",
+          "updatedAt": "2026-10-01T09:05:00Z"
+        }
+      ],
+      "nextCursor": "page-2"
+    },
+    "/api/v1/ledger/payments?limit=20&before=page-2": {
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e53",
+          "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "AUTHORIZED",
+          "sellerState": "NONE",
+          "chainState": "UNKNOWN",
+          "buyerTxHash": null,
+          "sellerTxHash": null,
+          "chainTxHash": null,
+          "createdAt": "2026-10-01T08:00:10Z",
+          "updatedAt": "2026-10-01T08:00:10Z"
+        }
+      ],
+      "nextCursor": null
+    },
+    "/api/v1/ledger/payments?book=BUYER&limit=20": {
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "buyerTxHash": null,
+          "sellerTxHash": null,
+          "chainTxHash": null,
+          "createdAt": "2026-10-01T10:00:10Z",
+          "updatedAt": "2026-10-01T10:05:00Z"
+        }
+      ],
+      "nextCursor": null
+    },
+    "/api/v1/ledger/payments?book=SELLER&limit=20": {
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52",
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "buyerTxHash": null,
+          "sellerTxHash": null,
+          "chainTxHash": null,
+          "createdAt": "2026-10-01T09:00:10Z",
+          "updatedAt": "2026-10-01T09:05:00Z"
+        }
+      ],
+      "nextCursor": null
+    },
+    "/api/v1/ledger/payments?runId=6ad4354c-8e79-4b49-b5d9-d45eb9689b41&limit=50": {
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "buyerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "sellerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "chainTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "createdAt": "2026-10-01T10:00:10Z",
+          "updatedAt": "2026-10-01T10:05:00Z"
+        }
+      ],
+      "nextCursor": null
+    },
+    "/api/v1/ledger/payments/3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51": {
+      "payment": {
+        "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+        "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+        "payTo": "0x1111111111111111111111111111111111111111",
+        "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+        "buyerState": "SETTLED",
+        "sellerState": "SETTLED",
+        "chainState": "USED",
+        "buyerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+        "sellerTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+        "chainTxHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+        "createdAt": "2026-10-01T10:00:10Z",
+        "updatedAt": "2026-10-01T10:05:00Z"
+      },
+      "entries": [
+        {
+          "entryId": "e0000000-0000-4000-8000-000000000001",
+          "book": "BUYER",
+          "kind": "ENCUMBER",
+          "description": "Authorization signed",
+          "effectiveAt": "2026-10-01T10:00:10Z",
+          "reversesEntryId": null,
+          "postings": [
+            {
+              "accountCode": "buyer:0x2222222222222222222222222222222222222222:wallet:encumbered",
+              "side": "DEBIT",
+              "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 }
+            },
+            {
+              "accountCode": "buyer:0x2222222222222222222222222222222222222222:wallet:available",
+              "side": "CREDIT",
+              "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 }
+            }
+          ]
+        },
+        {
+          "entryId": "e0000000-0000-4000-8000-000000000002",
+          "book": "BUYER",
+          "kind": "SETTLE",
+          "description": "Payment settled",
+          "effectiveAt": "2026-10-01T10:00:20Z",
+          "reversesEntryId": null,
+          "postings": [
+            {
+              "accountCode": "buyer:0x2222222222222222222222222222222222222222:expense:data",
+              "side": "DEBIT",
+              "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 }
+            },
+            {
+              "accountCode": "buyer:0x2222222222222222222222222222222222222222:wallet:encumbered",
+              "side": "CREDIT",
+              "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 }
+            }
+          ]
+        },
+        {
+          "entryId": "e0000000-0000-4000-8000-000000000003",
+          "book": "SELLER",
+          "kind": "SALE",
+          "description": "Payment received",
+          "effectiveAt": "2026-10-01T10:00:21Z",
+          "reversesEntryId": null,
+          "postings": [
+            {
+              "accountCode": "seller:0x1111111111111111111111111111111111111111:wallet",
+              "side": "DEBIT",
+              "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 }
+            },
+            {
+              "accountCode": "seller:0x1111111111111111111111111111111111111111:revenue:data",
+              "side": "CREDIT",
+              "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 }
+            }
+          ]
+        }
+      ],
+      "mismatches": []
+    },
+    "/api/v1/ledger/payments/3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52": {
+      "payment": {
+        "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52",
+        "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+        "payTo": "0x1111111111111111111111111111111111111111",
+        "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+        "buyerState": "SETTLED",
+        "sellerState": "SETTLED",
+        "chainState": "USED",
+        "buyerTxHash": null,
+        "sellerTxHash": null,
+        "chainTxHash": null,
+        "createdAt": "2026-10-01T09:00:10Z",
+        "updatedAt": "2026-10-01T09:05:00Z"
+      },
+      "entries": [
+        {
+          "entryId": "e0000000-0000-4000-8000-000000000011",
+          "book": "SELLER",
+          "kind": "SALE",
+          "description": "Payment received",
+          "effectiveAt": "2026-10-01T09:00:21Z",
+          "reversesEntryId": null,
+          "postings": [
+            {
+              "accountCode": "seller:0x1111111111111111111111111111111111111111:wallet",
+              "side": "DEBIT",
+              "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 }
+            },
+            {
+              "accountCode": "seller:0x1111111111111111111111111111111111111111:revenue:data",
+              "side": "CREDIT",
+              "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 }
+            }
+          ]
+        }
+      ],
+      "mismatches": [
+        {
+          "kind": "AMOUNT_MISMATCH",
+          "status": "OPEN",
+          "reconciliationRunId": "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61",
+          "detectedAt": "2026-10-01T10:10:00Z",
+          "adjustmentEntryId": null,
+          "ledgerValue": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "chainValue": { "atomicUnits": 10000, "asset": "USDC", "decimals": 6 }
+        }
+      ]
+    },
+    "/api/v1/ledger/payments/3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e53": {
+      "payment": {
+        "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e53",
+        "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+        "payTo": "0x1111111111111111111111111111111111111111",
+        "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+        "buyerState": "AUTHORIZED",
+        "sellerState": "NONE",
+        "chainState": "UNKNOWN",
+        "buyerTxHash": null,
+        "sellerTxHash": null,
+        "chainTxHash": null,
+        "createdAt": "2026-10-01T08:00:10Z",
+        "updatedAt": "2026-10-01T08:00:10Z"
+      },
+      "entries": [],
+      "mismatches": []
+    },
+    "/api/v1/ledger/revenue": {
+      "items": [
+        {
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "grossSales": { "atomicUnits": 40000, "asset": "USDC", "decimals": 6 },
+          "creditNotes": { "atomicUnits": 0, "asset": "USDC", "decimals": 6 },
+          "netRevenue": { "atomicUnits": 40000, "asset": "USDC", "decimals": 6 },
+          "customerCredits": { "atomicUnits": 0, "asset": "USDC", "decimals": 6 },
+          "sales": 2,
+          "credited": 0,
+          "chainVerified": {
+            "grossSales": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+            "creditNotes": { "atomicUnits": 0, "asset": "USDC", "decimals": 6 },
+            "netRevenue": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 }
+          },
+          "unverifiedGrossSales": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "openFindings": 1,
+          "saturated": false
+        }
+      ],
+      "truncated": false
+    },
+    "/api/v1/reconciliation/runs?limit=20": {
+      "items": [
+        {
+          "runId": "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61",
+          "status": "COMPLETED",
+          "startedAt": "2026-10-01T10:10:00Z",
+          "finishedAt": "2026-10-01T10:10:04Z",
+          "safeBlock": 12345678,
+          "summary": {
+            "checked": 3,
+            "matched": 1,
+            "pending": 1,
+            "mismatches": 1,
+            "resolvedUsed": 2,
+            "resolvedUnused": 0
+          }
+        },
+        {
+          "runId": "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a62",
+          "status": "PARTIAL",
+          "startedAt": "2026-10-01T09:10:00Z",
+          "finishedAt": "2026-10-01T09:10:02Z",
+          "safeBlock": 12345000,
+          "summary": {
+            "checked": 2,
+            "matched": 1,
+            "pending": 1,
+            "mismatches": 0,
+            "resolvedUsed": 1,
+            "resolvedUnused": 0
+          }
+        }
+      ]
+    },
+    "/api/v1/reconciliation/runs/latest": {
+      "runId": "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61",
+      "status": "COMPLETED",
+      "network": "eip155:84532",
+      "startedAt": "2026-10-01T10:10:00Z",
+      "finishedAt": "2026-10-01T10:10:04Z",
+      "safeBlock": 12345678,
+      "summary": {
+        "checked": 3,
+        "matched": 1,
+        "pending": 1,
+        "mismatches": 1,
+        "resolvedUsed": 2,
+        "resolvedUnused": 0
+      },
+      "suspense": { "atomicUnits": 0, "asset": "USDC", "decimals": 6 },
+      "suspenseSide": null,
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+          "paymentIntentId": null,
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "status": "MATCHED",
+          "txHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "mismatch": null
+        },
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52",
+          "paymentIntentId": null,
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "status": "MISMATCH",
+          "txHash": null,
+          "mismatch": {
+            "kind": "AMOUNT_MISMATCH",
+            "adjustmentEntryId": null,
+            "ledgerValue": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+            "chainValue": { "atomicUnits": 10000, "asset": "USDC", "decimals": 6 }
+          }
+        },
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e53",
+          "paymentIntentId": null,
+          "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "AUTHORIZED",
+          "sellerState": "NONE",
+          "chainState": "UNKNOWN",
+          "status": "PENDING",
+          "txHash": null,
+          "mismatch": null
+        }
+      ]
+    },
+    "/api/v1/reconciliation/runs/9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61": {
+      "runId": "9b1f0c52-3a7e-4d68-8f21-5c0d1e2f3a61",
+      "status": "COMPLETED",
+      "network": "eip155:84532",
+      "startedAt": "2026-10-01T10:10:00Z",
+      "finishedAt": "2026-10-01T10:10:04Z",
+      "safeBlock": 12345678,
+      "summary": {
+        "checked": 3,
+        "matched": 1,
+        "pending": 1,
+        "mismatches": 1,
+        "resolvedUsed": 2,
+        "resolvedUnused": 0
+      },
+      "suspense": { "atomicUnits": 0, "asset": "USDC", "decimals": 6 },
+      "suspenseSide": null,
+      "items": [
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e51",
+          "paymentIntentId": null,
+          "runId": "6ad4354c-8e79-4b49-b5d9-d45eb9689b41",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "status": "MATCHED",
+          "txHash": "0x68592d03715426a9a3aea48c4f50df430e6e10ad46962d9ab0c7c532a73bb090",
+          "mismatch": null
+        },
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e52",
+          "paymentIntentId": null,
+          "runId": "0d9f0b3e-5a51-4c0e-8d1b-3a8a3f1c2b02",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "SETTLED",
+          "sellerState": "SETTLED",
+          "chainState": "USED",
+          "status": "MISMATCH",
+          "txHash": null,
+          "mismatch": {
+            "kind": "AMOUNT_MISMATCH",
+            "adjustmentEntryId": null,
+            "ledgerValue": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+            "chainValue": { "atomicUnits": 10000, "asset": "USDC", "decimals": 6 }
+          }
+        },
+        {
+          "paymentId": "3f2b8a40-6c1d-4e0a-9d52-7a1b2c3d4e53",
+          "paymentIntentId": null,
+          "runId": "7c1e4f52-9b0a-4d7e-a6c3-1e2f3a4b5c03",
+          "payer": "0x2222222222222222222222222222222222222222",
+          "payTo": "0x1111111111111111111111111111111111111111",
+          "amount": { "atomicUnits": 20000, "asset": "USDC", "decimals": 6 },
+          "buyerState": "AUTHORIZED",
+          "sellerState": "NONE",
+          "chainState": "UNKNOWN",
+          "status": "PENDING",
+          "txHash": null,
+          "mismatch": null
+        }
+      ]
+    }
+  }
+}

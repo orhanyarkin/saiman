@@ -8,10 +8,19 @@ import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { fetchPing } from "@/lib/api/ping";
 import { parseRunEvents } from "@/lib/api/run-events";
 import { apiGet, apiPost } from "@/lib/api/source";
+import { LEDGER_POLL_MS, ledgerPollPhase } from "@/lib/ledger-model";
 import type {
   ApprovalResponse,
   ApprovalView,
   DecisionRequest,
+  LedgerBook,
+  PaymentDetail,
+  PaymentPage,
+  ReconciliationReport,
+  ReconciliationRunList,
+  ReconciliationStarted,
+  RevenueReport,
+  TrialBalanceRow,
   RunPage,
   RunPayments,
   RunSummary,
@@ -119,6 +128,112 @@ export const spendQuery = (day: string) =>
     queryFn: ({ signal }) =>
       apiGet<SpendOverview>(`/api/v1/spend?day=${encodeURIComponent(day)}`, signal),
   });
+
+// ---- ledger service (docs/api/ledger.openapi.json) ----------------------------------------
+
+export const LEDGER_PAGE_SIZE = 20;
+const RECON_POLL_MS = 2000;
+
+export const ledgerKeys = {
+  all: ["ledger"] as const,
+  trialBalance: ["ledger", "trial-balance"] as const,
+  payments: (filter: { runId: string | null; book: LedgerBook | null }) =>
+    ["ledger", "payments", filter] as const,
+  runPayments: (runId: string) => ["ledger", "run-payments", runId] as const,
+  payment: (id: string) => ["ledger", "payment", id] as const,
+  revenue: (payTo: string | null) => ["ledger", "revenue", payTo] as const,
+  reconRuns: ["reconciliation", "runs"] as const,
+  reconRun: (id: string) => ["reconciliation", "run", id] as const,
+};
+
+export const trialBalanceQuery = () =>
+  queryOptions({
+    queryKey: ledgerKeys.trialBalance,
+    queryFn: ({ signal }) => apiGet<TrialBalanceRow[]>("/api/v1/ledger/trial-balance", signal),
+  });
+
+function paymentsUrl(
+  filter: { runId?: string | null; book?: LedgerBook | null },
+  limit: number,
+  before: string | null,
+): string {
+  // Fixed parameter order keeps the URL stable (and fixtures keyable).
+  const params = new URLSearchParams();
+  if (filter.runId) {
+    params.set("runId", filter.runId);
+  }
+  if (filter.book) {
+    params.set("book", filter.book);
+  }
+  params.set("limit", String(limit));
+  if (before !== null) {
+    params.set("before", before);
+  }
+  return `/api/v1/ledger/payments?${params.toString()}`;
+}
+
+/** Keyset-paged payments, optionally of one run and/or one book. */
+export const ledgerPaymentsQuery = (
+  filter: { runId?: string | null; book?: LedgerBook | null } = {},
+) =>
+  infiniteQueryOptions({
+    queryKey: ledgerKeys.payments({ runId: filter.runId ?? null, book: filter.book ?? null }),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) =>
+      apiGet<PaymentPage>(paymentsUrl(filter, LEDGER_PAGE_SIZE, pageParam), signal),
+    getNextPageParam: (last) => last.nextCursor ?? null,
+  });
+
+/** The run page's panel: one page of the run's payments, polled by the caller while armed. */
+export const runLedgerPaymentsQuery = (runId: string, armedAt: number) =>
+  queryOptions({
+    queryKey: ledgerKeys.runPayments(runId),
+    queryFn: ({ signal }) => apiGet<PaymentPage>(paymentsUrl({ runId }, 50, null), signal),
+    // Evaluated after every fetch (and when `armedAt` changes): polling ends by itself.
+    refetchInterval: (query) =>
+      ledgerPollPhase(armedAt, Date.now(), query.state.data?.items ?? []) === "polling"
+        ? LEDGER_POLL_MS
+        : false,
+  });
+
+export const paymentDetailQuery = (paymentId: string) =>
+  queryOptions({
+    queryKey: ledgerKeys.payment(paymentId),
+    queryFn: ({ signal }) =>
+      apiGet<PaymentDetail>(`/api/v1/ledger/payments/${encodeURIComponent(paymentId)}`, signal),
+  });
+
+export const revenueQuery = (payTo: string | null) =>
+  queryOptions({
+    queryKey: ledgerKeys.revenue(payTo),
+    queryFn: ({ signal }) =>
+      apiGet<RevenueReport>(
+        payTo === null
+          ? "/api/v1/ledger/revenue"
+          : `/api/v1/ledger/revenue?payTo=${encodeURIComponent(payTo)}`,
+        signal,
+      ),
+  });
+
+export const reconRunsQuery = (limit = 20) =>
+  queryOptions({
+    queryKey: ledgerKeys.reconRuns,
+    queryFn: ({ signal }) =>
+      apiGet<ReconciliationRunList>(`/api/v1/reconciliation/runs?limit=${String(limit)}`, signal),
+  });
+
+/** One report by id or `latest`; polled while the run is RUNNING (PARTIAL/FAILED/COMPLETED are final). */
+export const reconRunQuery = (id: string) =>
+  queryOptions({
+    queryKey: ledgerKeys.reconRun(id),
+    queryFn: ({ signal }) =>
+      apiGet<ReconciliationReport>(`/api/v1/reconciliation/runs/${encodeURIComponent(id)}`, signal),
+    refetchInterval: (query) => (query.state.data?.status === "RUNNING" ? RECON_POLL_MS : false),
+  });
+
+export function startReconciliation(): Promise<ReconciliationStarted> {
+  return apiPost<ReconciliationStarted>("/api/v1/reconciliation/runs", {});
+}
 
 export function startRun(request: StartRunRequest): Promise<StartRunResponse> {
   return apiPost<StartRunResponse>("/api/v1/runs", request);

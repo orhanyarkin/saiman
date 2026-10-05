@@ -16,5 +16,12 @@
     "noUnusedParameters": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["vite.config.ts", "proxy.ts", "proxy.test.ts", "playwright.config.ts", "e2e"]
+  "include": [
+    "vite.config.ts",
+    "proxy.ts",
+    "proxy.test.ts",
+    "playwright.config.ts",
+    "playwright.live.config.ts",
+    "e2e"
+  ]
 }

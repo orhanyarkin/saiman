@@ -6,6 +6,7 @@ import { ApprovalCard } from "@/components/run/approval-card";
 import { BudgetMeter } from "@/components/run/budget-meter";
 import { PaymentIntentsPanel } from "@/components/run/payment-intents-panel";
 import { PaymentsPanel } from "@/components/run/payments-panel";
+import { RunLedgerPanel } from "@/components/run/run-ledger-panel";
 import { StatusBadge } from "@/components/run/status-badge";
 import { ReportPanel } from "@/components/run/report-panel";
 import { Stepper } from "@/components/run/stepper";
@@ -16,6 +17,7 @@ import { queryKeys, runPaymentsQuery } from "@/lib/api/queries";
 import { ApiError } from "@/lib/api/source";
 import { isTerminalStatus } from "@/lib/api/types";
 import { useDocumentTitle, useRunEvents, useThrottledValue } from "@/lib/hooks";
+import { ledgerArmTime } from "@/lib/ledger-model";
 import { formatMoney, moneyTitle } from "@/lib/money";
 import { STATUS_TEXT } from "@/lib/run-status";
 import { deriveRunView, stepLabel } from "@/lib/run-view-model";
@@ -35,6 +37,7 @@ function RunView({ runId }: { runId: string }) {
   const { events, summary, stream, terminal } = useRunEvents(runId);
   const payments = useQuery(runPaymentsQuery(runId, terminal));
   const view = deriveRunView(events);
+  const ledgerArm = ledgerArmTime(events);
   const status = summary.data?.status;
 
   useDocumentTitle(status ? `${STATUS_TEXT[status]}: run` : "Run");
@@ -166,6 +169,8 @@ function RunView({ runId }: { runId: string }) {
           )}
         </CardContent>
       </Card>
+
+      {ledgerArm === null ? null : <RunLedgerPanel runId={runId} armedAt={ledgerArm} />}
 
       <section aria-labelledby="timeline-title" className="space-y-3">
         <h2 id="timeline-title" className="text-lg font-semibold">

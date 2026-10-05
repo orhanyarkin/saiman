@@ -32,8 +32,15 @@ export async function renderWithProviders(
     path: "/runs/$runId",
     component: () => null,
   });
+  const others = [
+    "/runs/new",
+    "/ledger",
+    "/ledger/payments/$paymentId",
+    "/reconciliation",
+    "/reconciliation/$reconRunId",
+  ].map((path) => createRoute({ getParentRoute: () => rootRoute, path, component: () => null }));
   const router = createRouter({
-    routeTree: rootRoute.addChildren([index, run]),
+    routeTree: rootRoute.addChildren([index, run, ...others]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
