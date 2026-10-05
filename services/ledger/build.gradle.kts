@@ -8,6 +8,7 @@ dependencies {
     implementation(project(":libs:shared"))
     implementation(project(":libs:eventing")) // InboxGuard + Modulith registry defaults (ADR-0016)
     implementation(project(":libs:evm-rpc")) // Base Sepolia reads for reconciliation (ADR-0018)
+    implementation(project(":libs:api-security")) // bearer-token authentication of /api/** (ADR-0023)
     implementation(platform(libs.spring.modulith.bom))
     implementation(libs.spring.modulith.starter.jdbc) // event publication registry in schema `ledger`
     implementation(libs.spring.modulith.events.kafka) // @Externalized -> ledger.entry-posted.v1
@@ -25,6 +26,7 @@ dependencies {
     testImplementation(libs.spring.boot.starter.webmvc.test)
     testImplementation(libs.spring.boot.starter.kafka.test)
     testImplementation(project(":libs:test-support")) // one Postgres and Kafka per test JVM (ADR-0020)
+    testImplementation(testFixtures(project(":libs:api-security"))) // TestTokens
 }
 
 // Property tests (ADR-0019): `-Dsaiman.pbt.seed=<base seed>` and `-Dsaiman.pbt.tries=<n>` on the Gradle command

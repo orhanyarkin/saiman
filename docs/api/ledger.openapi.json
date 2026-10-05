@@ -535,6 +535,13 @@
         "required" : [ "account", "asset", "balance", "book", "credit", "debit", "decimals", "type" ],
         "type" : "object"
       }
+    },
+    "securitySchemes" : {
+      "bearerAuth" : {
+        "description" : "Opaque API token (READER or OPERATOR), sent as Authorization: Bearer <token>; never in a URL.",
+        "scheme" : "bearer",
+        "type" : "http"
+      }
     }
   },
   "info" : {
@@ -996,5 +1003,8 @@
         "tags" : [ "reconciliation-controller" ]
       }
     }
-  }
+  },
+  "security" : [ {
+    "bearerAuth" : [ ]
+  } ]
 }

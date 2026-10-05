@@ -10,14 +10,16 @@ import java.util.Locale;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.security.autoconfigure.web.servlet.SecurityFilterProperties;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Protects the ledger, whose {@code /api/**} has no authentication yet (M6 hardening; ADR-0018), from
- * a web page in the operator's browser. Same posture as the orchestrator's guard. Applied to <em>every</em> request, not
+ * Protects the ledger from a web page in the operator's browser, in front of the bearer-token authentication
+ * ({@link ApiSecurityConfiguration}, ADR-0023) and independent of it. Same posture as the orchestrator's guard. Applied to <em>every</em> request, not
  * only to paths that look like {@code /api/}: Spring MVC matches handlers on the decoded path with
  * {@code ;} parameters removed, so a prefix check on the raw URI ({@code /api;x=1/...}, {@code
  * /%61pi/...}) would let a request reach a handler unguarded.
@@ -41,10 +43,18 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * Error bodies are fixed text: nothing from the request is echoed.
  */
 @Component
+@Order(LedgerApiGuardFilter.ORDER)
 @EnableConfigurationProperties(LedgerApiProperties.class)
 public class LedgerApiGuardFilter extends OncePerRequestFilter {
 
     public static final String CSRF_HEADER = "X-Saiman-Csrf";
+
+    /**
+     * Before Spring Security's filter chain ({@link SecurityFilterProperties#DEFAULT_FILTER_ORDER}): a foreign Host, a
+     * non-canonical path or a missing CSRF header is refused before any bearer token is read (ADR-0023).
+     */
+    public static final int ORDER = SecurityFilterProperties.DEFAULT_FILTER_ORDER - 10;
+
     private static final Set<String> STATE_CHANGING = Set.of("POST", "PUT", "PATCH", "DELETE");
     private static final String HEALTH = "/actuator/health";
     private static final Set<String> WITH_BODY = Set.of("POST", "PUT", "PATCH");

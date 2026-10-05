@@ -82,6 +82,7 @@ class ActuatorEndpointsTests {
                 "/actuator/metrics"
             })
     void otherActuatorEndpointsDoNotExist(String uri) {
-        client.get().uri(uri).exchange().expectStatus().isNotFound();
+        // Denied by the security chain (ADR-0023) even for an OPERATOR, before the (absent) endpoint is looked up.
+        client.get().uri(uri).exchange().expectStatus().isForbidden();
     }
 }
