@@ -2,7 +2,7 @@
 # Reports whether each secret file exists, is empty or holds data, and its mode. Never
 # prints contents (or lengths beyond empty/non-empty). Mounted secrets (mkk_credentials,
 # openai_api_key, x402_buyer_private_key) must be 0644 so the container user can read them; the protection is the
-# 0700 secrets/ directory. buyer.key (console buyer only) is not mounted and stays 0600.
+# 0700 secrets/ directory. buyer.key (console buyer only) and the human API tokens (api_reader_token, api_operator_token) are not mounted and stay 0600.
 set -euo pipefail
 
 dir="${SECRETS_DIR:-secrets}"
@@ -15,7 +15,12 @@ if [[ -d "$dir" ]]; then
   fi
 fi
 
-for entry in mkk_credentials:644 openai_api_key:644 x402_buyer_private_key:644 buyer.key:600; do
+entries=(mkk_credentials:644 openai_api_key:644 x402_buyer_private_key:644 buyer.key:600
+  api_reader_token:600 api_operator_token:600 seller_service_token_ledger:644 seller_service_token_evals:644)
+for svc in orchestrator ledger seller_api ingest; do
+  entries+=("pg_${svc}_owner_password:644" "pg_${svc}_app_password:644")
+done
+for entry in "${entries[@]}"; do
   name="${entry%%:*}"
   want="${entry##*:}"
   path="${dir}/${name}"
