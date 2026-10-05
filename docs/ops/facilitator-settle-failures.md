@@ -89,7 +89,7 @@ Our rule stays **never retry `/settle`** until this data says otherwise.
 
 - The x402 exact-EVM scheme spec lets a facilitator return `settlement_pending` together with a transaction hash when it has broadcast but not yet confirmed. Our `settlement_pending` answers are classified `ambiguous`.
 - The upstream Go facilitator (`go/mechanisms/evm/exact/facilitator`) maps a failed receipt wait to `invalid_exact_evm_transaction_failed` (and has the separate `invalid_exact_evm_failed_to_get_receipt`), which is why H1 is plausible: the code does not distinguish "reverted" from "could not confirm".
-- x402 issue #2471: facilitator sender-nonce contention on Base Sepolia (supports H2).
+- x402 issue #2471 (https://github.com/x402-foundation/x402/issues/2471, open, 2026-05-26, verified 2026-10-05): *"Hosted facilitator: claim → settle ordering produces `replacement transaction underpriced` and `nothing_to_settle`"*. It concerns the **batch-settlement** flow on Base Sepolia (a `settle` posted before the preceding `claim` is mined reuses the delegated sender's nonce without enough gas bump; plus an indexer lag of about 20-30 s), not the `exact` scheme we use. It shows that the hosted facilitator can suffer sender-nonce and RPC-ordering failures on Base Sepolia, which is why we looked at H2, but it is **not evidence about our failure**; our failures carry a different message (see the experiment below).
 
 ## H5: is the signed `validAfter` back-dated, and does it matter? (analysis 2026-10-05, no code changed)
 
@@ -111,7 +111,7 @@ Our rule stays **never retry `/settle`** until this data says otherwise.
 **Reading**
 - `validAfter` is the same constant for the failed and the successful payments, so it cannot be what separates them. Hypothesis H5 ("the back-dated `validAfter` makes the facilitator's transaction fail") is **not supported**: if it were the cause, the 14 successes would not exist. It is not disproved as a contributing factor in some facilitator-side check we cannot see, but nothing in the data points at it.
 - The two logged failures took 404-465 ms. A transaction that was broadcast and then waited for a receipt on Base Sepolia (about 2 s blocks) would take seconds. A fast rejection fits a failure before or at submission (simulation revert, sender nonce too low or replacement underpriced, gas) and fits H2, not H1; consistent with chain state never being USED. The facilitator's `errorMessage` would settle it, but T7 deliberately never logs it.
-- The position pattern (3 of 4 right after a successful first payment from the same payer, 15-22 s later) fits the sender-nonce contention reported upstream (x402 issue #2471) but is not exclusive: 4 second payments succeeded.
+- The position pattern (3 of 4 right after a successful first payment from the same payer, 15-22 s later) resembles the sender-nonce contention class of problems (a different upstream flow, issue #2471) but is not exclusive: 4 second payments succeeded.
 - Timing note: failures cluster in bursts (the two newest were 5 s apart; 2026-10-01 and 13:05 are single failures inside an otherwise fine burst), which suggests facilitator-side state rather than anything specific to an authorization.
 
 **Is a back-dated `validAfter` harmless for security?** Yes, and "now" would be slightly worse.
@@ -122,6 +122,26 @@ Our rule stays **never retry `/settle`** until this data says otherwise.
 Conclusion: do not change it on security grounds; changing it to `now` or `now - 30` is also safe but is not expected to change the failure rate.
 
 **If an experiment is wanted (not done, needs the human's go):** make `CLOCK_SKEW_SECONDS` configurable (`x402.client.clock-skew-seconds`, default 600, bounds 0-600), run about 20 settles with 30 and compare the failure rate with the current 4 of 18; log the facilitator `errorMessage` only as a truncated (<= 120 chars), charset-restricted (`[A-Za-z0-9 _:.,()-]`), clearly marked untrusted field in the WARN line, with a marker test that a hostile message cannot inject newlines or secrets. "Never retry `/settle`" stays regardless: a rejected settlement with an unknown cause may still have been broadcast.
+
+## Experiment: `validAfter` back-dating 600 s vs 30 s (2026-10-05)
+
+Question: does the back-dated `validAfter` (default `x402.client.clock-skew-seconds` = 600) change the facilitator's settle failure rate? Method: `scripts/ops/x402-skew-experiment.sh` (committed), 40 buys of seller-api's disclosure summary (0.01 test USDC each, one RAG call each) by the console buyer, always the same payer wallet, in 20 pairs 8 s apart (failures so far were often the second payment of a run); the two arms alternate in randomised blocks (every two consecutive pairs hold one of each arm, seeded order), pairs spaced 270 s apart to stay under seller-api's per-payer limit of 30 runs per hour; about 85 minutes in total (2026-10-05 17:50-19:20 UTC). The arm was applied through `X402_CLIENT_CLOCK_SKEW_SECONDS` (a CLI `--x402.client.clock-skew-seconds` argument is **not** forwarded by the sample; a first probe that used it silently ran with 600 and is excluded). Applied values verified on chain from the calldata of one transaction per arm: `validBefore - validAfter` = 660 s (A) and 90 s (B). Outcomes are the seller's own `settlement` rows, matched to buys by time. Raw rows: `docs/ops/data/skew-experiment-2026-10-05.tsv`. `/settle` was not retried anywhere.
+
+| | arm A: skew 600 (default) | arm B: skew 30 |
+|---|---:|---:|
+| settlements attempted | 20 | 20 |
+| SETTLED | 16 | 18 |
+| SETTLE_FAILED (`invalid_exact_evm_transaction_failed`) | **4** | **2** |
+| failure rate (Wilson 95 % interval) | 20 % (8-42 %) | 10 % (3-30 %) |
+| failed as first / second buy of the pair | 3 / 1 | 1 / 1 |
+
+Fisher exact test, two-sided: p = 0.66. Both arms together: 6 of 40 (15 %), in line with the 4 of 18 seen before the experiment.
+
+**Reading, without overstating.** B failed less often (2 vs 4), but the difference is well inside what chance produces at n = 20 per arm (the intervals overlap almost entirely, p = 0.66); an experiment of this size could only have revealed a large effect (for example 40 % against 5 %). The data therefore **neither show an effect of the back-dating nor rule out a small one.** What they do show: all six failures, in both arms, carry the same facilitator message and the same fast rejection; the position-in-pair pattern from the earlier data did not reproduce (3 of 6 failures were first buys). Spend of this experiment: 34 settled buys = 0.34 test USDC (+ 0.02 of probes, + earlier demo runs), LLM about $0.0014 (llmDay 0.050655 -> 0.052087 USD); failed settlements charge nothing.
+
+**The facilitator's own error text** (first 120 chars after sanitising, identical in all six failures, status 200, 389-450 ms): `Missing or invalid parameters. Double check you have provided the correct parameters. URL: https://sepolia.base.org Req...`. That is the shape of a JSON-RPC "invalid params" error (code -32602) from an HTTP client talking to the public endpoint `https://sepolia.base.org`, i.e. the facilitator's RPC call failed, not the EIP-3009 authorization. It is **H6**: the failure is in the facilitator's RPC layer (an invalid or rejected request to the public Base Sepolia node during simulation or submission), upstream of anything the client controls. This fits the fast rejection (no receipt wait), `chainState` never USED and the lack of any dependence on `validAfter`. It does not identify the RPC method; the 120-character cap cuts the text before the request body. Proposed (not done): raise the cap for this field to 300 characters; the hex and 0x scrubbing already removes signatures and raw transactions.
+
+**Decision.** The default stays 600 (the data do not support changing it; per the human's rule it is not changed without asking). Back-dating remains safe (see H5). Mitigations that address H6 are outside our code: a different facilitator, or a facilitator on a dedicated RPC; the unconditional `/settle` no-retry rule stays.
 
 ## Observations log
 
