@@ -66,6 +66,8 @@ bad_pull_policy=$(jq -r '
   .services
   | to_entries[]
   | select((.value.profiles // []) | index("apps"))
+  # `web` is the one apps-profile service that runs a registry image (pinned nginx, rule 5).
+  | select(.key != "web")
   | select(.value.pull_policy != "never")
   | "\(.key): pull_policy is \"\(.value.pull_policy // "<unset>")\" (must be \"never\")"
 ' <<<"${config_json}")
@@ -188,8 +190,46 @@ if [[ -n "${bad_kafka}" ]]; then
   violations=1
 fi
 
+# 5. The dashboard `web` service (M5, ADR-0022) is a plain nginx serving static files and
+#    proxying same-origin paths. It must stay inert: a pinned registry image, one loopback port
+#    mapping to container port 80, no environment/env_file/secrets/configs, and exactly two
+#    read-only bind mounts (web/dist and nginx.conf). The nginx.conf itself is checked by
+#    scripts/check-nginx-conf.sh.
+bad_web=$(jq -r '
+  (.services.web // empty) as $w
+  | ( select(($w.image // "") | test("^nginx:[0-9]+\\.[0-9]+\\.[0-9]+-alpine$") | not)
+      | "web: image \"\($w.image // "<unset>")\" must be a pinned nginx:<major.minor.patch>-alpine tag" ),
+    ( select(($w.environment // {}) | length > 0)
+      | "web: must not set environment (no env on the dashboard container)" ),
+    ( select(($w.env_file // []) | length > 0)
+      | "web: must not use env_file" ),
+    ( select(($w.secrets // []) | length > 0)
+      | "web: must not mount secrets" ),
+    ( select(($w.configs // []) | length > 0)
+      | "web: must not use configs" ),
+    ( ($w.ports // [])[] | select((type == "string") or .host_ip != "127.0.0.1" or .target != 80)
+      | "web: ports must be 127.0.0.1:<port>:80 only" ),
+    ( [($w.volumes // [])[] | select(.type == "bind" and (.read_only // false) and
+          ((.target == "/usr/share/nginx/html" and (.source | endswith("/web/dist")))
+           or (.target == "/etc/nginx/conf.d/default.conf" and (.source | endswith("/nginx.conf")))))]
+      as $ok
+      | select((($w.volumes // []) | length) != 2 or ($ok | length) != 2)
+      | "web: volumes must be exactly ../../web/dist -> /usr/share/nginx/html:ro and ./nginx.conf -> /etc/nginx/conf.d/default.conf:ro" )
+' <<<"${config_json}")
+if [[ -n "${bad_web}" ]]; then
+  fail_check "web (dashboard) service outside its constraints:"
+  echo "${bad_web}" >&2
+  violations=1
+fi
+
+# The conf is only checked for the real compose file (fixtures have no nginx.conf next to them);
+# NGINX_CONF may point elsewhere, see scripts/check-nginx-conf.sh.
+if [[ "${COMPOSE_FILE}" == "deploy/compose/docker-compose.yml" ]]; then
+  "$(dirname "${BASH_SOURCE[0]}")/check-nginx-conf.sh" || violations=1
+fi
+
 if [[ ${violations} -ne 0 ]]; then
   exit 1
 fi
 
-echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, secrets: allowlist enforced, no OPENAI_* env, plaintext-hosts pinned to seller-api, chain RPC pinned to sepolia.base.org on ledger/orchestrator only, credit-note corroboration pinned to seller-api, Kafka auto-create off and controller local)"
+echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, secrets: allowlist enforced, no OPENAI_* env, plaintext-hosts pinned to seller-api, chain RPC pinned to sepolia.base.org on ledger/orchestrator only, credit-note corroboration pinned to seller-api, Kafka auto-create off and controller local, dashboard web service constrained)"

@@ -1,0 +1,13 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# expect: web: must not set environment
+name: cptest-web-env
+services:
+  web:
+    image: nginx:1.30.5-alpine
+    environment:
+      NGINX_ENVSUBST_OUTPUT_DIR: /tmp
+    ports:
+      - "127.0.0.1:8088:80"
+    volumes:
+      - ./web/dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
