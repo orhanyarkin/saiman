@@ -15,6 +15,8 @@ import io.github.orhanyarkin.saiman.shared.retrieval.RetrievedChunk;
 import io.github.orhanyarkin.x402.server.X402PaymentContext;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -84,6 +86,10 @@ class GroundedGenerator {
 
     static final String LINK_REMOVED = "[link removed]";
 
+    /** KAP publishes in Turkish time; the offset keeps the instant exact. */
+    private static final DateTimeFormatter PUBLISHED =
+            DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneId.of("Europe/Istanbul"));
+
     private static final String RULES = """
             You are a research assistant for public Turkish capital-markets (KAP) disclosures.
             The user message contains excerpts, each delimited by <<<EXCERPT id=...>>> and <<<END EXCERPT>>>,
@@ -147,6 +153,8 @@ class GroundedGenerator {
      * @param task the task text; treated as untrusted whatever its origin
      * @param deadline the request's time budget: no model call past it, and no answer returned after it
      *     (the caller must hold a run slot, see {@link #withRunSlot})
+     * @param dated whether each excerpt carries a {@code published:} line with the disclosure's KAP
+     *     publication time (Europe/Istanbul), so the model can answer date questions
      * @throws InsufficientTimeException if less than the model timeout was left before the call
      *     (nothing is sent then)
      * @throws ModelUnavailableException if the router refused or failed, or the deadline passed during
@@ -161,11 +169,12 @@ class GroundedGenerator {
             List<RetrievedChunk> excerpts,
             String taskLabel,
             String task,
-            Deadline deadline) {
+            Deadline deadline,
+            boolean dated) {
         requireTimeForModel(deadline);
         HttpServletRequest request = currentRequest();
         String system = RULES + "{\"" + textField + "\": \"...\", \"citedChunkIds\": [\"kap:...\"]}";
-        String user = userMessage(excerpts, taskLabel, task);
+        String user = userMessage(excerpts, taskLabel, task, dated);
         @Nullable String raw;
         try {
             raw = router.chatClient(tier, dataClass)
@@ -180,7 +189,7 @@ class GroundedGenerator {
             if (!provablyNotSent(e)) {
                 X402PaymentContext.markWorkDone(request);
             }
-            throw new ModelUnavailableException();
+            throw new ModelUnavailableException(causedBy(e, DailyCapExceededException.class));
         }
         // The model ran (and may have been billed): if this request now ends non-2xx, the starter
         // must keep the nonce claim so the same authorization can not buy another run.
@@ -231,6 +240,17 @@ class GroundedGenerator {
         return false;
     }
 
+    /** True when {@code type} is in the first few causes of {@code failure}. */
+    private static boolean causedBy(Throwable failure, Class<? extends Throwable> type) {
+        Throwable t = failure;
+        for (int depth = 0; t != null && depth < 8; depth++, t = t.getCause()) {
+            if (type.isInstance(t)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static HttpServletRequest currentRequest() {
         if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
             return attributes.getRequest();
@@ -238,11 +258,17 @@ class GroundedGenerator {
         throw new RunGuardUnavailableException();
     }
 
-    private static String userMessage(List<RetrievedChunk> excerpts, String taskLabel, String task) {
+    static String userMessage(List<RetrievedChunk> excerpts, String taskLabel, String task, boolean dated) {
         StringBuilder message = new StringBuilder();
         for (RetrievedChunk chunk : excerpts) {
             message.append("<<<EXCERPT id=").append(chunk.chunkId()).append(">>>\n");
             message.append("title: ").append(neutralise(chunk.title())).append('\n');
+            if (dated) {
+                // From ingest's metadata, not from the untrusted text: chunk text rarely carries the date.
+                message.append("published: ")
+                        .append(PUBLISHED.format(chunk.publishedAt()))
+                        .append('\n');
+            }
             message.append(neutralise(chunk.text())).append('\n');
             message.append("<<<END EXCERPT>>>\n\n");
         }
