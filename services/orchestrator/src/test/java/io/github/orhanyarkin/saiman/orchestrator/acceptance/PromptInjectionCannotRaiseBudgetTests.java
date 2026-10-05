@@ -255,13 +255,13 @@ class PromptInjectionCannotRaiseBudgetTests extends AgentRunTestSupport {
         }
     }
 
-    /** Not even a direct SQL UPDATE can change a run's budget (the V2 trigger). */
+    /** Not even a direct SQL UPDATE can change a run's budget (no column grant since V11; the V2 trigger is behind it). */
     private void assertTheBudgetRowIsImmutable(UUID runId, long budget) {
         assertThatThrownBy(() -> jdbc.sql("UPDATE run SET budget_atomic = 100000000 WHERE id = :id")
                         .param("id", runId)
                         .update())
                 .isInstanceOf(DataAccessException.class)
-                .hasMessageContaining("immutable");
+                .hasRootCauseMessage("ERROR: permission denied for table run");
         assertThat(run(runId).budget()).isEqualTo(budget);
     }
 }

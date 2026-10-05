@@ -5,12 +5,21 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.SpendTestSupport;
 import io.github.orhanyarkin.saiman.testsupport.PostgresContainerConfiguration.SuperuserDatabase;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -108,6 +117,102 @@ class RuntimeRoleGrantsTests extends SpendTestSupport {
                         .query(Integer.class)
                         .single())
                 .isEqualTo(1);
+    }
+
+    @Test
+    void appendOnlyTablesAcceptInsertsOnly() {
+        for (String table : List.of("run_event", "tool_result", "payment_event_log")) {
+            for (String privilege : List.of("UPDATE", "DELETE", "TRUNCATE")) {
+                assertThat(hasTablePrivilege(table, privilege))
+                        .as(table + " " + privilege)
+                        .isFalse();
+            }
+            assertThat(hasTablePrivilege(table, "INSERT")).as(table + " INSERT").isTrue();
+        }
+        assertThat(sqlState(
+                        () -> jdbc.sql("UPDATE run_event SET payload = payload").update()))
+                .isEqualTo(PERMISSION_DENIED);
+        assertThat(sqlState(() -> jdbc.sql("DELETE FROM tool_result").update())).isEqualTo(PERMISSION_DENIED);
+        assertThat(sqlState(() -> jdbc.sql("DELETE FROM payment_event_log").update()))
+                .isEqualTo(PERMISSION_DENIED);
+    }
+
+    @Test
+    void whatARowSaidWhenItWasInsertedCannotBeChangedButItsStateCan() {
+        UUID run = createRun(50_000);
+        assertThat(sqlState(() -> jdbc.sql("UPDATE run SET question = 'x' WHERE id = :id")
+                        .param("id", run)
+                        .update()))
+                .isEqualTo(PERMISSION_DENIED);
+        assertThat(sqlState(() -> jdbc.sql("UPDATE run SET llm_budget_usd_micros = 1 WHERE id = :id")
+                        .param("id", run)
+                        .update()))
+                .isEqualTo(PERMISSION_DENIED);
+        assertThat(sqlState(() ->
+                        jdbc.sql("UPDATE payment_intent SET resource = 'x'").update()))
+                .isEqualTo(PERMISSION_DENIED);
+        assertThat(sqlState(() -> jdbc.sql("UPDATE payment_intent SET idempotency_key = 'x'")
+                        .update()))
+                .isEqualTo(PERMISSION_DENIED);
+        assertThat(sqlState(
+                        () -> jdbc.sql("UPDATE approval SET amount_atomic = 1").update()))
+                .isEqualTo(PERMISSION_DENIED);
+        assertThat(sqlState(() -> jdbc.sql("UPDATE approval SET pay_to = 'x'").update()))
+                .isEqualTo(PERMISSION_DENIED);
+        for (String column : List.of("status", "decided_at", "decided_by")) {
+            assertThat(hasColumnPrivilege("approval", column))
+                    .as("approval." + column)
+                    .isTrue();
+        }
+        assertThat(hasColumnPrivilege("approval", "amount_atomic")).isFalse();
+        assertThat(hasColumnPrivilege("run", "status")).isTrue();
+        assertThat(hasColumnPrivilege("run", "budget_atomic")).isFalse();
+        assertThat(hasColumnPrivilege("payment_intent", "status")).isTrue();
+        assertThat(hasColumnPrivilege("spend_day", "committed_atomic")).isTrue();
+        jdbc.sql("UPDATE run SET status = 'FAILED' WHERE id = :id")
+                .param("id", run)
+                .update();
+    }
+
+    /** The code deletes nothing itself: the only DELETE the app role may hold is Modulith's on event_publication. */
+    @Test
+    void theAppRoleHoldsDeleteOnlyWhereTheCodeNeedsIt() throws IOException {
+        Set<String> deletedByCode = new TreeSet<>(Set.of("event_publication")); // Spring Modulith's registry
+        Pattern delete = Pattern.compile("DELETE\\s+FROM\\s+([a-z_]+)");
+        try (Stream<Path> sources = Files.walk(Path.of("src/main/java"))) {
+            for (Path source :
+                    sources.filter(p -> p.toString().endsWith(".java")).toList()) {
+                Matcher matcher = delete.matcher(Files.readString(source));
+                while (matcher.find()) {
+                    deletedByCode.add(matcher.group(1));
+                }
+            }
+        }
+
+        List<String> granted = jdbc.sql("SELECT table_name FROM information_schema.role_table_grants"
+                        + " WHERE grantee = current_user AND privilege_type = 'DELETE' AND table_schema = 'orchestrator'"
+                        + " ORDER BY table_name")
+                .query(String.class)
+                .list();
+
+        assertThat(granted).containsExactlyElementsOf(deletedByCode);
+    }
+
+    private boolean hasTablePrivilege(String table, String privilege) {
+        return Boolean.TRUE.equals(jdbc.sql("SELECT has_table_privilege(current_user, :table, :privilege)")
+                .param("table", "orchestrator." + table)
+                .param("privilege", privilege)
+                .query(Boolean.class)
+                .single());
+    }
+
+    /** Column-level UPDATE; has_column_privilege is also true when the whole table is granted. */
+    private boolean hasColumnPrivilege(String table, String column) {
+        return Boolean.TRUE.equals(jdbc.sql("SELECT has_column_privilege(current_user, :table, :column, 'UPDATE')")
+                .param("table", "orchestrator." + table)
+                .param("column", column)
+                .query(Boolean.class)
+                .single());
     }
 
     @Test
