@@ -10,14 +10,17 @@ import java.util.Locale;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.security.autoconfigure.web.servlet.SecurityFilterProperties;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Protects the orchestrator, whose {@code /api/**} has no authentication yet (orchestrator auth is
- * M6 hardening), from a web page in the operator's browser. Applied to <em>every</em> request, not
+ * Protects the orchestrator from a web page in the operator's browser, <em>before</em> authentication: ordered ahead of
+ * the Spring Security chain, so a foreign {@code Host}, a missing CSRF header or a non-canonical path is refused
+ * (400/403/413) whether or not the request carries a valid token (ADR-0023). Applied to <em>every</em> request, not
  * only to paths that look like {@code /api/}: Spring MVC matches handlers on the decoded path with
  * {@code ;} parameters removed, so a prefix check on the raw URI ({@code /api;x=1/...}, {@code
  * /%61pi/...}) would let a request reach a handler unguarded.
@@ -41,6 +44,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * Error bodies are fixed text: nothing from the request is echoed.
  */
 @Component
+@Order(SecurityFilterProperties.DEFAULT_FILTER_ORDER - 10)
 @EnableConfigurationProperties(ApiGuardProperties.class)
 public class ApiRequestGuardFilter extends OncePerRequestFilter {
 

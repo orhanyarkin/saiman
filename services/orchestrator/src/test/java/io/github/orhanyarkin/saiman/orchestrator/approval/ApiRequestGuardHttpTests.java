@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.orchestrator.approval;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.orhanyarkin.saiman.apisecurity.testfixtures.TestTokens;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentApprovalRequiredException;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentHandle;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.SpendTestSupport;
@@ -160,12 +161,19 @@ class ApiRequestGuardHttpTests extends SpendTestSupport {
         return raw(request.toString());
     }
 
+    /** Adds the OPERATOR token after the request line; the guard answers first, so rejections do not depend on it. */
+    private static String withOperatorToken(String request) {
+        int lineEnd = request.indexOf("\r\n");
+        return request.substring(0, lineEnd + 2) + "Authorization: " + TestTokens.bearer(TestTokens.OPERATOR) + "\r\n"
+                + request.substring(lineEnd + 2);
+    }
+
     /** Writes the request bytes as given and returns the response status code. */
     private int raw(String request) throws IOException {
         try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(10_000);
             OutputStream out = socket.getOutputStream();
-            out.write(request.getBytes(StandardCharsets.US_ASCII));
+            out.write(withOperatorToken(request).getBytes(StandardCharsets.US_ASCII));
             out.flush();
             BufferedReader in =
                     new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));

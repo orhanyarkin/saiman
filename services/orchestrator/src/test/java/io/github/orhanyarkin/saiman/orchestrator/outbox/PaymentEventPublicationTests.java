@@ -236,7 +236,8 @@ class PaymentEventPublicationTests extends SpendTestSupport {
         } catch (PaymentApprovalRequiredException e) {
             approvalId = e.approvalId();
         }
-        approvals.decide(run, approvalId, ApprovalDecision.APPROVE); // ApprovalDecidedEvent -> ApprovalWaiter
+        approvals.decide(
+                run, approvalId, ApprovalDecision.APPROVE, "OPERATOR:test"); // ApprovalDecidedEvent -> ApprovalWaiter
         runEvents.append(run, RunEventType.STEP_STARTED, new RunEventData.StepChanged(AgentStep.RESEARCHER)); // -> bus
         assertThat(client.send(handle, null).paid()).isTrue();
 

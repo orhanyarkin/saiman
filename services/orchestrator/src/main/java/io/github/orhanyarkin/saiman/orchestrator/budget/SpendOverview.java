@@ -14,9 +14,24 @@ import org.jspecify.annotations.Nullable;
  * @param dayReserved reserved (including held) spend counted on the day
  * @param dayCommitted settled spend counted on the day
  * @param byTool the day's payment intents by tool and status
+ * @param llmDay today's (UTC) global model-cost cap, whatever {@code day} was asked for (ADR-0026)
  */
 public record SpendOverview(
-        LocalDate day, Money dailyCap, Money dayReserved, Money dayCommitted, Limits limits, List<ByTool> byTool) {
+        LocalDate day,
+        Money dailyCap,
+        Money dayReserved,
+        Money dayCommitted,
+        Limits limits,
+        List<ByTool> byTool,
+        LlmDay llmDay) {
+
+    /**
+     * The global daily LLM cap (ADR-0011, ADR-0026) as plain integers: USD micro-dollars spent or reserved today
+     * (UTC) and the cap. When {@code spentUsdMicros >= capUsdMicros} new public runs are answered with the replay
+     * offer.
+     */
+    @Schema(name = "SpendLlmDay")
+    public record LlmDay(long spentUsdMicros, long capUsdMicros) {}
 
     /**
      * The spend limits as configured (read-only: no endpoint changes them).

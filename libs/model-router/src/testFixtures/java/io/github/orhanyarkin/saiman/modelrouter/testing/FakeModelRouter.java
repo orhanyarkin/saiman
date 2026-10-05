@@ -1,8 +1,10 @@
 package io.github.orhanyarkin.saiman.modelrouter.testing;
 
+import io.github.orhanyarkin.saiman.modelrouter.DailyCapStatus;
 import io.github.orhanyarkin.saiman.modelrouter.DataClass;
 import io.github.orhanyarkin.saiman.modelrouter.ModelRouter;
 import io.github.orhanyarkin.saiman.modelrouter.Tier;
+import io.github.orhanyarkin.saiman.shared.money.Money;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -61,6 +63,20 @@ public final class FakeModelRouter implements ModelRouter {
     public EmbeddingModel embeddingModel(DataClass dataClass) {
         throwIfRefusing();
         return embeddingModel;
+    }
+
+    /** The cap a fake reports until a test sets one: nothing spent of $0.70. */
+    private volatile DailyCapStatus dailyCap = new DailyCapStatus(Money.usdMicros(0), Money.usdMicros(700_000));
+
+    /** Sets what {@link #dailyCap()} reports, to test how a caller degrades when the cap is (nearly) used up. */
+    public FakeModelRouter withDailyCap(DailyCapStatus status) {
+        this.dailyCap = status;
+        return this;
+    }
+
+    @Override
+    public DailyCapStatus dailyCap() {
+        return dailyCap;
     }
 
     private void throwIfRefusing() {
