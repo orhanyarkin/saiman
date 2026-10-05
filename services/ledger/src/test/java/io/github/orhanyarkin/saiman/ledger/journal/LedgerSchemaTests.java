@@ -20,6 +20,7 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.SplittableRandom;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -184,6 +185,76 @@ class LedgerSchemaTests {
                 .isEqualTo(1600L);
     }
 
+    /** V7: insert-only records refuse UPDATE, DELETE and TRUNCATE from the runtime role. */
+    @Test
+    void insertOnlyRecordsRefuseRewritesFromTheRuntimeRole() {
+        Map<String, String> anyColumn = Map.of(
+                "reconciliation_mismatch", "kind",
+                "reconciliation_item", "status",
+                "credit_note_corroboration", "tx_hash",
+                "account", "code",
+                "inbox", "topic");
+        anyColumn.forEach((table, column) -> {
+            for (String sql : List.of(
+                    "UPDATE " + table + " SET " + column + " = " + column + " WHERE false",
+                    "DELETE FROM " + table + " WHERE false",
+                    "TRUNCATE " + table)) {
+                assertRefused(sql);
+            }
+        });
+    }
+
+    /** ADR-0024: the runtime role has DML only; no DDL anywhere, no sequence resets, no trigger or function changes. */
+    @Test
+    void theRuntimeRoleCannotChangeTheSchema() {
+        for (String sql : List.of(
+                "CREATE TABLE ledger.app_made (id int)",
+                "CREATE TABLE public.app_made (id int)",
+                "CREATE FUNCTION ledger.app_made() RETURNS int LANGUAGE sql AS 'SELECT 1'",
+                "DROP TRIGGER posting_immutable ON posting",
+                "ALTER FUNCTION reject_ledger_change() RENAME TO app_renamed",
+                "DROP FUNCTION reject_ledger_change() CASCADE",
+                "ALTER TABLE posting OWNER TO ledger_app")) {
+            assertRefused(sql);
+        }
+    }
+
+    /** Default privileges: what ledger_owner creates after V7 is usable by ledger_app; Flyway's history is not. */
+    @Test
+    void laterOwnerObjectsGetTheDefaultGrantsButNotSequenceResets() {
+        JdbcClient owner = Superuser.owner(superuserDatabase);
+        String suffix = UUID.randomUUID().toString().replace("-", "");
+        String table = "later_" + suffix;
+        String sequence = "later_seq_" + suffix;
+        owner.sql("CREATE TABLE " + table + " (id int)").update();
+        owner.sql("CREATE SEQUENCE " + sequence).update();
+        try {
+            jdbc.sql("INSERT INTO " + table + " VALUES (1)").update();
+            assertThat(jdbc.sql("SELECT count(*) FROM " + table)
+                            .query(Long.class)
+                            .single())
+                    .isOne();
+            assertThat(jdbc.sql("SELECT nextval('" + sequence + "')")
+                            .query(Long.class)
+                            .single())
+                    .isOne();
+            assertRefused("SELECT setval('" + sequence + "', 100)");
+            assertRefused("SELECT count(*) FROM flyway_schema_history");
+        } finally {
+            owner.sql("DROP TABLE " + table).update();
+            owner.sql("DROP SEQUENCE " + sequence).update();
+        }
+    }
+
+    private void assertRefused(String sql) {
+        assertThatThrownBy(() -> jdbc.sql(sql).query().listOfRows())
+                .as(sql)
+                .isInstanceOf(DataAccessException.class)
+                .satisfies(e -> assertThat(
+                                NestedExceptionUtils.getMostSpecificCause(e).getMessage())
+                        .containsAnyOf("permission denied", "must be owner"));
+    }
+
     @Test
     void oncePerPaymentKindsAreUniquePerBook() {
         TestPayment payment = TestPayment.random(new SplittableRandom(7), 20_000);
@@ -203,7 +274,8 @@ class LedgerSchemaTests {
 
     /**
      * ADR-0017's known gap, which scripts/ledger-tamper-demo.sh relies on: a superuser session in replica mode
-     * skips the immutability triggers. Since M6 (ADR-0024) only the superuser can; the runtime role can't (above).
+     * skips the immutability triggers. Since M6 (ADR-0024) only a superuser or anyone holding the ledger_owner credential can; the runtime role
+     * can't (above).
      */
     @Test
     void replicaModeBypassesTheTriggersAsTheTamperDemoExpects() throws SQLException {

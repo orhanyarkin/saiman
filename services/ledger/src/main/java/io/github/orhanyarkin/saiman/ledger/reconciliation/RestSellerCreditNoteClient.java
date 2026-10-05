@@ -6,6 +6,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.core.IntervalFunction;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
+import io.micrometer.common.KeyValue;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
@@ -22,6 +23,9 @@ import org.springframework.boot.http.client.HttpClientSettings;
 import org.springframework.boot.http.client.HttpRedirects;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.observation.ClientHttpObservationDocumentation;
+import org.springframework.http.client.observation.ClientRequestObservationContext;
+import org.springframework.http.client.observation.DefaultClientRequestObservationConvention;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
@@ -88,6 +92,7 @@ public class RestSellerCreditNoteClient implements SellerCreditNoteClient {
         this.client = RestClient.builder()
                 .requestFactory(ClientHttpRequestFactoryBuilder.jdk().build(settings))
                 .observationRegistry(observations)
+                .observationConvention(new KeyFreeObservationConvention(baseUrl))
                 .build();
         this.breaker = CircuitBreaker.of(
                 "seller-credit-notes",
@@ -126,6 +131,9 @@ public class RestSellerCreditNoteClient implements SellerCreditNoteClient {
                             Optional<SellerCreditNote> found = retried.get();
                             outcome[0] = found.isPresent() ? "found" : "not_found";
                             return found;
+                        } catch (SellerUnauthorizedException e) {
+                            outcome[0] = "unauthorized";
+                            throw e;
                         } catch (CallNotPermittedException e) {
                             outcome[0] = "circuit_open";
                             throw new SellerUnavailableException("seller circuit is open");
@@ -153,6 +161,9 @@ public class RestSellerCreditNoteClient implements SellerCreditNoteClient {
                         }
                         // 401/403 (wrong or missing service token) and any other status: no definite answer, so the
                         // payment stays PENDING; never "no credit note", never a mismatch.
+                        if (status == 401 || status == 403) {
+                            throw new SellerUnauthorizedException("seller answered HTTP " + status);
+                        }
                         if (status != 200 && status != 404) {
                             throw new SellerUnavailableException("seller answered HTTP " + status);
                         }
@@ -229,6 +240,34 @@ public class RestSellerCreditNoteClient implements SellerCreditNoteClient {
 
     private static SellerUnavailableException malformed() {
         return new SellerUnavailableException("seller response malformed");
+    }
+
+    /** The request path as a template: what spans and metrics may carry instead of the literal path. */
+    static final String PATH_TEMPLATE = "/internal/credit-notes/{paymentKey}";
+
+    /**
+     * Spring's default client convention puts the full request URL into the span ({@code http.url}); here that is the
+     * payment key (payer and nonce). The request is sent to a literal URI (no template expansion, so the key's colons
+     * stay unencoded), so the template is supplied here instead, for both the {@code uri} tag and {@code http.url}.
+     */
+    static final class KeyFreeObservationConvention extends DefaultClientRequestObservationConvention {
+
+        private final String baseUrl;
+
+        KeyFreeObservationConvention(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        @Override
+        protected KeyValue uri(ClientRequestObservationContext context) {
+            return KeyValue.of(ClientHttpObservationDocumentation.LowCardinalityKeyNames.URI, PATH_TEMPLATE);
+        }
+
+        @Override
+        protected KeyValue requestUri(ClientRequestObservationContext context) {
+            return KeyValue.of(
+                    ClientHttpObservationDocumentation.HighCardinalityKeyNames.HTTP_URL, baseUrl + PATH_TEMPLATE);
+        }
     }
 
     /** IO errors, 429 and 5xx: retried and counted by the breaker. */

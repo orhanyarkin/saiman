@@ -6,8 +6,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerCreditNote;
+import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerUnauthorizedException;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerUnavailableException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationHandler;
 import io.micrometer.observation.ObservationRegistry;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -57,13 +60,28 @@ class RestSellerCreditNoteClientTests {
     private final List<String> authorizations = new CopyOnWriteArrayList<>();
     private HttpServer server;
     private RestSellerCreditNoteClient client;
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    private final List<Observation.Context> observed = new CopyOnWriteArrayList<>();
+    private String base;
 
     @BeforeEach
     void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", this::handle);
         server.start();
-        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        base = "http://127.0.0.1:" + server.getAddress().getPort();
+        ObservationRegistry observations = ObservationRegistry.create();
+        observations.observationConfig().observationHandler(new ObservationHandler<Observation.Context>() {
+            @Override
+            public boolean supportsContext(Observation.Context context) {
+                return true;
+            }
+
+            @Override
+            public void onStop(Observation.Context context) {
+                observed.add(context);
+            }
+        });
         client = new RestSellerCreditNoteClient(
                 new SellerProperties(
                         base,
@@ -74,8 +92,8 @@ class RestSellerCreditNoteClientTests {
                         Duration.ofMillis(1),
                         Duration.ofSeconds(30),
                         TOKEN + "\n"), // as read from a configtree file
-                ObservationRegistry.NOOP,
-                new SimpleMeterRegistry());
+                observations,
+                meters);
     }
 
     @AfterEach
@@ -232,6 +250,7 @@ class RestSellerCreditNoteClientTests {
         queue(Reply.of(401, "application/problem+json", "{\"status\":401,\"detail\":\"Authentication required\"}"));
         assertThatThrownBy(() -> client.find(KEY))
                 .isInstanceOf(SellerUnavailableException.class)
+                .isInstanceOf(SellerUnauthorizedException.class)
                 .hasMessage("seller answered HTTP 401");
         assertThat(paths).hasSize(1);
 
@@ -242,6 +261,35 @@ class RestSellerCreditNoteClientTests {
         assertThat(paths).hasSize(2);
 
         assertThat(output.getAll()).doesNotContain(TOKEN);
+        assertThat(meters.counter("saiman.ledger.seller.credit_note_lookups", "outcome", "unauthorized")
+                        .count())
+                .isEqualTo(2.0);
+        assertThat(meters.counter("saiman.ledger.seller.credit_note_lookups", "outcome", "unavailable")
+                        .count())
+                .isZero();
+    }
+
+    @Test
+    void spansCarryThePathTemplateNeverThePaymentKey() {
+        queue(Reply.of(200, "application/json", FOUND));
+
+        assertThat(client.find(KEY)).isPresent();
+
+        Observation.Context http = observed.stream()
+                .filter(c -> "http.client.requests".equals(c.getName()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(http.getHighCardinalityKeyValue("http.url").getValue())
+                .isEqualTo(base + "/internal/credit-notes/{paymentKey}");
+        assertThat(http.getLowCardinalityKeyValue("uri").getValue()).isEqualTo("/internal/credit-notes/{paymentKey}");
+        String payer = "0x" + "12".repeat(20);
+        for (Observation.Context context : observed) {
+            context.getAllKeyValues()
+                    .forEach(kv -> assertThat(kv.getValue())
+                            .as(context.getName() + " " + kv.getKey())
+                            .doesNotContain(payer)
+                            .doesNotContain(TOKEN));
+        }
     }
 
     @Test

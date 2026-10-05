@@ -17,6 +17,15 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA ${flyway:defaultSchema}
 REVOKE ALL ON TABLE ${flyway:defaultSchema}.flyway_schema_history FROM ${app_role};
 
 -- Append-only books (ADR-0017): the immutability triggers stay as the second line; the runtime role is refused by
--- privilege before they even fire. Only a superuser (scripts/ledger-tamper-demo.sh) can still bypass them.
+-- privilege before they even fire. A superuser (scripts/ledger-tamper-demo.sh) or anyone holding the ledger_owner
+-- credential can still bypass them (the owner may disable its own triggers).
 REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ${flyway:defaultSchema}.journal_entry FROM ${app_role};
 REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ${flyway:defaultSchema}.posting FROM ${app_role};
+
+-- Insert-only records: the service never updates or deletes them (findings, run items, corroborations, the chart of
+-- accounts, the inbox). payment, reconciliation_run and event_publication stay writable: the code mutates them.
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ${flyway:defaultSchema}.reconciliation_mismatch FROM ${app_role};
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ${flyway:defaultSchema}.reconciliation_item FROM ${app_role};
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ${flyway:defaultSchema}.credit_note_corroboration FROM ${app_role};
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ${flyway:defaultSchema}.account FROM ${app_role};
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ${flyway:defaultSchema}.inbox FROM ${app_role};
