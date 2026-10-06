@@ -95,6 +95,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Environment protection preflight (before any secret or credential)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENV_AUDIT_TOKEN: ${{ secrets.ENV_AUDIT_TOKEN }}
+        run: deploy/terraform/aws/ops/check-environment-protection.sh demo-apply --require-reviewer
+
       - name: Resolve inputs (image tag, session id, expiry)
         env:
           INPUT_TTL: ${{ inputs.ttl_hours }}

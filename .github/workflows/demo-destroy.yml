@@ -39,6 +39,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Environment protection preflight (before any credential)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENV_AUDIT_TOKEN: ${{ secrets.ENV_AUDIT_TOKEN }}
+        run: deploy/terraform/aws/ops/check-environment-protection.sh demo-destroy
+
       - name: Configure AWS credentials (OIDC, destroy role)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:

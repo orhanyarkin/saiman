@@ -52,5 +52,6 @@ jobs:
       id-token: write
       contents: read
     uses: ./.github/workflows/demo-destroy.yml
+    secrets: inherit
     with:
       only_if_expired: true
