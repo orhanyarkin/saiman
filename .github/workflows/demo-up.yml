@@ -172,6 +172,13 @@ jobs:
           [[ -n "$STATE_BUCKET" ]] || { echo "::error::repository variable TF_STATE_BUCKET is not set"; exit 1; }
           aws sts get-caller-identity --query Account --output text >/dev/null
           echo "AWS credentials ok"
+          # Refuse to start over a live demo (it would overwrite its secrets and expiry).
+          out="$(deploy/terraform/aws/ops/demo-expiry.sh --region "$AWS_REGION")"
+          if grep -qx 'exists=true' <<<"$out" && grep -qx 'expired=false' <<<"$out"; then
+            echo "::error::a demo is already running (see the expiry below). Run demo-down first."
+            grep '^expires_at=' <<<"$out"
+            exit 1
+          fi
 
       - name: Write SSM parameters (SecureString from files) and the expiry
         run: |
@@ -272,5 +279,7 @@ jobs:
             echo "- fix and re-run **demo-up**, or run **demo-down** now;"
             echo "- otherwise the reaper destroys the demo after expiry (\`${EXPIRES_AT:-unknown}\`) and the Scheduler stops compute 30 min later."
             echo "- verify with \`make demo-down-check\` (admin SSO profile) after teardown."
+            echo "- \`Error acquiring the state lock\` after a cancelled run: delete \`demo-lite/terraform.tfstate.tflock\` in the state bucket"
+            echo "  (the destroy role may) or \`terraform force-unlock <lock id>\` with your admin profile, then re-run."
           } >>"$GITHUB_STEP_SUMMARY"
           echo "demo-up failed; see the job summary for next steps."

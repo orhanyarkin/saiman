@@ -144,6 +144,11 @@ expect "expiry: future expiry is not expired" 0 "expired=false" "${ops}/demo-exp
 expect "expiry: past expiry is expired" 0 "expired=true" "${ops}/demo-expiry.sh" --region eu-central-1 --now 2026-10-06T18:00:01Z
 echo '{"TagList":[]}' >"${fx}/ssm_list-tags-for-resource.json"
 expect "expiry: a parameter without a tag counts as expired" 0 "expired=true" "${ops}/demo-expiry.sh" --region eu-central-1
+echo '{"TagList":[{"Key":"expires-at","Value":"2099-01-01T00:00:00Z"}]}' >"${fx}/ssm_list-tags-for-resource.json"
+echo '{"Parameters":[{"Name":"/saiman/demo/expires-at","LastModifiedDate":"2026-10-06T11:00:00+00:00"}]}' >"${fx}/ssm_describe-parameters.json"
+expect "expiry: a 2099 tag on a parameter modified 9h ago is expired (age cap)" 0 "expired=true" "${ops}/demo-expiry.sh" --region eu-central-1 --now 2026-10-06T20:00:00Z
+echo '{"Parameters":[{"Name":"/saiman/demo/expires-at","LastModifiedDate":1791313200.5}]}' >"${fx}/ssm_describe-parameters.json"
+expect "expiry: epoch LastModifiedDate 1h ago keeps a 2099 tag alive" 0 "expired=false" "${ops}/demo-expiry.sh" --region eu-central-1 --now 2026-10-06T20:00:00Z
 if grep -q 'get-parameter' "${fx}/calls.log"; then bad "expiry used get-parameter (denied for the CI roles)"; else ok "expiry never calls get-parameter"; fi
 
 # --- demo-cleanup ---------------------------------------------------------------------------------------------------
@@ -151,12 +156,20 @@ reset
 echo '{"Parameters":[{"Name":"/saiman/demo/openai_api_key"},{"Name":"/saiman/demo/expires-at"},{"Name":"/saiman/demo/pg_master_password"}]}' >"${fx}/ssm_describe-parameters.json"
 echo '{"Versions":[{"Key":"demo/a","VersionId":"v1"}],"DeleteMarkers":[{"Key":"demo/b","VersionId":"v2"}]}' >"${fx}/s3api_list-object-versions.once.json"
 echo '{"taskDefinitionArns":["arn:aws:ecs:eu-central-1:1:task-definition/saiman-demo-lite:1"]}' >"${fx}/ecs_list-task-definitions.json"
-expect "cleanup runs" 0 "deleted /saiman/demo/expires-at" "${ops}/demo-cleanup.sh" --region eu-central-1 --state-bucket saiman-1-tfstate
+expect "cleanup runs" 0 "expires-at kept" "${ops}/demo-cleanup.sh" --region eu-central-1 --state-bucket saiman-1-tfstate
 if grep -q 'delete-parameters --names /saiman/demo/openai_api_key /saiman/demo/pg_master_password' "${fx}/calls.log"; then ok "cleanup deletes the secrets in a batch"; else bad "secret batch delete missing"; fi
-last_ssm="$(grep -E 'ssm delete-parameter' "${fx}/calls.log" | tail -n 1)"
-if [[ "${last_ssm}" == *"delete-parameter --name /saiman/demo/expires-at"* ]]; then ok "expires-at is deleted last"; else bad "expires-at was not the last SSM delete: ${last_ssm}"; fi
 if grep -q 's3api delete-objects --bucket saiman-1-tfstate' "${fx}/calls.log"; then ok "cleanup purges versions and delete markers"; else bad "no s3api delete-objects"; fi
 if grep -q 'ecs deregister-task-definition' "${fx}/calls.log"; then ok "cleanup deregisters ACTIVE task definitions"; else bad "no deregister"; fi
+if grep -q 'delete-parameter --name /saiman/demo/expires-at' "${fx}/calls.log"; then bad "default cleanup deleted expires-at (the reaper must stay armed until the check passed)"; else ok "expires-at survives the default cleanup"; fi
+: >"${fx}/calls.log"
+expect "cleanup --expiry-only deletes expires-at" 0 "deleted /saiman/demo/expires-at" "${ops}/demo-cleanup.sh" --region eu-central-1 --state-bucket saiman-1-tfstate --expiry-only
+if grep -q 'delete-parameter --name /saiman/demo/expires-at' "${fx}/calls.log"; then ok "expires-at deleted by --expiry-only"; else bad "--expiry-only did not delete"; fi
+# Leftovers keep expires-at: the check fails (exit 1) so the workflow never reaches --expiry-only.
+echo '{"Vpcs":[{"VpcId":"vpc-left"}]}' >"${fx}/ec2_describe-vpcs.json"
+expect "teardown check fails on leftovers (so expires-at is kept)" 1 "vpc-left" "${ops}/check-demo-down.sh" --region eu-central-1 --state-bucket saiman-1-tfstate --allow-unverified --ignore-expiry-param
+rm -f "${fx}/ec2_describe-vpcs.json" "${fx}/ecs_list-task-definitions.json"
+echo '{"Parameters":[{"Name":"/saiman/demo/expires-at"}]}' >"${fx}/ssm_describe-parameters.json"
+expect "teardown check ignores only the expires-at parameter" 0 "" "${ops}/check-demo-down.sh" --region eu-central-1 --state-bucket saiman-1-tfstate --allow-unverified --ignore-expiry-param
 if grep -qE 'terraform|ssm (put|get)|ecs (create|run|register|update)' "${fx}/calls.log"; then bad "cleanup made a create/read-secret call"; else ok "cleanup only deletes/lists"; fi
 
 # --- wait-demo-ready ----------------------------------------------------------------------------------------------------

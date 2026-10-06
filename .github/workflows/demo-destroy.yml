@@ -20,7 +20,7 @@ permissions:
 jobs:
   destroy:
     name: demo-destroy
-    if: github.repository == 'orhanyarkin/saiman'
+    if: github.ref == 'refs/heads/main' && github.repository == 'orhanyarkin/saiman'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: demo-destroy
@@ -107,4 +107,24 @@ jobs:
           set -euo pipefail
           # The destroy role cannot list every service; UNVERIFIED checks are printed, not failed.
           # Run `make demo-down-check` with your admin SSO profile for the full, strict check.
-          deploy/terraform/aws/ops/check-demo-down.sh --region "$AWS_REGION" --state-bucket "$STATE_BUCKET" --allow-unverified
+          deploy/terraform/aws/ops/check-demo-down.sh --region "$AWS_REGION" --state-bucket "$STATE_BUCKET" --allow-unverified --ignore-expiry-param
+
+      - name: Disarm the reaper (delete the expiry, only after the check passed)
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: deploy/terraform/aws/ops/demo-cleanup.sh --region "$AWS_REGION" --state-bucket "$STATE_BUCKET" --expiry-only
+
+      - name: Next steps after a failure (the expiry is kept, the reaper retries)
+        if: failure()
+        run: |
+          {
+            echo "### demo-destroy failed"
+            echo ""
+            echo "The expiry parameter is kept, so the reaper retries every 30 minutes. To act now:"
+            echo "- re-run **demo-down**;"
+            echo "- a stale Terraform lock (a cancelled run) shows as \`Error acquiring the state lock\`: delete the object"
+            echo "  \`demo-lite/terraform.tfstate.tflock\` in the state bucket (the destroy role may delete it), or run"
+            echo "  \`terraform force-unlock <lock id>\` with your admin profile, then re-run **demo-down**;"
+            echo "- list what is left: \`make demo-down-check STATE_BUCKET=<bucket>\` (admin SSO profile)."
+          } >>"$GITHUB_STEP_SUMMARY"

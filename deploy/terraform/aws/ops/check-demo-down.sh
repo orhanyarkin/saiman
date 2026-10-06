@@ -33,6 +33,7 @@ usage() {
 region=""
 bucket=""
 strict=1
+ignore_expiry=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --region)
@@ -51,6 +52,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-unverified)
       strict=0
+      shift
+      ;;
+    --ignore-expiry-param)
+      # demo-destroy deletes /saiman/demo/expires-at only AFTER this check passed (it keeps the reaper armed).
+      ignore_expiry=1
       shift
       ;;
     -h | --help) usage ;;
@@ -180,7 +186,11 @@ check "security groups (tagged saiman)" '.SecurityGroups[]?.GroupId' ec2 describ
 
 # --- logs, parameters, schedules --------------------------------------------------------------------
 check "log groups (/saiman*)" '.logGroups[]?.logGroupName' logs describe-log-groups --log-group-name-prefix /saiman
-check "ssm parameters (/saiman/demo/)" '.Parameters[]?.Name' \
+ssm_filter='.Parameters[]?.Name'
+if [[ "${ignore_expiry}" -eq 1 ]]; then
+  ssm_filter='.Parameters[]?.Name | select(. != "/saiman/demo/expires-at")'
+fi
+check "ssm parameters (/saiman/demo/)" "${ssm_filter}" \
   ssm describe-parameters --parameter-filters "Key=Name,Option=BeginsWith,Values=/saiman/demo/"
 check "scheduler schedules" "$(prefix_filter '.Schedules[]?.Name')" scheduler list-schedules
 

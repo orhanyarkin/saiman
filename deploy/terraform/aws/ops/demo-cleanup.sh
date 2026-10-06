@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Removes what Terraform does not own after `terraform destroy` (ADR-0028), with the destroy role:
-#   1. SSM parameters under /saiman/demo/ (created by demo-up, never by Terraform), expires-at LAST so a
-#      failed teardown is retried by the reaper;
+#   1. SSM parameters under /saiman/demo/ (created by demo-up, never by Terraform) EXCEPT expires-at, which
+#      is kept until the teardown check passed (--expiry-only), so a failed teardown is retried by the reaper;
 #   2. every object version and delete marker under s3://<state bucket>/demo/ (the bucket is versioned);
 #   3. ACTIVE task definitions are deregistered, INACTIVE ones deleted, as far as the role allows.
 # Idempotent. Prints names and counts only, never parameter values.
 #
-# Usage: demo-cleanup.sh --region eu-central-1 --state-bucket <bucket>
+# Usage: demo-cleanup.sh --region eu-central-1 --state-bucket <bucket> [--expiry-only]
 set -euo pipefail
 
 region=""
+expiry_only=0
 bucket=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,6 +24,10 @@ while [[ $# -gt 0 ]]; do
       bucket="$2"
       shift 2
       ;;
+    --expiry-only)
+      expiry_only=1
+      shift
+      ;;
     *)
       echo "usage: demo-cleanup.sh --region <region> --state-bucket <bucket>" >&2
       exit 2
@@ -35,6 +40,15 @@ done
 }
 
 export AWS_PAGER=""
+if [[ "${expiry_only}" -eq 1 ]]; then
+  # Last step of demo-destroy, only after check-demo-down passed: until then the reaper stays armed.
+  if aws --region "${region}" --output json ssm describe-parameters \
+    --parameter-filters "Key=Name,Option=Equals,Values=/saiman/demo/expires-at" | jq -e '(.Parameters // []) | length > 0' >/dev/null; then
+    aws --region "${region}" --output json ssm delete-parameter --name /saiman/demo/expires-at >/dev/null
+    echo "demo-cleanup: deleted /saiman/demo/expires-at"
+  fi
+  exit 0
+fi
 work="$(mktemp -d "${TMPDIR:-/tmp}/saiman-cleanup.XXXXXX")"
 trap 'rm -rf "${work}"' EXIT
 
@@ -97,8 +111,4 @@ while [[ -s "${work}/inactive.txt" ]]; do
 done
 echo "demo-cleanup: deregistered ${deregistered} task definition(s), deleted ${deleted_td} INACTIVE one(s)"
 
-# --- last: the expiry marker, so a failure above leaves the reaper armed ------------------------------------
-if grep -qxF '/saiman/demo/expires-at' "${work}/params.txt"; then
-  aws_json ssm delete-parameter --name /saiman/demo/expires-at >/dev/null
-  echo "demo-cleanup: deleted /saiman/demo/expires-at"
-fi
+echo "demo-cleanup: /saiman/demo/expires-at kept; run with --expiry-only once the teardown check passed"
