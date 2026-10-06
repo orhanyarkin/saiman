@@ -16,7 +16,7 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 locals {
-  repo = var.github_repo
+  repo = var.oidc_subject_repo
 
   sub_plan    = ["repo:${local.repo}:pull_request", "repo:${local.repo}:ref:refs/heads/main"]
   sub_apply   = ["repo:${local.repo}:environment:${var.apply_environment}"]

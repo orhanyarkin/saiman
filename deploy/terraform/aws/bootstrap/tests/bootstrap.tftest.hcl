@@ -17,7 +17,7 @@ run "trust_subjects_are_exact" {
   assert {
     condition = (
       jsondecode(aws_iam_role.plan.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"]
-      == ["repo:orhanyarkin/saiman:pull_request", "repo:orhanyarkin/saiman:ref:refs/heads/main"]
+      == ["repo:orhanyarkin@44910233/saiman@1390957366:pull_request", "repo:orhanyarkin@44910233/saiman@1390957366:ref:refs/heads/main"]
     )
     error_message = "plan role trust sub values changed"
   }
@@ -25,7 +25,7 @@ run "trust_subjects_are_exact" {
   assert {
     condition = (
       jsondecode(aws_iam_role.apply.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"]
-      == ["repo:orhanyarkin/saiman:environment:demo-apply"]
+      == ["repo:orhanyarkin@44910233/saiman@1390957366:environment:demo-apply"]
     )
     error_message = "apply role must trust only the demo-apply environment"
   }
@@ -33,7 +33,7 @@ run "trust_subjects_are_exact" {
   assert {
     condition = (
       jsondecode(aws_iam_role.destroy.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"]
-      == ["repo:orhanyarkin/saiman:environment:demo-destroy"]
+      == ["repo:orhanyarkin@44910233/saiman@1390957366:environment:demo-destroy"]
     )
     error_message = "destroy role must trust only the demo-destroy environment"
   }

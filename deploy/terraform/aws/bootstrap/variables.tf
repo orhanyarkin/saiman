@@ -19,10 +19,22 @@ variable "state_bucket_name" {
   }
 }
 
-variable "github_repo" {
-  description = "GitHub repository (owner/name) allowed to assume the roles."
+variable "oidc_subject_repo" {
+  description = <<-EOT
+    The repository exactly as GitHub writes it after "repo:" in the OIDC `sub` claim. Repositories with immutable
+    subject claims (the default for newer repositories) use owner and repository IDs, for example
+    "orhanyarkin@44910233/saiman@1390957366"; older repositories use "owner/name". Read the real value with
+      gh api repos/<owner>/<repo>/actions/oidc/customization/sub --jq .sub_claim_prefix
+    and drop the leading "repo:". A mismatch makes every role refuse the token ("Not authorized to perform
+    sts:AssumeRoleWithWebIdentity").
+  EOT
   type        = string
-  default     = "orhanyarkin/saiman"
+  default     = "orhanyarkin@44910233/saiman@1390957366"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9._-]+(@[0-9]+)?/[A-Za-z0-9._-]+(@[0-9]+)?$", var.oidc_subject_repo))
+    error_message = "oidc_subject_repo must look like owner/name or owner@<id>/name@<id>."
+  }
 }
 
 variable "apply_environment" {
