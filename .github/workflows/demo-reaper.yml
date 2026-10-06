@@ -15,7 +15,9 @@ permissions:
 jobs:
   check:
     name: check expiry
-    if: github.repository == 'orhanyarkin/saiman'
+    # Skipped (green) until bootstrap exists and DESTROY_ROLE_ARN is set; otherwise every cron tick would fail at the
+    # OIDC step and email a failure every 30 minutes. demo-up/demo-down still fail loudly when it is missing.
+    if: github.repository == 'orhanyarkin/saiman' && vars.DESTROY_ROLE_ARN != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: demo-destroy
