@@ -26,7 +26,7 @@ spring:
     schemas: ledger
     default-schema: ledger
     create-schemas: true
-    # V7 grants DML to the runtime role (ADR-0024); compose runs Flyway as ledger_owner and the pool as ledger_app.
+    # V7 grants DML to the runtime role (ADR-0024); the ledger-migrate one-shot runs Flyway as ledger_owner (ADR-0027) and the pool uses ledger_app.
     placeholders:
       app_role: ledger_app
   kafka:

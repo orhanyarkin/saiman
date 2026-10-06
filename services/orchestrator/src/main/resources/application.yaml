@@ -24,8 +24,8 @@ spring:
     schemas: orchestrator
     default-schema: orchestrator
     create-schemas: true
-    # V10 grants DML to this role (ADR-0024). Flyway runs as orchestrator_owner and the pool as orchestrator_app
-    # (spring.flyway.user / spring.datasource.username, set by the compose environment from per-service secrets).
+    # V10 grants DML to this role (ADR-0024). Flyway runs as orchestrator_owner in the orchestrator-migrate one-shot (ADR-0027) and the pool as orchestrator_app
+    # (spring.flyway.user in the migrator, spring.datasource.username in the service, both set by the compose environment).
     placeholders:
       app_role: orchestrator_app
   # Transactional outbox (ADR-0016). libs/eventing sets the registry defaults (only @ApplicationModuleListener
