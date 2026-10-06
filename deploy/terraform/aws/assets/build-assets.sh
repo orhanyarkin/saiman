@@ -17,7 +17,8 @@
 #   scripts/readiness.sh                                           copied from this directory (busybox readiness container)
 #
 # Deterministic: sorted traversal, modes 0644/0755, mtime 0, no timestamps in content. The manifest
-# (sha256 per file, sorted) is printed on stdout and is the same for the same inputs. No secrets are read.
+# (sha256 per file, sorted) is printed on stdout, followed by one `manifest-sha256 <hex>` line (aggregate over
+# the manifest text), and is the same for the same inputs. No secrets are read.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -106,4 +107,8 @@ install -m 0755 "${here}/readiness.sh" "${out}/scripts/readiness.sh"
 
 # --- normalise and print the manifest ------------------------------------------------------------
 find "${out}" -exec touch -h -d @0 {} +
-(cd "${out}" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sed 's|  \./|  |')
+manifest="$(cd "${out}" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sed 's|  \./|  |')"
+printf '%s\n' "${manifest}"
+# Aggregate digest (the demo-lite variable assets_manifest_sha256): sha256 over the manifest text above, one
+# "sha256  path" line per file, sorted by path, newline-terminated. The assets container recomputes it.
+printf 'manifest-sha256 %s\n' "$(printf '%s\n' "${manifest}" | sha256sum | cut -d' ' -f1)"
