@@ -16,13 +16,15 @@ locals {
   ssm_param_prefix = trimsuffix(local.ssm_prefix_arn, "*")
 
   images = {
-    # Third-party images follow compose (same pinned tags); Docker Hub "library" images come from the
-    # public.ecr.aws mirror, which has no anonymous pull limit from AWS.
+    # Third-party images follow compose (same tags); Docker Hub "library" images come from the
+    # public.ecr.aws mirror, which has no anonymous pull limit from AWS. kafka and otel (Docker Hub, not
+    # mirrored) are pinned by index digest, resolved with `docker buildx imagetools inspect <image:tag>`;
+    # both indexes contain linux/arm64.
     awscli   = "public.ecr.aws/aws-cli/aws-cli:2.36.33"
     postgres = "public.ecr.aws/docker/library/postgres:17.10" # Debian: db-init needs bash
-    kafka    = "apache/kafka:4.3.1"
+    kafka    = "apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837"
     redis    = "public.ecr.aws/docker/library/redis:8.10.2-alpine"
-    otel     = "otel/opentelemetry-collector:0.162.0"
+    otel     = "otel/opentelemetry-collector:0.162.0@sha256:310a800ad69ee430e7c541796852a242c9c7db97aaad4daa5ccf843c525fbdb2"
     nginx    = "public.ecr.aws/docker/library/nginx:1.31.0-alpine"
     busybox  = "public.ecr.aws/docker/library/busybox:1.38.0"
   }
@@ -69,7 +71,7 @@ locals {
       SELLER_INGEST_BASE_URL                   = "http://127.0.0.1:8083"
       SELLER_DISCLOSURES_SOURCE                = "rag"
       X402_SELLER_PAYTO_ADDRESS                = var.x402_seller_payto_address
-      SELLER_INTERNAL_ALLOWED_HOSTS            = "127.0.0.1,127.0.0.1:8081"
+      SELLER_INTERNAL_ALLOWED_HOSTS            = "127.0.0.1:8081" # exact Host the ledger sends
     }
     ledger = {
       SAIMAN_AUTH_READER_TOKEN_SHA256    = var.auth_digests["reader"]
@@ -141,6 +143,7 @@ locals {
     }, local.app_env[name])
     secrets = merge({
       SPRING_DATASOURCE_PASSWORD = "pg_${a.schema}_app_password"
+      SPRING_DATA_REDIS_PASSWORD = "redis_password" # spring.data.redis.password
     }, local.app_secrets[name])
     depends = merge(
       {
@@ -164,10 +167,15 @@ locals {
       command = [join(" ", [
         "set -eu;",
         "aws s3 sync --only-show-errors \"${local.assets_prefix}/\" /assets/;",
-        "cp -R /assets/web/dist/. /web-html/;",
-        "cp /assets/nginx/default.conf /web-conf/default.conf;",
+        # Integrity first (nothing is copied before it passes): sha256 over the sorted `sha256  path`
+        # manifest of the synced prefix must equal assets_manifest_sha256 (what build-assets.sh printed).
+        "agg=$(cd /assets && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sed 's|  \\./|  |' | sha256sum | cut -d' ' -f1);",
+        "[ \"$agg\" = \"${var.assets_manifest_sha256}\" ] || { echo 'assets: manifest digest mismatch' >&2; exit 1; };",
         "aws s3 cp --only-show-errors \"s3://${var.state_bucket_name}/${var.corpus_object_key}\" /corpus/ingest-corpus.dump;",
-        "aws s3 cp --only-show-errors \"s3://${var.state_bucket_name}/${local.corpus_meta}\" /corpus/ingest-corpus.meta.json",
+        "echo \"${var.corpus_sha256}  /corpus/ingest-corpus.dump\" | sha256sum -c - >/dev/null || { echo 'assets: corpus digest mismatch' >&2; exit 1; };",
+        "aws s3 cp --only-show-errors \"s3://${var.state_bucket_name}/${local.corpus_meta}\" /corpus/ingest-corpus.meta.json;",
+        "cp -R /assets/web/dist/. /web-html/;",
+        "cp /assets/nginx/default.conf /web-conf/default.conf",
       ])]
       env = {
         AWS_DEFAULT_REGION = local.region
@@ -266,14 +274,18 @@ locals {
       }
     }
 
+    # Loopback only AND password-protected: every container of the task shares this network namespace.
+    # The password reaches redis-server through the container's own environment (REDIS_PASSWORD).
     redis = {
       image         = local.images.redis
       essential     = true
       memory        = 128
       restartPolicy = { enabled = true, restartAttemptPeriod = 60 }
-      command       = ["redis-server", "--bind", "127.0.0.1", "--save", "", "--appendonly", "no"]
+      entryPoint    = ["sh", "-c"]
+      command       = ["exec redis-server --bind 127.0.0.1 --save '' --appendonly no --requirepass \"$REDIS_PASSWORD\""]
+      secrets       = { REDIS_PASSWORD = "redis_password" }
       healthCheck = {
-        command     = ["CMD", "redis-cli", "-h", "127.0.0.1", "ping"]
+        command     = ["CMD-SHELL", "REDISCLI_AUTH=\"$REDIS_PASSWORD\" redis-cli -h 127.0.0.1 ping | grep -q PONG"]
         interval    = 5
         timeout     = 5
         retries     = 20

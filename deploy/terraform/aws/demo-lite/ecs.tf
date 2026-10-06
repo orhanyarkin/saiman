@@ -9,6 +9,14 @@ resource "aws_ecs_cluster" "main" {
     name  = "containerInsights"
     value = "disabled" # Insights metrics cost money and the demo ships its own OTel telemetry
   }
+
+  # ECS Exec sessions are not logged to CloudWatch/S3 (never OVERRIDE: that would need extra
+  # permissions on the task role); CloudTrail records every ExecuteCommand/StartSession call.
+  configuration {
+    execute_command_configuration {
+      logging = "NONE"
+    }
+  }
 }
 
 resource "aws_ecs_task_definition" "main" {
@@ -63,7 +71,8 @@ resource "aws_ecs_service" "main" {
     assign_public_ip = true # egress only: there is no NAT, and the SG has no ingress rule
   }
 
-  # The human reaches the stack with `aws ecs execute-command` / an SSM port-forward (no ALB).
+  # The human reaches the stack with `aws ecs execute-command` / an SSM port-forward (no ALB). Port 80 of `web`
+  # is the convention, not a control: a port-forward reaches every loopback port of the task.
   enable_execute_command = true
 
   # Terraform's DeleteService with force makes teardown work for the destroy role, which can delete

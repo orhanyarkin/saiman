@@ -21,7 +21,9 @@ variables {
     operator       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     service_ledger = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
   }
-  db_master_password = "unit-test-only"
+  db_master_password     = "unit-test-only"
+  assets_manifest_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  corpus_sha256          = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 }
 
 run "task_shape" {
@@ -61,52 +63,124 @@ run "task_shape" {
   }
 }
 
-run "secret_split" {
-  # owner secrets only on *-migrate (and db-init, which holds every password like compose db-init)
+run "exact_secret_map" {
+  # EXACT map per container: secret env name -> SSM parameter name. Anything extra or missing fails.
+  assert {
+    condition = jsonencode({
+      for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
+      c.name => { for s in c.secrets : s.name => trimprefix(s.valueFrom, "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/demo/") }
+      }) == jsonencode({
+      assets                 = {}
+      kafka                  = {}
+      web                    = {}
+      readiness              = {}
+      "otel-collector"       = {}
+      redis                  = { REDIS_PASSWORD = "redis_password" }
+      "corpus-restore"       = { PGPASSWORD = "pg_ingest_owner_password" }
+      "orchestrator-migrate" = { SPRING_FLYWAY_PASSWORD = "pg_orchestrator_owner_password" }
+      "seller-api-migrate"   = { SPRING_FLYWAY_PASSWORD = "pg_seller_api_owner_password" }
+      "ledger-migrate"       = { SPRING_FLYWAY_PASSWORD = "pg_ledger_owner_password" }
+      "ingest-migrate"       = { SPRING_FLYWAY_PASSWORD = "pg_ingest_owner_password" }
+      "db-init" = {
+        PGPASSWORD            = "pg_master_password"
+        PW_ORCHESTRATOR_OWNER = "pg_orchestrator_owner_password"
+        PW_ORCHESTRATOR_APP   = "pg_orchestrator_app_password"
+        PW_LEDGER_OWNER       = "pg_ledger_owner_password"
+        PW_LEDGER_APP         = "pg_ledger_app_password"
+        PW_SELLER_API_OWNER   = "pg_seller_api_owner_password"
+        PW_SELLER_API_APP     = "pg_seller_api_app_password"
+        PW_INGEST_OWNER       = "pg_ingest_owner_password"
+        PW_INGEST_APP         = "pg_ingest_app_password"
+      }
+      orchestrator = {
+        SPRING_DATASOURCE_PASSWORD   = "pg_orchestrator_app_password"
+        SPRING_DATA_REDIS_PASSWORD   = "redis_password"
+        SAIMAN_ROUTER_OPENAI_API_KEY = "openai_api_key"
+        X402_CLIENT_PRIVATE_KEY      = "x402_buyer_private_key"
+      }
+      seller-api = {
+        SPRING_DATASOURCE_PASSWORD   = "pg_seller_api_app_password"
+        SPRING_DATA_REDIS_PASSWORD   = "redis_password"
+        SAIMAN_ROUTER_OPENAI_API_KEY = "openai_api_key"
+      }
+      ledger = {
+        SPRING_DATASOURCE_PASSWORD         = "pg_ledger_app_password"
+        SPRING_DATA_REDIS_PASSWORD         = "redis_password"
+        SAIMAN_LEDGER_SELLER_SERVICE_TOKEN = "seller_service_token_ledger"
+      }
+      ingest = {
+        SPRING_DATASOURCE_PASSWORD   = "pg_ingest_app_password"
+        SPRING_DATA_REDIS_PASSWORD   = "redis_password"
+        SAIMAN_ROUTER_OPENAI_API_KEY = "openai_api_key"
+      }
+    })
+    error_message = "the secret split must match the exact per-container map (master password, owner passwords, buyer key, OpenAI key and Redis password only where listed)"
+  }
+}
+
+run "exact_env_names" {
+  # EXACT environment-name allowlist per container (migrators: exactly the four of ADR-0027).
+  assert {
+    condition = jsonencode({
+      for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
+      c.name => sort([for e in c.environment : e.name])
+      }) == jsonencode({
+      assets                 = ["AWS_DEFAULT_REGION", "AWS_PAGER"]
+      web                    = []
+      readiness              = []
+      redis                  = []
+      "otel-collector"       = []
+      "corpus-restore"       = ["PGDATABASE", "PGHOST", "PGSSLMODE", "PGUSER"]
+      "db-init"              = ["BOOTSTRAP_RDS", "BOOTSTRAP_SECRET_SOURCE", "PGDATABASE", "PGHOST", "PGSSLMODE", "PGUSER"]
+      "orchestrator-migrate" = ["BPL_JVM_THREAD_COUNT", "SAIMAN_RUN_MODE", "SPRING_DATASOURCE_URL", "SPRING_FLYWAY_USER"]
+      "seller-api-migrate"   = ["BPL_JVM_THREAD_COUNT", "SAIMAN_RUN_MODE", "SPRING_DATASOURCE_URL", "SPRING_FLYWAY_USER"]
+      "ledger-migrate"       = ["BPL_JVM_THREAD_COUNT", "SAIMAN_RUN_MODE", "SPRING_DATASOURCE_URL", "SPRING_FLYWAY_USER"]
+      "ingest-migrate"       = ["BPL_JVM_THREAD_COUNT", "SAIMAN_RUN_MODE", "SPRING_DATASOURCE_URL", "SPRING_FLYWAY_USER"]
+      kafka = sort([
+        "CLUSTER_ID", "KAFKA_NODE_ID", "KAFKA_PROCESS_ROLES", "KAFKA_CONTROLLER_QUORUM_VOTERS", "KAFKA_CONTROLLER_LISTENER_NAMES",
+        "KAFKA_LISTENERS", "KAFKA_ADVERTISED_LISTENERS", "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP", "KAFKA_INTER_BROKER_LISTENER_NAME",
+        "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR", "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "KAFKA_TRANSACTION_STATE_LOG_MIN_ISR",
+        "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS", "KAFKA_AUTO_CREATE_TOPICS_ENABLE", "KAFKA_LOG_DIRS", "KAFKA_HEAP_OPTS",
+      ])
+      orchestrator = sort(concat(
+        ["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_URL", "SPRING_FLYWAY_ENABLED", "SPRING_KAFKA_BOOTSTRAP_SERVERS"],
+        ["SAIMAN_AUTH_READER_TOKEN_SHA256", "SAIMAN_AUTH_OPERATOR_TOKEN_SHA256", "X402_CLIENT_ALLOWED_PAY_TO", "X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS", "SPRING_HTTP_CLIENTS_REDIRECTS", "SAIMAN_SELLER_BASE_URL", "SAIMAN_ROUTER_REQUIRE_COST_SCOPE", "SAIMAN_ROUTER_MAX_SCOPE_BUDGET_USD_MICROS", "SAIMAN_ORCHESTRATOR_API_ALLOWED_HOSTS", "SAIMAN_ORCHESTRATOR_SPEND_APPROVAL_THRESHOLD_ATOMIC", "SAIMAN_CHAIN_RPC_URL", "SAIMAN_CHAIN_ALLOWED_HOSTS"],
+      ))
+      seller-api = sort(concat(
+        ["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_URL", "SPRING_FLYWAY_ENABLED", "SPRING_KAFKA_BOOTSTRAP_SERVERS"],
+        ["SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256", "SELLER_INGEST_BASE_URL", "SELLER_DISCLOSURES_SOURCE", "X402_SELLER_PAYTO_ADDRESS", "SELLER_INTERNAL_ALLOWED_HOSTS"],
+      ))
+      ledger = sort(concat(
+        ["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_URL", "SPRING_FLYWAY_ENABLED", "SPRING_KAFKA_BOOTSTRAP_SERVERS"],
+        ["SAIMAN_AUTH_READER_TOKEN_SHA256", "SAIMAN_AUTH_OPERATOR_TOKEN_SHA256", "SAIMAN_CHAIN_RPC_URL", "SAIMAN_CHAIN_ALLOWED_HOSTS", "SAIMAN_LEDGER_API_ALLOWED_HOSTS", "SAIMAN_LEDGER_SELLER_BASE_URL", "SAIMAN_LEDGER_SELLER_ALLOWED_HOSTS"],
+      ))
+      ingest = sort(["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_URL", "SPRING_FLYWAY_ENABLED", "SPRING_KAFKA_BOOTSTRAP_SERVERS"])
+    })
+    error_message = "the environment names must match the exact per-container allowlist"
+  }
+}
+
+run "no_injection_or_secret_like_names" {
+  # Port of the compose-policy normalisation: upper case, "." and "-" to "_", runs of "_" collapsed,
+  # a trailing list index ("_0", "_0_") stripped. Applied to environment AND secret names.
   assert {
     condition = alltrue([
       for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
-      length([for s in c.secrets : s if can(regex("_owner_password$", s.valueFrom))]) == 0
-      if !endswith(c.name, "-migrate") && !contains(["db-init", "corpus-restore"], c.name)
+      alltrue([
+        for n in concat([for e in c.environment : e.name], [for s in c.secrets : s.name]) :
+        !can(regex("^(SPRING_FLYWAY_URL|SPRING_APPLICATION_JSON|JAVA_TOOL_OPTIONS|JDK_JAVA_OPTIONS|_JAVA_OPTIONS|JAVA_OPTS|SPRING_AUTOCONFIGURE_EXCLUDE|SAIMAN_SECRETS_DIR|OPENAI_API_KEY|OPENAI_BASE_URL|AZURE_OPENAI_BASE_URL|OPENAI_LOG)$|^SPRING_(CONFIG|MAIN)_|^BPL_(DEBUG|JMX)_|^(SPRING_AI_OPENAI_|SAIMAN_INGEST_MKK_|SPRINGDOC_)", replace(replace(upper(replace(n, "/[.-]/", "_")), "/_+/", "_"), "/_[0-9]+_?$/", "")))
+      ])
     ])
-    error_message = "owner passwords may only reach *-migrate, db-init and corpus-restore (ingest_owner)"
+    error_message = "a forbidden config-injection name is present (after normalisation)"
   }
 
+  # The matcher itself: each of these spellings must be recognised as forbidden.
   assert {
     condition = alltrue([
-      for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
-      [for s in c.secrets : s.name] == ["SPRING_FLYWAY_PASSWORD"] && length(c.environment) == 4
-      if endswith(c.name, "-migrate")
-    ])
-    error_message = "a migrate one-shot holds exactly SPRING_FLYWAY_PASSWORD and four plain env vars"
-  }
-
-  assert {
-    condition = alltrue([
-      for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
-      length([for s in c.secrets : s if can(regex("_app_password$", s.valueFrom))]) == 0
-      if !contains(["orchestrator", "seller-api", "ledger", "ingest", "db-init"], c.name)
-    ])
-    error_message = "app passwords only on the four apps (and db-init)"
-  }
-
-  assert {
-    condition = alltrue([
-      for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
-      length([for s in c.secrets : s if can(regex("_app_password$", s.valueFrom)) && s.name == "SPRING_DATASOURCE_PASSWORD"]) == 1
-      && length([for s in c.secrets : s if can(regex("_owner_password$", s.valueFrom))]) == 0
-      if contains(["orchestrator", "seller-api", "ledger", "ingest"], c.name)
-    ])
-    error_message = "each app holds exactly one app password and no owner password"
-  }
-
-  # The buyer key: orchestrator only, via secrets only.
-  assert {
-    condition = (
-      [for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.name if length([for s in c.secrets : s if can(regex("x402_buyer_private_key$", s.valueFrom))]) > 0] == ["orchestrator"]
-      && alltrue([for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : length([for e in c.environment : e if can(regex("(?i)private|0x[0-9a-f]{64}", e.name)) || can(regex("(?i)0x[0-9a-f]{64}", e.value))]) == 0])
-    )
-    error_message = "the buyer private key reaches only the orchestrator and only through secrets"
+      for n in ["SPRING__CONFIG_IMPORT", "SPRING_AUTOCONFIGURE_EXCLUDE_0", "BPL_DEBUG_ENABLED", "SPRING_FLYWAY__URL", "spring.main.lazy-initialization", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "SAIMAN_SECRETS_DIR", "BPL_JMX_ENABLED", "SPRING_APPLICATION_JSON_1_"] :
+      can(regex("^(SPRING_FLYWAY_URL|SPRING_APPLICATION_JSON|JAVA_TOOL_OPTIONS|JDK_JAVA_OPTIONS|_JAVA_OPTIONS|JAVA_OPTS|SPRING_AUTOCONFIGURE_EXCLUDE|SAIMAN_SECRETS_DIR|OPENAI_API_KEY|OPENAI_BASE_URL|AZURE_OPENAI_BASE_URL|OPENAI_LOG)$|^SPRING_(CONFIG|MAIN)_|^BPL_(DEBUG|JMX)_|^(SPRING_AI_OPENAI_|SAIMAN_INGEST_MKK_|SPRINGDOC_)", replace(replace(upper(replace(n, "/[.-]/", "_")), "/_+/", "_"), "/_[0-9]+_?$/", "")))
+    ]) && local.region == "eu-central-1"
+    error_message = "the injection matcher must catch collapsed, indexed and dotted spellings (local.region is only here to anchor the assert to the configuration)"
   }
 
   # No secret-looking environment name (the three digest variables and the BOOTSTRAP_SECRET_SOURCE=env mode switch are explicit exceptions).
@@ -121,6 +195,15 @@ run "secret_split" {
     error_message = "no environment entry may look like a secret"
   }
 
+  # No key material or password-looking value in any environment value.
+  assert {
+    condition = alltrue([
+      for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
+      alltrue([for e in c.environment : !can(regex("0x[0-9a-fA-F]{64}", e.value)) && !can(regex("://[^/@]*:[^/@]*@", e.value))])
+    ])
+    error_message = "no private key or credentialed URL in an environment value"
+  }
+
   # Every secret is an SSM ARN under /saiman/demo/ (the only prefix the execution role may read).
   assert {
     condition = alltrue([
@@ -129,15 +212,101 @@ run "secret_split" {
     ])
     error_message = "secrets must be SSM parameter ARNs under /saiman/demo/"
   }
+}
 
-  # web and the data stores carry no secrets at all.
+run "no_namespace_sharing_or_privileges" {
+  assert {
+    condition     = aws_ecs_task_definition.main.pid_mode == null && aws_ecs_task_definition.main.ipc_mode == null
+    error_message = "pid_mode and ipc_mode must stay unset (no shared PID/IPC namespaces)"
+  }
+
   assert {
     condition = alltrue([
       for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
-      length(c.secrets) == 0 && length(c.environment) == 0 || !contains(["web", "redis", "readiness"], c.name)
+      !can(c.linuxParameters) && !can(c.privileged) && !can(c.user) && !can(c.dockerSecurityOptions) && !can(c.environmentFiles)
     ])
-    error_message = "web, redis and readiness hold no secrets"
+    error_message = "no linuxParameters (capabilities, devices), privileged, user, security options or environment files"
   }
+
+  assert {
+    condition     = jsonencode(sort([for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.name])) == jsonencode(sort(["assets", "db-init", "orchestrator-migrate", "seller-api-migrate", "ledger-migrate", "ingest-migrate", "corpus-restore", "kafka", "redis", "otel-collector", "orchestrator", "seller-api", "ledger", "ingest", "web", "readiness"]))
+    error_message = "the container set is fixed"
+  }
+
+  assert {
+    condition     = aws_ecs_cluster.main.configuration[0].execute_command_configuration[0].logging == "NONE"
+    error_message = "ECS Exec logging must be NONE (not OVERRIDE)"
+  }
+}
+
+run "integrity_checks_in_assets_container" {
+  assert {
+    condition = (
+      can(regex("sha256sum", [for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.command[0] if c.name == "assets"][0]))
+      && can(regex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", [for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.command[0] if c.name == "assets"][0]))
+      && can(regex("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210", [for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.command[0] if c.name == "assets"][0]))
+    )
+    error_message = "the assets container must verify the manifest and corpus digests"
+  }
+
+  # The verification comes before the first copy into a served volume.
+  assert {
+    condition = (
+      length(regexall("digest mismatch", [for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.command[0] if c.name == "assets"][0])) == 2
+      && length(split("cp -R", [for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.command[0] if c.name == "assets"][0])[0]) > length(split("corpus digest mismatch", [for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.command[0] if c.name == "assets"][0])[0])
+    )
+    error_message = "both digests must be checked before any copy into web-html/web-conf"
+  }
+}
+
+run "rejects_bad_digests" {
+  command = plan
+
+  variables {
+    assets_manifest_sha256 = "NOT-A-DIGEST"
+  }
+
+  expect_failures = [var.assets_manifest_sha256]
+}
+
+run "rejects_bad_corpus_digest" {
+  command = plan
+
+  variables {
+    corpus_sha256 = "abc"
+  }
+
+  expect_failures = [var.corpus_sha256]
+}
+
+run "rejects_corpus_key_without_dump_suffix" {
+  command = plan
+
+  variables {
+    corpus_object_key = "artifacts/corpus/latest.tar"
+  }
+
+  expect_failures = [var.corpus_object_key]
+}
+
+run "rejects_corpus_key_with_traversal" {
+  command = plan
+
+  variables {
+    corpus_object_key = "artifacts/../demo/assets/x.dump"
+  }
+
+  expect_failures = [var.corpus_object_key]
+}
+
+run "rejects_foreign_grafana_endpoint" {
+  command = plan
+
+  variables {
+    grafana_otlp_endpoint = "https://evil.example.com/otlp"
+  }
+
+  expect_failures = [var.grafana_otlp_endpoint]
 }
 
 run "app_hardening" {
@@ -237,15 +406,15 @@ run "ordering_and_images" {
   assert {
     condition = alltrue([
       for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
-      startswith(c.image, "ghcr.io/orhanyarkin/saiman-") ? endswith(c.image, ":sha-0123456789ab") : can(regex(":[0-9][^:@]*$", c.image))
+      startswith(c.image, "ghcr.io/orhanyarkin/saiman-") ? endswith(c.image, ":sha-0123456789ab") : startswith(c.image, "public.ecr.aws/") ? can(regex(":[0-9][^:@]*$", c.image)) : can(regex("^[a-z0-9./-]+:[0-9][0-9.]*@sha256:[0-9a-f]{64}$", c.image))
     ])
-    error_message = "service images use the sha- tag, third-party images a pinned version"
+    error_message = "service images use the sha- tag, mirror images a version tag, Docker Hub images tag@sha256 digests"
   }
 
   assert {
     condition = (
-      [for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.image if c.name == "kafka"][0] == "apache/kafka:4.3.1"
-      && [for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.image if c.name == "otel-collector"][0] == "otel/opentelemetry-collector:0.162.0"
+      startswith([for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.image if c.name == "kafka"][0], "apache/kafka:4.3.1@sha256:")
+      && startswith([for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.image if c.name == "otel-collector"][0], "otel/opentelemetry-collector:0.162.0@sha256:")
       && startswith([for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.image if c.name == "db-init"][0], "public.ecr.aws/docker/library/postgres:17")
     )
     error_message = "third-party pins must match compose (db-init needs a bash-capable postgres 17 image)"
