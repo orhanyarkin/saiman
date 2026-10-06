@@ -26,6 +26,7 @@ chmod 755 "${work}"
 
 python3 -I - "${work}" "${files[@]}" <<'PY'
 import os
+import re
 import sys
 
 import yaml
@@ -38,7 +39,23 @@ for path in files:
         doc = yaml.safe_load(fh)
     base = os.path.basename(path)
     for job_id, job in (doc.get("jobs") or {}).items():
+        perms = job.get("permissions", doc.get("permissions"))
+        privileged = isinstance(perms, dict) and perms.get("id-token") == "write"
         for i, step in enumerate(job.get("steps") or []):
+            if privileged:
+                uses = str(step.get("uses", ""))
+                wth = step.get("with") or {}
+                run_txt = str(step.get("run", ""))
+                label = f"{base}:{job_id}:step{i + 1}"
+                if any(t in uses for t in ("pnpm/action-setup", "actions/setup-node", "actions/setup-java", "gradle/actions")):
+                    print(f"FAIL {label}: toolchain setup ({uses.split('@')[0]}) in a job with id-token: write (M1)")
+                    bad += 1
+                if "cache" in wth or "cache-dependency-path" in wth:
+                    print(f"FAIL {label}: cache: in a job with id-token: write (cache poisoning, M1)")
+                    bad += 1
+                if re.search(r"(^|[\s;&|(])(pnpm|npm|npx|yarn|\./gradlew|gradle)\s", run_txt):
+                    print(f"FAIL {label}: package-manager/build command in a job with id-token: write (M1)")
+                    bad += 1
             run = step.get("run")
             if run is None:
                 continue

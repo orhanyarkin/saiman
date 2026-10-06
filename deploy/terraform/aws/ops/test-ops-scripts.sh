@@ -60,6 +60,25 @@ expect() {
 
 ops="${here}"
 
+# --- check-workflow-run-blocks: no package manager / cache in an id-token job (M1) ---------------------------
+cat >"${work}/bad.yml" <<'EOF'
+name: bad
+on: workflow_dispatch
+jobs:
+  up:
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          cache: pnpm
+      - run: pnpm install
+EOF
+expect "run-blocks: pnpm/cache in an id-token job is rejected" 1 "(M1)" "${ops}/check-workflow-run-blocks.sh" "${work}/bad.yml"
+sed -i 's/id-token: write/contents: read/' "${work}/bad.yml"
+expect "run-blocks: the same job without id-token is fine" 0 "clean" "${ops}/check-workflow-run-blocks.sh" "${work}/bad.yml"
+
 # --- check-ssm-names -----------------------------------------------------------------------------------
 cp "${here}/../demo-lite/containers.tf" "${work}/containers.tf"
 if grep -q 'redis_password' "${work}/containers.tf"; then
