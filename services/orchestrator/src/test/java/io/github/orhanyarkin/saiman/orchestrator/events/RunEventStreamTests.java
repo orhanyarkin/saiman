@@ -3,6 +3,7 @@ package io.github.orhanyarkin.saiman.orchestrator.events;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import io.github.orhanyarkin.saiman.apisecurity.testfixtures.TestTokens;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.RunTestSupport;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.saiman.shared.run.AgentStep;
@@ -244,6 +245,7 @@ class RunEventStreamTests extends RunTestSupport {
         try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             OutputStream out = socket.getOutputStream();
             out.write(("GET /api/v1/runs/" + run + "/events HTTP/1.1\r\nHost: localhost\r\n"
+                            + "Authorization: " + TestTokens.bearer(TestTokens.OPERATOR) + "\r\n"
                             + "Accept: text/event-stream\r\n\r\n")
                     .getBytes(StandardCharsets.US_ASCII));
             out.flush();

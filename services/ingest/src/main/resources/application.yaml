@@ -18,6 +18,9 @@ spring:
     schemas: ingest
     default-schema: ingest
     create-schemas: true
+    placeholders:
+      # Runtime DB role that V3__grants.sql grants DML to (ADR-0024); compose uses the same name.
+      app_role: ingest_app
   mvc:
     problemdetails:
       enabled: true

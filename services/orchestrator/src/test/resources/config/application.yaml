@@ -25,3 +25,12 @@ logging:
 saiman:
   router:
     cost-guard: memory
+  # Known test tokens (libs/api-security testFixtures TestTokens: READER, OPERATOR); their digests, as in a deployment.
+  # Tests send the OPERATOR token by default (TestcontainersConfiguration); the auth tests build their own clients.
+  auth:
+    reader-token-sha256: bb8a7703e6054c96e9442f822efebaa7c3b1690de33838d7ea49ffbf6f23a8ac
+    operator-token-sha256: 064f3fe639ff9d727d0c62769168ce319345c94ea3833c66c792b81aa50f37a3
+  test:
+    db:
+      # ADR-0024: the pool runs as orchestrator_app (DML only), Flyway as orchestrator_owner, as in production.
+      runtime-role: app

@@ -1,0 +1,413 @@
+{
+  "generatedAt" : "2026-10-05T16:22:29.428190814Z",
+  "gitSha" : "d072373",
+  "label" : "",
+  "topK" : 10,
+  "goldenCorpusVersion" : "24303757d747de77",
+  "liveCorpusVersion" : "24303757d747de77",
+  "corpusWatermark" : "2023-12-29T20:46:52Z",
+  "corpusStale" : false,
+  "summary" : {
+    "RETRIEVAL" : {
+      "n" : 16.0,
+      "errors" : 0.0,
+      "recall@10" : 0.9270833333333334,
+      "mrr@10" : 0.9114583333333334,
+      "ndcg@10" : 0.8695887973616744,
+      "latencyP95Ms" : 415.0
+    },
+    "FRESHNESS" : {
+      "n" : 3.0,
+      "errors" : 0.0,
+      "recency@5" : 0.5333333333333333,
+      "latestHit@5" : 0.6666666666666666,
+      "ndcg@10" : 0.7196557384447272,
+      "latencyP95Ms" : 237.0
+    }
+  },
+  "items" : [ {
+    "id" : "R-ARCLK",
+    "kind" : "RETRIEVAL",
+    "ticker" : "ARCLK",
+    "question" : "ARCLK yönetim kurulu komitelerinin oluşturulmasına ilişkin Mart 2023 bildirimi",
+    "ranking" : [ 1124305, 1115722, 1130485, 1126828, 1115721, 1174325 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 0.25,
+      "ndcg@10" : 0.4306765580733931
+    },
+    "latencyMs" : 415,
+    "error" : null
+  }, {
+    "id" : "R-ASELS",
+    "kind" : "RETRIEVAL",
+    "ticker" : "ASELS",
+    "question" : "ASELS esas sözleşme tadili bildirimi Ağustos 2023",
+    "ranking" : [ 1141480, 1188720, 1142914, 1196000, 1190473, 1142915, 1188721, 1094955, 1110201 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 0.9298593499260986
+    },
+    "latencyMs" : 228,
+    "error" : null
+  }, {
+    "id" : "R-BIMAS",
+    "kind" : "RETRIEVAL",
+    "ticker" : "BIMAS",
+    "question" : "BIMAS bağımsız denetim kuruluşunun belirlenmesi Haziran 2023",
+    "ranking" : [ 1138989, 1156123, 1156120, 1123892, 1123884, 1173410 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 0.9134015924715544
+    },
+    "latencyMs" : 193,
+    "error" : null
+  }, {
+    "id" : "R-EREGL",
+    "kind" : "RETRIEVAL",
+    "ticker" : "EREGL",
+    "question" : "EREGL pay geri alım bildirimi Mayıs 2023",
+    "ranking" : [ 1153942, 1130709, 1126471, 1140592, 1215175, 1133973 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 1.0
+    },
+    "latencyMs" : 198,
+    "error" : null
+  }, {
+    "id" : "R-FROTO",
+    "kind" : "RETRIEVAL",
+    "ticker" : "FROTO",
+    "question" : "FROTO kar payı dağıtım işlemleri bildirimi Ekim 2023",
+    "ranking" : [ 1122330, 1210408, 1127168, 1219331 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 0.9134015924715544
+    },
+    "latencyMs" : 202,
+    "error" : null
+  }, {
+    "id" : "R-KCHOL",
+    "kind" : "RETRIEVAL",
+    "ticker" : "KCHOL",
+    "question" : "KCHOL birleşme işlemlerine ilişkin bildirim Temmuz 2023",
+    "ranking" : [ 1172777, 1124296, 1175222, 1189291, 1161448, 1135715, 1112817 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 1.0
+    },
+    "latencyMs" : 208,
+    "error" : null
+  }, {
+    "id" : "R-KRDMD",
+    "kind" : "RETRIEVAL",
+    "ticker" : "KRDMD",
+    "question" : "KRDMD genel kurul işlemleri bildirimi Kasım 2023",
+    "ranking" : [ 1133692, 1216303, 1120206, 1156587, 1208785 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 0.9134015924715544
+    },
+    "latencyMs" : 216,
+    "error" : null
+  }, {
+    "id" : "R-PETKM",
+    "kind" : "RETRIEVAL",
+    "ticker" : "PETKM",
+    "question" : "PETKM ilişkili taraf işlemleri açıklaması Nisan 2023",
+    "ranking" : [ 1135750, 1141368, 1105033, 1148198, 1157459, 1123120, 1092322 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 1.0
+    },
+    "latencyMs" : 202,
+    "error" : null
+  }, {
+    "id" : "R-PGSUS",
+    "kind" : "RETRIEVAL",
+    "ticker" : "PGSUS",
+    "question" : "PGSUS kar payı dağıtım bildirimi Mart 2023",
+    "ranking" : [ 1129697, 1134545, 1120710, 1120714, 1134559 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 1.0
+    },
+    "latencyMs" : 210,
+    "error" : null
+  }, {
+    "id" : "R-SAHOL",
+    "kind" : "RETRIEVAL",
+    "ticker" : "SAHOL",
+    "question" : "SAHOL finansal duran varlık satışı bildirimi Aralık 2023",
+    "ranking" : [ 1208705, 1224207, 1217142, 1109672, 1201024, 1170432, 1138390 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 0.9134015924715544
+    },
+    "latencyMs" : 200,
+    "error" : null
+  }, {
+    "id" : "R-SASA",
+    "kind" : "RETRIEVAL",
+    "ticker" : "SASA",
+    "question" : "SASA sermaye artırımı azaltımı işlemleri bildirimi Eylül 2023",
+    "ranking" : [ 1103603, 1191825, 1218960, 1154496, 1099177, 1208309, 1154210, 1136950 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 0.9397260442949866
+    },
+    "latencyMs" : 218,
+    "error" : null
+  }, {
+    "id" : "R-SISE",
+    "kind" : "RETRIEVAL",
+    "ticker" : "SISE",
+    "question" : "SISE esas sözleşme tadili bildirimi Şubat 2023",
+    "ranking" : [ 1114775, 1117164, 1140862, 1229108, 1149954, 1229869, 1150650 ],
+    "metrics" : {
+      "recall@10" : 0.5,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 0.6744821105691429
+    },
+    "latencyMs" : 218,
+    "error" : null
+  }, {
+    "id" : "R-TCELL",
+    "kind" : "RETRIEVAL",
+    "ticker" : "TCELL",
+    "question" : "TCELL finansal duran varlık edinimi bildirimi Ağustos 2023",
+    "ranking" : [ 1173266, 1139226, 1180413, 1204245, 1230986, 1155154, 1196309, 1186595, 1123169 ],
+    "metrics" : {
+      "recall@10" : 0.3333333333333333,
+      "mrr@10" : 0.3333333333333333,
+      "ndcg@10" : 0.28507032503695073
+    },
+    "latencyMs" : 231,
+    "error" : null
+  }, {
+    "id" : "R-THYAO",
+    "kind" : "RETRIEVAL",
+    "ticker" : "THYAO",
+    "question" : "THYAO payların geri alınmasına ilişkin bildirim Ekim 2023",
+    "ranking" : [ 1207592, 1179573, 1171060, 1175196, 1216141, 1120650 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 1.0
+    },
+    "latencyMs" : 229,
+    "error" : null
+  }, {
+    "id" : "R-TOASO",
+    "kind" : "RETRIEVAL",
+    "ticker" : "TOASO",
+    "question" : "TOASO geleceğe dönük değerlendirmeler açıklaması Şubat 2023",
+    "ranking" : [ 1109294, 1102651, 1226033, 1129519, 1115059, 1129523, 1118642, 1137043 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 1.0
+    },
+    "latencyMs" : 219,
+    "error" : null
+  }, {
+    "id" : "R-TUPRS",
+    "kind" : "RETRIEVAL",
+    "ticker" : "TUPRS",
+    "question" : "TUPRS geleceğe dönük değerlendirmeler açıklaması Temmuz 2023",
+    "ranking" : [ 1177642, 1111641, 1210025, 1111647, 1142655, 1129530, 1135914, 1169515, 1092383 ],
+    "metrics" : {
+      "recall@10" : 1.0,
+      "mrr@10" : 1.0,
+      "ndcg@10" : 1.0
+    },
+    "latencyMs" : 211,
+    "error" : null
+  }, {
+    "id" : "F-THYAO",
+    "kind" : "FRESHNESS",
+    "ticker" : "THYAO",
+    "question" : "THYAO son özel durum açıklamaları",
+    "ranking" : [ 1226178, 1230391, 1221201, 1217358, 1216142, 1208683, 1230904, 1224968, 1174638, 1213333 ],
+    "metrics" : {
+      "recency@5" : 0.4,
+      "latestHit@5" : 0.0,
+      "ndcg@10" : 0.539488703866247
+    },
+    "latencyMs" : 237,
+    "error" : null
+  }, {
+    "id" : "F-ASELS",
+    "kind" : "FRESHNESS",
+    "ticker" : "ASELS",
+    "question" : "ASELS en son açıklamaları",
+    "ranking" : [ 1196957, 1230557, 1226156, 1223954, 1185770, 1221979, 1188721, 1186757, 1212698, 1210049 ],
+    "metrics" : {
+      "recency@5" : 0.6,
+      "latestHit@5" : 1.0,
+      "ndcg@10" : 0.7262633690596021
+    },
+    "latencyMs" : 202,
+    "error" : null
+  }, {
+    "id" : "F-SISE",
+    "kind" : "FRESHNESS",
+    "ticker" : "SISE",
+    "question" : "SISE güncel bildirimleri",
+    "ranking" : [ 1229869, 1229108, 1220175, 1197343, 1209647, 1204844, 1199411, 1196945, 1229343, 1226220 ],
+    "metrics" : {
+      "recency@5" : 0.6,
+      "latestHit@5" : 1.0,
+      "ndcg@10" : 0.8932151424083326
+    },
+    "latencyMs" : 202,
+    "error" : null
+  } ],
+  "skipped" : { },
+  "queries" : 19,
+  "costNote" : "Tier R makes 19 retrieval calls; each embeds one short query through ingest's model-router route (embeddings only, no generation, no x402 payment), about $0.00002 per run (ADR-0025). The answer tier's cost, when it ran, is in its own section.",
+  "answers" : {
+    "stoppedOnCap" : false,
+    "abortReason" : null,
+    "attempted" : 7,
+    "outcomes" : {
+      "NO_VALID_CITATIONS" : 6,
+      "REFUSED" : 1
+    },
+    "summary" : {
+      "ANSWER" : {
+        "n" : 5.0,
+        "scored" : 5.0,
+        "taskSuccess" : 0.0,
+        "factRecall" : 1.0,
+        "citationRecall" : 1.0,
+        "citationValidity" : 1.0
+      },
+      "UNANSWERABLE" : {
+        "n" : 2.0,
+        "scored" : 2.0,
+        "refusalCorrect" : 1.0,
+        "citationValidity" : 1.0
+      }
+    },
+    "totalCostUsdMicros" : 5495,
+    "meanCostUsdMicros" : 785,
+    "latencyP95Ms" : 4902,
+    "items" : [ {
+      "id" : "A-ARCLK-1126828",
+      "kind" : "ANSWER",
+      "ticker" : "ARCLK",
+      "question" : "ARCLK yönetim kurulu komiteleri bildirimi hangi tarihte yayımlandı?",
+      "status" : "OK",
+      "outcome" : "NO_VALID_CITATIONS",
+      "citations" : 1,
+      "validCitations" : 1,
+      "citationBasis" : "RETRIEVAL",
+      "citationRecall" : 1.0,
+      "factRecall" : 1.0,
+      "correct" : false,
+      "costUsdMicros" : 879,
+      "latencyMs" : 4902
+    }, {
+      "id" : "A-THYAO-1207592",
+      "kind" : "ANSWER",
+      "ticker" : "THYAO",
+      "question" : "THYAO payların geri alınmasına ilişkin bildirimini hangi tarihte yayımladı?",
+      "status" : "OK",
+      "outcome" : "NO_VALID_CITATIONS",
+      "citations" : 1,
+      "validCitations" : 1,
+      "citationBasis" : "RETRIEVAL",
+      "citationRecall" : 1.0,
+      "factRecall" : 1.0,
+      "correct" : false,
+      "costUsdMicros" : 913,
+      "latencyMs" : 2686
+    }, {
+      "id" : "A-KCHOL-1172777",
+      "kind" : "ANSWER",
+      "ticker" : "KCHOL",
+      "question" : "KCHOL birleşme işlemlerine ilişkin bildirimini hangi tarihte yayımladı?",
+      "status" : "OK",
+      "outcome" : "NO_VALID_CITATIONS",
+      "citations" : 1,
+      "validCitations" : 1,
+      "citationBasis" : "RETRIEVAL",
+      "citationRecall" : 1.0,
+      "factRecall" : 1.0,
+      "correct" : false,
+      "costUsdMicros" : 823,
+      "latencyMs" : 2216
+    }, {
+      "id" : "A-SAHOL-1129966",
+      "kind" : "ANSWER",
+      "ticker" : "SAHOL",
+      "question" : "SAHOL kar payı dağıtım işlemlerine ilişkin bildirimi hangi tarihte yayımlandı?",
+      "status" : "OK",
+      "outcome" : "NO_VALID_CITATIONS",
+      "citations" : 1,
+      "validCitations" : 1,
+      "citationBasis" : "RETRIEVAL",
+      "citationRecall" : 1.0,
+      "factRecall" : 1.0,
+      "correct" : false,
+      "costUsdMicros" : 917,
+      "latencyMs" : 2207
+    }, {
+      "id" : "A-EREGL-1153942",
+      "kind" : "ANSWER",
+      "ticker" : "EREGL",
+      "question" : "EREGL pay geri alım bildirimi hangi tarihte yayımlandı?",
+      "status" : "OK",
+      "outcome" : "NO_VALID_CITATIONS",
+      "citations" : 1,
+      "validCitations" : 1,
+      "citationBasis" : "RETRIEVAL",
+      "citationRecall" : 1.0,
+      "factRecall" : 1.0,
+      "correct" : false,
+      "costUsdMicros" : 794,
+      "latencyMs" : 2204
+    }, {
+      "id" : "U-AKBNK",
+      "kind" : "UNANSWERABLE",
+      "ticker" : "AKBNK",
+      "question" : "AKBNK 2023 yılı üçüncü çeyrek net kârı ne kadardır?",
+      "status" : "OK",
+      "outcome" : "REFUSED",
+      "citations" : 0,
+      "validCitations" : 0,
+      "citationBasis" : "RETRIEVAL",
+      "citationRecall" : null,
+      "factRecall" : null,
+      "correct" : true,
+      "costUsdMicros" : 0,
+      "latencyMs" : 23
+    }, {
+      "id" : "U-THYAO-2025",
+      "kind" : "UNANSWERABLE",
+      "ticker" : "THYAO",
+      "question" : "THYAO 2025 yılında dağıttığı temettü tutarı nedir?",
+      "status" : "OK",
+      "outcome" : "NO_VALID_CITATIONS",
+      "citations" : 1,
+      "validCitations" : 1,
+      "citationBasis" : "RETRIEVAL",
+      "citationRecall" : null,
+      "factRecall" : null,
+      "correct" : true,
+      "costUsdMicros" : 1169,
+      "latencyMs" : 3087
+    } ]
+  }
+}

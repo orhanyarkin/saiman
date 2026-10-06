@@ -10,6 +10,16 @@ import org.junit.jupiter.api.Test;
 class LimitsConsistencyCheckTests {
 
     @Test
+    void aRunBudgetAboveTheDailyCapIsAStartupError() {
+        assertThat(LimitsConsistencyCheck.llmBudgetAboveDailyCap(150_000, 700_000))
+                .isNull();
+        assertThat(LimitsConsistencyCheck.llmBudgetAboveDailyCap(700_000, 700_000))
+                .isNull();
+        assertThat(LimitsConsistencyCheck.llmBudgetAboveDailyCap(700_001, 700_000))
+                .contains("no run could ever start");
+    }
+
+    @Test
     void aDefaultRunBudgetAboveTheDailyCapFailsStartup() {
         assertThatThrownBy(() -> new SpendProperties(40_000, 50_000, 200_000, 10_000, Duration.ofMinutes(5), 4, 6, 25))
                 .isInstanceOf(IllegalArgumentException.class)

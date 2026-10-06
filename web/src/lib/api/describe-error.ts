@@ -8,6 +8,15 @@ export function describeError(error: unknown): string {
         return error.retryAfterSeconds === null
           ? "Too many requests. Please try again in a moment."
           : `Too many requests. Please retry in ${String(error.retryAfterSeconds)} s.`;
+      case "unauthorized":
+        return "Authentication required. Connect with an API token to continue.";
+      case "forbidden":
+        return "This token is read-only. Connect with an operator token to do this.";
+      case "daily-cap":
+        return (
+          error.detail ??
+          "The daily model budget is used up, so no new runs can start until 00:00 UTC."
+        );
       case "not-ready":
         return "The orchestrator is starting. Please retry in a few seconds.";
       case "network":

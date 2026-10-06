@@ -1,5 +1,7 @@
 package io.github.orhanyarkin.saiman.orchestrator.run;
 
+import io.github.orhanyarkin.saiman.modelrouter.DailyCapStatus;
+import io.github.orhanyarkin.saiman.modelrouter.ModelRouter;
 import io.github.orhanyarkin.saiman.orchestrator.approval.ApprovalService;
 import io.github.orhanyarkin.saiman.orchestrator.budget.RunLimitsProperties;
 import io.github.orhanyarkin.saiman.orchestrator.budget.SpendProperties;
@@ -82,6 +84,7 @@ public class RunService {
     private final MeterRegistry meters;
     private final TransactionTemplate tx;
     private final Semaphore permits;
+    private final ModelRouter router;
 
     RunService(
             RunRepository runs,
@@ -96,7 +99,9 @@ public class RunService {
             ObservationRegistry observations,
             Tracer tracer,
             MeterRegistry meters,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager,
+            ModelRouter router) {
+        this.router = router;
         this.runs = runs;
         this.events = events;
         this.gateway = gateway;
@@ -139,6 +144,10 @@ public class RunService {
         } catch (IllegalArgumentException e) {
             throw rejected(RunAdmissionException.Reason.INVALID_BUDGET);
         }
+        RunAdmissionException.Reason capRefusal = dailyCapRefusal();
+        if (capRefusal != null) {
+            throw rejected(capRefusal);
+        }
         if (!permits.tryAcquire()) {
             throw rejected(RunAdmissionException.Reason.TOO_MANY_RUNS);
         }
@@ -159,6 +168,29 @@ public class RunService {
         }
         meters.counter("saiman.runs.started").increment();
         return new StartedRun(runId, EVENTS_URL.formatted(runId), awaitTraceId(traceHandoff));
+    }
+
+    /**
+     * ADR-0026: a run needs about {@code llm-budget-usd-micros} of model spend, so with less than that left of the
+     * global daily cap it is refused up front (the caller is offered a recorded run) instead of failing half way.
+     * Fails closed: if the router cannot say, no run starts. The cap is still enforced by reservation on every model
+     * call; this only decides whether to begin.
+     */
+    private RunAdmissionException.@Nullable Reason dailyCapRefusal() {
+        try {
+            DailyCapStatus status = router.dailyCap();
+            if (!status.counterReadable()) {
+                return RunAdmissionException.Reason.LLM_DAILY_CAP_UNKNOWN;
+            }
+            return status.remaining().atomicUnits() < limits.llmBudgetUsdMicros()
+                    ? RunAdmissionException.Reason.LLM_DAILY_CAP
+                    : null;
+        } catch (RuntimeException e) {
+            LOG.warn(
+                    "Daily model cap unreadable ({}); refusing the run",
+                    e.getClass().getSimpleName());
+            return RunAdmissionException.Reason.LLM_DAILY_CAP_UNKNOWN;
+        }
     }
 
     public Optional<RunSummary> summary(UUID runId) {

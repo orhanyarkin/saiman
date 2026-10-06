@@ -17,6 +17,7 @@ dependencies {
     implementation(libs.resilience4j.circuitbreaker) // breaker on the seller client, wired programmatically
     implementation(libs.resilience4j.retry) // jittered retry on the free ticker catalogue call only (never on a paid call)
     implementation(project(":libs:eventing")) // Modulith registry defaults (ADR-0016)
+    implementation(project(":libs:api-security")) // static role tokens behind the resource-server seam (ADR-0023)
     implementation(project(":libs:evm-rpc")) // safe-block chain reads for HELD resolution (ADR-0018)
     implementation(platform(libs.spring.modulith.bom))
     implementation(libs.spring.modulith.starter.jdbc) // transactional outbox: JDBC event publication registry
@@ -30,6 +31,7 @@ dependencies {
     testImplementation(libs.spring.boot.micrometer.tracing.test)
     testImplementation(project(":libs:test-support")) // one Postgres and Kafka per test JVM (ADR-0020)
     testImplementation(libs.opentelemetry.sdk.testing)
+    testImplementation(testFixtures(project(":libs:api-security"))) // TestTokens
     testImplementation(testFixtures(project(":libs:x402-spring-boot-starter"))) // TestWallets
     testImplementation(platform(libs.spring.ai.bom))
     testImplementation(testFixtures(project(":libs:model-router"))) // FakeChatModel etc. (no key, no network)

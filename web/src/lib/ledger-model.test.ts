@@ -11,6 +11,7 @@ import {
   ledgerArmTime,
   ledgerPollPhase,
   LEDGER_POLL_WINDOW_MS,
+  mismatchText,
 } from "@/lib/ledger-model";
 import { formatBigMoney } from "@/lib/money";
 
@@ -136,5 +137,17 @@ describe("trial balance check", () => {
     expect(check?.status).toBe("balanced");
     expect(check?.debits).toBe(18014398509481982n);
     expect(formatBigMoney(check?.debits ?? 0n, "USDC", 6)).toBe("18,014,398,509.481982 USDC");
+  });
+});
+
+describe("mismatchText", () => {
+  it("explains the uncorroborated credit note kind the API returns", () => {
+    expect(mismatchText("CREDIT_NOTE_UNCORROBORATED")).toBe(
+      "A credit note was booked that the seller does not confirm.",
+    );
+  });
+
+  it("falls back to a generic finding for an unknown kind (ADR: consumers must tolerate new kinds)", () => {
+    expect(mismatchText("SOMETHING_NEW")).toBe("Reconciliation finding: SOMETHING_NEW.");
   });
 });

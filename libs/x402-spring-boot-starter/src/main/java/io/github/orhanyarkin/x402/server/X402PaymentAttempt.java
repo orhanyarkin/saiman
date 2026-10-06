@@ -40,6 +40,7 @@ final class X402PaymentAttempt {
     private @Nullable String payer;
     private @Nullable String txHash;
     private boolean verified;
+    private long verifiedAtNanos;
     private boolean settleAttempted;
     private @Nullable String paymentResponseHeader;
     private boolean paidFailureReported;
@@ -125,6 +126,12 @@ final class X402PaymentAttempt {
         this.claimToken = claimToken;
         this.payer = payer;
         this.verified = true;
+        this.verifiedAtNanos = System.nanoTime();
+    }
+
+    /** {@link System#nanoTime()} when {@link #markVerified} ran; only meaningful for differences. */
+    long verifiedAtNanos() {
+        return verifiedAtNanos;
     }
 
     boolean verified() {

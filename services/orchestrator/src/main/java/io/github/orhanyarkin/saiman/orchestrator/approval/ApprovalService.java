@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -29,7 +30,7 @@ public class ApprovalService {
 
     private static final String COLUMNS =
             "id, payment_intent_id, run_id, amount_atomic, pay_to, resource, status, requested_at, decided_at,"
-                    + " expires_at";
+                    + " expires_at, decided_by";
 
     private final JdbcClient jdbc;
     private final PaymentIntentService intents;
@@ -101,11 +102,13 @@ public class ApprovalService {
      * either the run is already terminal here (refused) or the finish sees this decision and releases
      * an APPROVED intent that will never be sent.
      *
+     * @param decidedBy the authenticated principal name ({@code <role>:<8 hex of the token digest>}), stored as the
+     *     audit trail; never a token
      * @throws ApprovalNotFoundException if no approval with this id belongs to this run
      * @throws RunAlreadyFinishedException if the run has ended
      */
     @Transactional
-    public DecisionOutcome decide(UUID runId, UUID approvalId, ApprovalDecision decision) {
+    public DecisionOutcome decide(UUID runId, UUID approvalId, ApprovalDecision decision, String decidedBy) {
         LockedApproval locked = jdbc.sql("SELECT " + COLUMNS + ", expires_at <= now() AS expired FROM approval"
                         + " WHERE id = :id AND run_id = :runId FOR UPDATE")
                 .param("id", approvalId)
@@ -126,11 +129,11 @@ public class ApprovalService {
             return new DecisionOutcome(approval, false);
         }
         if (locked.expired()) {
-            return new DecisionOutcome(apply(approval, ApprovalStatus.EXPIRED), false);
+            return new DecisionOutcome(apply(approval, ApprovalStatus.EXPIRED, null), false);
         }
         ApprovalStatus status =
                 decision == ApprovalDecision.APPROVE ? ApprovalStatus.APPROVED : ApprovalStatus.REJECTED;
-        return new DecisionOutcome(apply(approval, status), true);
+        return new DecisionOutcome(apply(approval, status, decidedBy), true);
     }
 
     /**
@@ -148,7 +151,7 @@ public class ApprovalService {
         if (approval.status() != ApprovalStatus.PENDING) {
             return approval.status();
         }
-        return apply(approval, ApprovalStatus.EXPIRED).status();
+        return apply(approval, ApprovalStatus.EXPIRED, null).status();
     }
 
     /**
@@ -165,15 +168,17 @@ public class ApprovalService {
                 .param("runId", runId)
                 .query(ApprovalService::map)
                 .list();
-        pending.forEach(approval -> apply(approval, ApprovalStatus.EXPIRED));
+        pending.forEach(approval -> apply(approval, ApprovalStatus.EXPIRED, null));
         return pending.size();
     }
 
-    private ApprovalView apply(ApprovalView approval, ApprovalStatus status) {
-        ApprovalView updated = jdbc.sql("UPDATE approval SET status = :status, decided_at = now()"
+    /** {@code decidedBy} is null for an expiry: nobody decided. */
+    private ApprovalView apply(ApprovalView approval, ApprovalStatus status, @Nullable String decidedBy) {
+        ApprovalView updated = jdbc.sql("UPDATE approval SET status = :status, decided_at = now(), decided_by = :by"
                         + " WHERE id = :id AND status = 'PENDING' RETURNING " + COLUMNS)
                 .param("id", approval.id())
                 .param("status", status.name())
+                .param("by", decidedBy)
                 .query(ApprovalService::map)
                 .single();
         switch (status) {
@@ -191,6 +196,18 @@ public class ApprovalService {
         return updated;
     }
 
+    /**
+     * The API shows only the role of the decider ({@code operator}), never the digest fragment of the principal name
+     * ({@code operator:1a2b3c4d}), which any READER could otherwise see. The column keeps the full name for audit.
+     */
+    private static @Nullable String roleOf(@Nullable String principalName) {
+        if (principalName == null) {
+            return null;
+        }
+        int colon = principalName.indexOf(':');
+        return colon < 0 ? principalName : principalName.substring(0, colon);
+    }
+
     private static ApprovalView map(ResultSet rs, int row) throws SQLException {
         Timestamp decidedAt = rs.getTimestamp("decided_at");
         return new ApprovalView(
@@ -203,7 +220,8 @@ public class ApprovalService {
                 ApprovalStatus.valueOf(rs.getString("status")),
                 rs.getTimestamp("requested_at").toInstant(),
                 decidedAt == null ? null : decidedAt.toInstant(),
-                rs.getTimestamp("expires_at").toInstant());
+                rs.getTimestamp("expires_at").toInstant(),
+                roleOf(rs.getString("decided_by")));
     }
 
     /**

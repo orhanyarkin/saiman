@@ -100,7 +100,8 @@ public class X402ClientAutoConfiguration {
                 requireMaxAmountPerRequest(properties),
                 requireAllowedPayTo(properties),
                 plaintextHosts,
-                observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP));
+                observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP),
+                requireClockSkewSeconds(properties));
     }
 
     /**
@@ -161,6 +162,19 @@ public class X402ClientAutoConfiguration {
      * @throws IllegalStateException if {@code x402.client.max-amount-per-request} is missing or
      *     not positive; the message states the rule only, never {@code properties}' values
      */
+    /**
+     * @throws IllegalStateException if {@code x402.client.clock-skew-seconds} is outside 0..600; the
+     *     message states the rule only
+     */
+    static long requireClockSkewSeconds(X402ClientProperties properties) {
+        long skew = properties.effectiveClockSkewSeconds();
+        if (skew < 0 || skew > X402PaymentInterceptor.DEFAULT_CLOCK_SKEW_SECONDS) {
+            throw new IllegalStateException("x402.client.clock-skew-seconds must be between 0 and "
+                    + X402PaymentInterceptor.DEFAULT_CLOCK_SKEW_SECONDS);
+        }
+        return skew;
+    }
+
     private static long requireMaxAmountPerRequest(X402ClientProperties properties) {
         Long maxAmountPerRequest = properties.maxAmountPerRequest();
         if (maxAmountPerRequest == null || maxAmountPerRequest <= 0) {

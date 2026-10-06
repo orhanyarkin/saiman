@@ -14,7 +14,18 @@ public final class RunAdmissionException extends RuntimeException {
         /** 429: {@code max-concurrent} runs are executing. */
         TOO_MANY_RUNS("too many runs are executing; try again later"),
         /** 503: the service is not ready (startup recovery has not finished). */
-        NOT_READY("the orchestrator is not ready to accept runs yet");
+        NOT_READY("the orchestrator is not ready to accept runs yet"),
+        /**
+         * 503 with {@code code LLM_DAILY_CAP_REACHED} (ADR-0026): what is left of the global daily model budget is
+         * below one run's model budget, or the counter could not be read (fail closed). A recorded run can be watched
+         * instead.
+         */
+        LLM_DAILY_CAP("The daily model budget is used up. Watch a recorded run instead."),
+        /**
+         * 503 like {@link #LLM_DAILY_CAP}, but the cap counter could not be read (Redis down or corrupt), so the
+         * run is refused to fail closed. Retry-After is short: the condition may clear in a minute, not at midnight.
+         */
+        LLM_DAILY_CAP_UNKNOWN("The daily model budget is used up. Watch a recorded run instead.");
 
         private final String detail;
 

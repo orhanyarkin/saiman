@@ -8,7 +8,7 @@ import { createFixtureServer } from "./fixture-server.ts";
 const POST_HEADERS = { "Content-Type": "application/json", "X-Saiman-Csrf": "1" };
 
 let base = "";
-const server = createFixtureServer({ stepMs: 5, heartbeatMs: 60_000 });
+const server = createFixtureServer({ stepMs: 5, heartbeatMs: 60_000, auth: false });
 
 beforeAll(async () => {
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
@@ -170,6 +170,7 @@ describe("fixture server", () => {
 
   it("serves captured responses verbatim and 404s unknown paths", async () => {
     const custom = createFixtureServer({
+      auth: false,
       capture: { responses: { "/api/v1/spend?day=2026-10-01": { dailyCap: 1 } } },
     });
     await new Promise<void>((done) => custom.listen(0, "127.0.0.1", done));
@@ -200,7 +201,12 @@ describe("fixture server", () => {
   });
 
   it("shows a settled payment in the ledger a moment after the settled event", async () => {
-    const lagged = createFixtureServer({ stepMs: 5, heartbeatMs: 60_000, ledgerLagMs: 150 });
+    const lagged = createFixtureServer({
+      stepMs: 5,
+      heartbeatMs: 60_000,
+      ledgerLagMs: 150,
+      auth: false,
+    });
     await new Promise<void>((done) => lagged.listen(0, "127.0.0.1", done));
     const url = `http://127.0.0.1:${String((lagged.address() as AddressInfo).port)}`;
     const headers = { "Content-Type": "application/json", "X-Saiman-Csrf": "1" };
@@ -245,7 +251,7 @@ describe("fixture server", () => {
   });
 
   it("scripts the reconciliation start: 202, 409 while running, 429 right after, 202 again", async () => {
-    const recon = createFixtureServer({ reconRunMs: 100, reconCooldownMs: 1500 });
+    const recon = createFixtureServer({ auth: false, reconRunMs: 100, reconCooldownMs: 1500 });
     await new Promise<void>((done) => recon.listen(0, "127.0.0.1", done));
     const url = `http://127.0.0.1:${String((recon.address() as AddressInfo).port)}`;
     const start = () =>

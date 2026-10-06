@@ -200,6 +200,88 @@ if grep -q "keep" "${out_file}"; then
   failures=$((failures + 1))
 fi
 
+# --- M6: generated secrets, digests, ingest backfill secrets (ADR-0023/0024) ---
+gen_dir="${work_dir}/gen"
+expect_exit "ensure-secret-files: generates DB passwords and tokens" 0 env SECRETS_DIR="${gen_dir}" scripts/ensure-secret-files.sh
+tok="$(cat "${gen_dir}/api_reader_token")"
+if [[ "${tok}" =~ ^[A-Za-z0-9_-]{43}$ && "$(stat -c %a "${gen_dir}/api_reader_token")" == "600" \
+  && "$(stat -c %a "${gen_dir}/seller_service_token_ledger")" == "644" \
+  && "$(cat "${gen_dir}/pg_ledger_app_password")" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "PASS: ensure-secret-files: token 43 base64url chars (0600 human / 0644 mounted), password 64 hex"
+else
+  echo "FAIL: ensure-secret-files: generated secrets have the wrong shape or mode" >&2
+  failures=$((failures + 1))
+fi
+if grep -qF "${tok}" "${out_file}" "${err_file}"; then
+  echo "FAIL: ensure-secret-files printed a token" >&2
+  failures=$((failures + 1))
+fi
+before="$(cat "${gen_dir}"/pg_* "${gen_dir}"/api_* "${gen_dir}"/seller_service_token_* | sha256sum)"
+expect_exit "ensure-secret-files: rerun generates nothing" 0 env SECRETS_DIR="${gen_dir}" scripts/ensure-secret-files.sh
+after="$(cat "${gen_dir}"/pg_* "${gen_dir}"/api_* "${gen_dir}"/seller_service_token_* | sha256sum)"
+if [[ "${before}" == "${after}" && ! -s "${out_file}" ]]; then
+  echo "PASS: ensure-secret-files: existing generated secrets are kept and the rerun is silent"
+else
+  echo "FAIL: ensure-secret-files: rerun changed or printed something" >&2
+  failures=$((failures + 1))
+fi
+digests="$(SECRETS_DIR="${gen_dir}" scripts/with-auth-digests.sh --print)"
+want="$(tr -d '\r\n' <"${gen_dir}/api_reader_token" | sha256sum | cut -d' ' -f1)"
+if grep -qx "SAIMAN_AUTH_READER_TOKEN_SHA256=${want}" <<<"${digests}" && ! grep -qF "${tok}" <<<"${digests}"; then
+  echo "PASS: with-auth-digests: SHA-256 of the token file, token not printed"
+else
+  echo "FAIL: with-auth-digests: unexpected digests" >&2
+  failures=$((failures + 1))
+fi
+ing_dest="${work_dir}/ing2"
+scripts/prepare-ingest-secrets.sh "${gen_dir}" "${ing_dest}" 2>/dev/null
+touch "${gen_dir}/mkk_credentials"
+if [[ -f "${ing_dest}/spring.datasource.password" && -f "${ing_dest}/spring.flyway.password" && ! -e "${ing_dest}/api_reader_token" && ! -e "${ing_dest}/pg_ledger_app_password" ]]; then
+  echo "PASS: prepare-ingest-secrets: ingest DB passwords mapped to spring.* properties, nothing else"
+else
+  echo "FAIL: prepare-ingest-secrets: unexpected ingest secrets dir" >&2
+  failures=$((failures + 1))
+fi
+
+# --- with-auth-digests.sh rejects weak or known tokens (ADR-0023) ---
+bad_dir="${work_dir}/badtok"
+cp -r "${gen_dir}" "${bad_dir}"
+for case in "short:abc123" "lowdiversity:$(printf 'ab%.0s' {1..30})" "badchars:$(printf 'a-b_c%.0s' {1..10})!!!!!!!!!!" "testtoken:saiman-test-reader-token-0123456789abcdefghij"; do
+  name="${case%%:*}"
+  printf '%s' "${case#*:}" >"${bad_dir}/api_reader_token"
+  expect_exit "with-auth-digests: rejects ${name} token" 1 env SECRETS_DIR="${bad_dir}" scripts/with-auth-digests.sh --print
+  if grep -qF "${case#*:}" "${out_file}" "${err_file}"; then
+    echo "FAIL: with-auth-digests: ${name} token was printed" >&2
+    failures=$((failures + 1))
+  fi
+done
+
+# --- with-auth-digests.sh never puts a token in argv (stub wrappers log every argv) ---
+stub_bin="${work_dir}/stubbin"
+argv_log="${work_dir}/argv.log"
+mkdir -p "${stub_bin}"
+: >"${argv_log}"
+for tool in grep fold sort tr cut sha256sum wc mktemp; do
+  real="$(command -v "${tool}")"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$0 $*" >>"%s"\nexec "%s" "$@"\n' "${argv_log}" "${real}" >"${stub_bin}/${tool}"
+  chmod +x "${stub_bin}/${tool}"
+done
+PATH="${stub_bin}:${PATH}" SECRETS_DIR="${gen_dir}" scripts/with-auth-digests.sh --print >/dev/null
+leaked=0
+for f in api_reader_token api_operator_token seller_service_token_ledger seller_service_token_evals; do
+  grep -qF "$(cat "${gen_dir}/${f}")" "${argv_log}" && leaked=1
+done
+if [[ -s "${argv_log}" && "${leaked}" -eq 0 ]]; then
+  echo "PASS: with-auth-digests: no token in the argv of any helper process (${argv_log##*/} had $(wc -l <"${argv_log}") calls)"
+else
+  echo "FAIL: with-auth-digests: a token appeared in argv (or the stubs saw nothing)" >&2
+  failures=$((failures + 1))
+fi
+expect_exit "curl-auth: refuses -v" 2 scripts/curl-auth.sh reader -v http://localhost:1/
+expect_exit "curl-auth: refuses a -sSv cluster" 2 scripts/curl-auth.sh reader -sSv http://localhost:1/
+expect_exit "curl-auth: refuses -D-" 2 scripts/curl-auth.sh operator -D- http://localhost:1/
+expect_exit "capture-demo self-test" 0 scripts/capture-demo/test-scrub.sh
+
 if [[ "${failures}" -ne 0 ]]; then
   echo "test-check-compose-policy: ${failures} check(s) FAILED" >&2
   exit 1

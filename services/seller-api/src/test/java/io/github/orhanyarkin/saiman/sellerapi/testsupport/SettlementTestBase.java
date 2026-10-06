@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.sellerapi.testsupport;
 
 import io.github.orhanyarkin.saiman.sellerapi.SellerApiApplication;
+import io.github.orhanyarkin.saiman.testsupport.PostgresContainerConfiguration.SuperuserDatabase;
 import io.github.orhanyarkin.saiman.testsupport.RedisContainerConfiguration;
 import io.github.orhanyarkin.x402.core.PaymentFlow;
 import io.github.orhanyarkin.x402.core.PaymentPayload;
@@ -55,15 +56,17 @@ public abstract class SettlementTestBase {
     protected JdbcClient jdbc;
 
     @Autowired
+    protected SuperuserDatabase superuserDatabase;
+
+    @Autowired
     protected JsonMapper json;
 
     @BeforeEach
     void resetState() {
         FACILITATOR.resetInjectedFailures();
         FACILITATOR.resetCallCounts();
-        jdbc.sql("DELETE FROM event_publication").update();
-        jdbc.sql("DELETE FROM settlement").update();
-        jdbc.sql("DELETE FROM credit_note").update();
+        // As the superuser: the runtime role may not delete settlement or credit-note rows (ADR-0024).
+        SuperuserJdbc.reset(SuperuserJdbc.of(superuserDatabase));
     }
 
     protected final PaymentRequirements offer() {

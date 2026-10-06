@@ -1,0 +1,104 @@
+# Eval results
+
+Method and golden set: `services/evals/README.md`, ADR-0025. Reports from `make eval` land here as `latest.md` / `latest.json` (`runs/` keeps history); this file records the numbers that drove the recency-leg decision.
+
+## Retrieval baseline, golden set v1 (2026-10-05)
+
+Corpus `24303757d747de77` (frozen 2023 KAP snapshot, 16 tickers with indexed disclosures), ingest as running before the recency leg (two legs: vector + Turkish full text, RRF k=60), topK 10 chunks, ticker filter on, 19 queries. Disclosure level.
+
+| Kind | n | Metric | Baseline |
+|---|---:|---|---:|
+| RETRIEVAL | 16 | Recall@10 | 0.927 |
+| RETRIEVAL | 16 | MRR@10 | 0.911 |
+| RETRIEVAL | 16 | nDCG@10 | 0.870 |
+| RETRIEVAL | 16 | p95 latency | 1576 ms (first query after idle; the rest 210-440 ms) |
+| FRESHNESS | 3 | recency@5 | 0.067 |
+| FRESHNESS | 3 | latestHit@5 | 0.333 |
+| FRESHNESS | 3 | nDCG@10 | 0.181 |
+
+Per item: "THYAO son özel durum açıklamaları" returns five 2023 spring/summer disclosures (none of the five newest, which are all from 29 and 15 December); "ASELS en son açıklamaları" 0 of 5. Weakest RETRIEVAL items: TCELL (recall 0.33; three `Finansal Duran Varlık Edinimi` disclosures, only the primary one found), SISE (0.5) and ARCLK (MRR 0.25; the committee disclosure is rank 4 behind other March 2023 disclosures).
+
+## Recency leg (ingest `HybridRetriever`)
+
+A question with recency intent (`son`, `en son`, `güncel`, `yeni`, `latest`, `recent`, whole words, Turkish-locale case folding) **and** a ticker filter adds a third RRF leg: the first chunk of each of the 40 newest indexed documents of those tickers, ranked by `published_at DESC`. Its term is `RECENCY_WEIGHT / (60 + rank)`.
+
+**RETRIEVAL cannot regress by construction**: no RETRIEVAL question of the golden set contains an intent keyword, and without intent (or without tickers) the fused list is the exact two-leg result (`RetrievalTests.withoutRecencyIntentOrWithoutTickersTheResultIsTheTwoLegResult`, `RrfFusionTests.emptyRecencyLegGivesExactlyTheTwoLegResult`). So the RETRIEVAL numbers above are also the "after" numbers.
+
+**FRESHNESS, estimated.** The running ingest container is the old image, so the "after" for FRESHNESS is an SQL replay, not a live run: the lexical and recency legs were executed read-only against the live corpus with ingest's own queries, the vector ranks were taken from the baseline responses (topK 20; chunks the old response did not return contribute no vector term). Mean over the 3 FRESHNESS items:
+
+| Recency weight | recency@5 | latestHit@5 | nDCG@10 |
+|---|---:|---:|---:|
+| no leg (baseline) | 0.067 | 0.333 | 0.181 |
+| 1 | 0.200 | 0.333 | 0.294 |
+| 2 | 0.600 | 0.667 | 0.805 |
+| **3 (shipped)** | **0.733** | **0.667** | **0.852** |
+| 6 | 0.800 | 0.667 | 0.897 |
+
+Why a weight: with weight 1 the leg's best term (1/61) cannot lift a newest disclosure that neither other leg ranks above the fused top 10, so "ASELS en son açıklamaları" stays at 0. The weight only applies when the user explicitly asked for the newest. Weight 3 was picked as the knee of the curve on three items; the replay is optimistic about the vector leg and the set is tiny, so treat 0.73 as a hypothesis and **re-run the live eval after rebuilding ingest** (below). THYAO's newest disclosure still misses the top 10 at weights up to 6: other chunks of the December disclosures that match "özel durum açıklamaları" in both legs fill the ten chunk slots.
+
+### Reproduce the "after" run
+
+```bash
+./gradlew :services:ingest:bootBuildImage     # new ingest image (V3 grants need the db-init roles of T4)
+docker compose -f deploy/compose/docker-compose.yml --profile apps up -d ingest
+SAIMAN_EVALS_INGEST_BASE_URL=http://127.0.0.1:8083 SAIMAN_EVALS_OUTPUT_DIR=build/evals \
+SAIMAN_EVALS_LABEL=after GIT_SHA=$(git rev-parse --short HEAD) ./gradlew :services:evals:bootRun
+```
+
+Diff `build/evals/latest.json` against the baseline run file; RETRIEVAL must be identical.
+
+## Tier A: answers (how to run and read it)
+
+Off by default; `make eval` stays a free retrieval run and its `latest.md` says "Tier A not run". To score answers:
+
+```bash
+make up                 # apps healthy, incl. seller-api and the evals service token secret
+make eval EVAL_ANSWERS=1
+```
+
+This calls the seller's internal eval endpoint once per ANSWER/UNANSWERABLE item (7 in golden set v1, sequentially, at most 30), spends model money through the router (about $0.06 per 30 questions, bounded by the $0.70 day cap), and adds a "Tier A: answers" section to `latest.md`/`latest.json`: outcome counts, per-kind task success / fact recall / citation recall / citation validity / refusal correctness, per-item rows, total and per-question USD, p95 latency. Scoring is deterministic (no LLM judge); definitions are in `services/evals/README.md`.
+
+Reading the numbers: *task success* needs the right fact, every expected source cited and every citation valid, so one missed source fails the item; fact recall and citation recall show which half failed. *Citation validity* below 1.0 means the model cited a disclosure that retrieval does not return for that question. The ANSWER items are publication-date questions and the model receives each excerpt's publication timestamp from document metadata, so a high fact recall shows the metadata is used, not that dates are read from the disclosure text. If `stoppedOnCap` is set, the day cap ended the run: rerun after the cap resets.
+
+## Live run, M6 integration (2026-10-05, ingest with the recency leg, weight 3.0)
+
+`make eval` and `make eval EVAL_ANSWERS=1` against the local stack (corpus `24303757d747de77`). The committed `latest.md`/`latest.json` are the Tier A run.
+
+| Kind | Metric | Baseline (old ingest) | After (recency leg) |
+|---|---|---:|---:|
+| RETRIEVAL (n=16) | Recall@10 / MRR@10 / nDCG@10 | 0.927 / 0.911 / 0.870 | 0.927 / 0.911 / 0.870 (unchanged, as constructed) |
+| FRESHNESS (n=3) | recency@5 | 0.067 | **0.533** |
+| FRESHNESS | latestHit@5 | 0.333 | 0.667 |
+| FRESHNESS | nDCG@10 | 0.181 | 0.720 |
+
+The SQL replay had estimated recency@5 0.733 at weight 3; the live number is lower (0.533), and "THYAO son özel durum açıklamaları" still misses the newest disclosure (latestHit 0, recency@5 0.4). The leg is a clear improvement, not a fix; `saiman.ingest.retrieval.recency-weight` can be tuned without a rebuild.
+
+Tier A (7 questions, $0.0055 total, p95 4.9 s): fact recall 1.000, citation recall 1.000, citation validity 1.000, refusal correct 2/2, **task success 0.000**. Cause: the answer service answers only with at least two valid citations (paid-endpoint rule), and every ANSWER item is a single-disclosure question, so the outcome is `NO_VALID_CITATIONS` even though the answer text contains the facts and cites the right source. Follow-up: relabel the ANSWER items as two-source questions (or add a single-source golden kind) before treating task success as a quality number. The first live Tier A run also found that the eval POST must carry a Content-Length (seller-api answers 413 to a chunked body); fixed.
+
+## ANSWER items relabelled as two-source questions (2026-10-05)
+
+Why: the seller answer service answers only with at least two valid citations (the paid questions endpoint returns 422 and a credit note otherwise), so the first Tier A run, whose five ANSWER items were single-disclosure questions, ended as `NO_VALID_CITATIONS` for every item and scored task success 0.000 even though the answers contained the right facts and cited the right source. That measured the labels, not the product. The items are now two-source questions: each uses a distinct ticker and two disclosures of different types and dates, `expected.sources` holds both, `requiredFacts` has one date per disclosure; labels were read from the corpus before the run and were not changed afterwards (`services/evals/README.md` has the SQL).
+
+| ANSWER (n=5) / UNANSWERABLE (n=2) | Before (single-source, run `d072373`) | After (two-source, run `652710d`) |
+|---|---:|---:|
+| taskSuccess | 0.000 | **1.000** |
+| factRecall | 1.000 | 1.000 |
+| citationRecall | 1.000 | 1.000 |
+| citationValidity | 1.000 | 1.000 |
+| refusalCorrect (UNANSWERABLE) | 1.000 | 1.000 |
+| outcomes | 6 NO_VALID_CITATIONS, 1 REFUSED | 5 ANSWERED, 1 NO_VALID_CITATIONS, 1 REFUSED |
+| cost / p95 latency | $0.005495 / 4.9 s | $0.005903 / 3.8 s |
+
+Reading: the jump from 0.000 comes from the labels now matching the service contract, not from a change in the service. n=5 is a smoke test, not a benchmark: every item is saturated, which also means the set cannot discriminate between models or prompts yet. Publication dates are answerable because the service gives the model each excerpt's `published` timestamp. A free-form question can still fail the two-citation rule: a live demo run "ASELS en son açıklamaları neler ve hangi konulara ilişkin?" ended `NO_EVIDENCE` (the paid upfront calls were settled and credited) while the same kind of question for THYAO, SISE and ARCLK succeeded.
+
+## TEMPORAL items: no relative-time claims (2026-10-05)
+
+Why: an early demo answer to "SISE güncel bildirimlerinde neler var?" said there had been no new disclosure "in the last 7 days" - a relative-time claim that is false for a frozen corpus whose newest disclosure is from 29 Dec 2023. The answer prompt now states the snapshot date and forbids relative-time wording (`GroundedGenerator`, rule 6); the eval has a `TEMPORAL` kind (two recency-phrased questions: SISE and KCHOL) and an extra `relativeTimeFree` metric on the ANSWER items, checked deterministically against a documented list of Turkish and English patterns (`services/evals/README.md`).
+
+| | Before the prompt rule | After (run `dd7a79f`) |
+|---|---|---|
+| SISE "güncel bildirimleri" | one observed demo answer with "son 7 günde ..." (n = 1, not an eval run) | no relative-time expression, 8 valid citations |
+| TEMPORAL temporalSuccess / relativeTimeFree (n = 2) | not measured | 1.000 / 1.000 |
+| ANSWER relativeTimeFree (n = 5) | not measured | 1.000 |
+
+n = 2 and a phrase list are a regression guard, not a guarantee: the model can paraphrase a relative-time claim the patterns do not list.

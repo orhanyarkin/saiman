@@ -59,13 +59,14 @@ if [[ -n "${bad_ports}" ]]; then
   violations=1
 fi
 
-# 2. Every service in the "apps" profile must set pull_policy: never, so compose can
+# 2. Every service in the "apps" profile (and "evals") must set pull_policy: never, so compose can
 #    never silently fall back to pulling an image with this tag from a registry
-#    instead of using the one just built locally by `./gradlew bootBuildImage`.
+#    instead of using the one just built locally by `./gradlew bootBuildImage`. The
+#    one-shot `evals` service (profile "evals", M6) is covered too.
 bad_pull_policy=$(jq -r '
   .services
   | to_entries[]
-  | select((.value.profiles // []) | index("apps"))
+  | select(((.value.profiles // []) | index("apps")) or ((.value.profiles // []) | index("evals")))
   # `web` is the one apps-profile service that runs a registry image (pinned nginx, rule 5).
   | select(.key != "web")
   | select(.value.pull_policy != "never")
@@ -115,23 +116,90 @@ fi
 #        bare 0x-prefixed 32-byte hex literal) -- including on orchestrator itself, since
 #        before its M3 secrets: mount lands it has no business holding one either.
 bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
-  . as $root
-  | def allowed: {"ingest": ["mkk_credentials", "openai_api_key"], "seller-api": ["openai_api_key"], "orchestrator": ["x402_buyer_private_key", "openai_api_key"]};
+  . as $orig
+  # Env keys are normalised (upper case, "." and "-" -> "_") before every name rule: Spring relaxed
+  # binding would otherwise let a dotted or lower-case key slip past an upper-case rule.
+  | def norm: ascii_upcase | gsub("[.-]"; "_");
+  (.services |= map_values(if .environment then .environment |= with_entries(.key |= norm) else . end)) as $root
+  | def allowed: {
+        "postgres": ["pg_superuser_password"],
+        "ingest": ["mkk_credentials", "openai_api_key", "pg_ingest_owner_password", "pg_ingest_app_password"],
+        "seller-api": ["openai_api_key", "pg_seller_api_owner_password", "pg_seller_api_app_password"],
+        "orchestrator": ["x402_buyer_private_key", "openai_api_key", "pg_orchestrator_owner_password", "pg_orchestrator_app_password"],
+        "ledger": ["pg_ledger_owner_password", "pg_ledger_app_password", "seller_service_token_ledger"],
+        "evals": ["seller_service_token_evals"],
+        "db-init": ["pg_superuser_password", "pg_orchestrator_owner_password", "pg_orchestrator_app_password", "pg_ledger_owner_password", "pg_ledger_app_password", "pg_seller_api_owner_password", "pg_seller_api_app_password", "pg_ingest_owner_password", "pg_ingest_app_password"]
+      };
+    # Property each mounted secret must be exposed as (configtree file name, ADR-0023/0024); db-init has no target.
+    def target_of: {"seller_service_token_ledger": "saiman.ledger.seller.service-token", "seller_service_token_evals": "saiman.evals.seller.service-token"};
+    def pg_target($src): if ($src | test("^pg_.*_owner_password$")) then "spring.flyway.password" elif ($src | test("^pg_.*_app_password$")) then "spring.datasource.password" else null end;
+    # Own database users per app service (ADR-0024).
+    def db_schema: {"orchestrator": "orchestrator", "seller-api": "seller_api", "ledger": "ledger", "ingest": "ingest"};
+    def bind_sources: {"otel-collector": ["/otel-collector.yaml"], "web": ["/web/dist", "/nginx.conf"], "db-init": ["/postgres"], "evals": ["/build/evals"]};
+    def inscope($p): ((($p // []) | index("apps")) != null) or ((($p // []) | index("evals")) != null);
     def forbidden_env: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_BASE_URL", "OPENAI_LOG", "SPRING_APPLICATION_JSON", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "SPRING_CONFIG_IMPORT", "SPRING_CONFIG_LOCATION", "SPRING_CONFIG_ADDITIONAL_LOCATION"];
     def keyish: test("(?i)(PRIVATE_?KEY|/secrets(/|$)|\\.key$|\\.pem$)|0x[0-9a-fA-F]{64}");
     $root.services | to_entries[] | .key as $svc | .value as $s
   | ( if ($s.env_file // []) | length > 0
       then "\($svc): env_file is not allowed (per-service env vars only, ADR-0009)"
       else empty end ),
-    ( ($s.environment // {}) | to_entries[] | "\(.key)=\(.value // "")" | select(keyish)
+    ( ($s.environment // {}) | to_entries[] | select(.key != "POSTGRES_PASSWORD_FILE") | "\(.key)=\(.value // "")" | select(keyish)
       | "\($svc): environment entry looks like a private key (ADR-0009: the buyer key reaches only the orchestrator, via secrets:, never as an environment entry)" ),
     ( ($s.secrets // [])[]? | .source as $src
       | select(((allowed[$svc] // []) | index($src)) == null)
       | "\($svc): mounts secret \"\($src)\" (allowed: \((allowed[$svc] // []) | join(", ") | if . == "" then "none" else . end); ADR-0009)" ),
-    ( ($s.secrets // [])[]? | .source as $src | select(($src == "mkk_credentials" or $src == "openai_api_key" or $src == "x402_buyer_private_key"))
+    ( ($s.secrets // [])[]? | .source as $src
       | ($root.secrets // {})[$src] as $def
       | select(($def.file // "") != ($secrets_dir + "/" + $src))
       | "\($svc): secret \"\($src)\" must be file-sourced from the repo secrets/\($src) (not environment or another path)" ),
+    ( ($s.secrets // [])[]? | select($svc != "db-init") | .source as $src
+      | (target_of[$src] // pg_target($src)) as $want
+      | select($want != null and (.target // "") != $want)
+      | "\($svc): secret \"\($src)\" must be mounted with target \"\($want)\" (configtree property name, ADR-0023/0024)" ),
+    ( ($orig.services[$svc].environment // {}) | keys[] | select(test("^[A-Z][A-Z0-9_]*$") | not)
+      | "\($svc): environment key \"\(.)\" is not UPPER_SNAKE_CASE (dotted or lower-case keys would bypass the name rules)" ),
+    ( ($s.environment // {}) | to_entries[] | select(.key | test("PASSWORD"))
+      | select(($svc == "postgres" and .key == "POSTGRES_PASSWORD_FILE" and (.value // "") == "/run/secrets/pg_superuser_password") | not)
+      | "\($svc): environment \(.key) is not allowed (passwords arrive as file secrets; only postgres may set POSTGRES_PASSWORD_FILE=/run/secrets/pg_superuser_password, ADR-0024)" ),
+    ( ($s.environment // {}) | to_entries[] | select(.key | test("TOKEN$"))
+      | "\($svc): environment \(.key) is not allowed (raw tokens arrive as file secrets or stay with humans; only SAIMAN_AUTH_*_SHA256 digests may be env, ADR-0023)" ),
+    ( ($s.volumes // [])[]? | select(.type == "bind") | .source as $src
+      | select(((bind_sources[$svc] // []) | map(. as $suffix | $src | endswith($suffix)) | any) | not)
+      | "\($svc): bind source \($src) is not on the allowlist for this service (\((bind_sources[$svc] // []) | join(", ") | if . == "" then "none" else . end))" ),
+    ( if inscope($s.profiles) then
+        ( select($s.command != null or $s.entrypoint != null)
+          | "\($svc): command/entrypoint overrides are not allowed on app services (they could pass --saiman.* flags)" ),
+        ( ($s.environment // {}) | to_entries[] | select(.key == "SPRING_DATASOURCE_URL")
+          | select((.value // "") != "jdbc:postgresql://postgres:5432/saiman")
+          | "\($svc): SPRING_DATASOURCE_URL must be exactly jdbc:postgresql://postgres:5432/saiman (no URL parameters, no credentials)" ),
+        ( ($s.environment // {}) | to_entries[] | select(.key | test("^SPRING_(DATASOURCE|FLYWAY)_(USERNAME|USER)$"))
+          | . as $e | (db_schema[$svc]) as $schema
+          | select($schema == null
+              or ($e.key == "SPRING_DATASOURCE_USERNAME" and ($e.value // "") != ($schema + "_app"))
+              or ($e.key == "SPRING_FLYWAY_USER" and ($e.value // "") != ($schema + "_owner")))
+          | "\($svc): \($e.key)=\($e.value // "") is not allowed (runtime user is <schema>_app, migration user <schema>_owner, never the saiman superuser, ADR-0024)" ),
+        ( select(db_schema[$svc] != null and ($s.profiles // []) == ["apps"])
+          | ( select((($s.environment // {}).SPRING_DATASOURCE_USERNAME // "") != (db_schema[$svc] + "_app"))
+              | "\($svc): SPRING_DATASOURCE_USERNAME must be \(db_schema[$svc])_app (ADR-0024)" ),
+            ( select((($s.environment // {}).SPRING_FLYWAY_USER // "") != (db_schema[$svc] + "_owner"))
+              | "\($svc): SPRING_FLYWAY_USER must be \(db_schema[$svc])_owner (ADR-0024)" ) )
+      else empty end ),
+    ( ($s.environment // {}) | to_entries[] | select(.key | test("^SAIMAN_AUTH_"))
+      | . as $e
+      | ( select(($e.key | test("^SAIMAN_AUTH_(READER_TOKEN|OPERATOR_TOKEN|SERVICE_TOKENS_(LEDGER|EVALS))_SHA256$")) | not)
+          | "\($svc): \($e.key) is not one of the known SAIMAN_AUTH_*_SHA256 digest variables (ADR-0023)" ),
+        ( select(($e.key | test("^SAIMAN_AUTH_(READER|OPERATOR)_TOKEN_SHA256$")) and ($svc != "orchestrator" and $svc != "ledger"))
+          | "\($svc): \($e.key) is only allowed on orchestrator and ledger (human role digests, ADR-0023)" ),
+        ( select(($e.key | test("^SAIMAN_AUTH_SERVICE_TOKENS_")) and $svc != "seller-api")
+          | "\($svc): \($e.key) is only allowed on seller-api (the verifier of the service tokens, ADR-0023)" ),
+        ( select((($e.value // "") | test("^(\\$\\{\($e.key):-\\}|[0-9a-f]{64})$")) | not)
+          | "\($svc): \($e.key) must be the interpolation \"${\($e.key):-}\" or a 64-hex digest" ) ),
+    ( ($s.volumes // [])[]? | select(.type == "bind" and ((.read_only // false) | not))
+      | select(($svc == "evals" and (.source | endswith("/build/evals")) and .target == "/out") | not)
+      | "\($svc): bind mount \(.source) is writable (only evals may write, and only to build/evals mounted at /out; everything else must be :ro)" ),
+    ( select($svc == "evals")
+      | select((($s.volumes // []) | length) != 1)
+      | "evals: must have exactly one volume (../../build/evals:/out)" ),
     ( ($s.environment // {}) | keys[] | select(. as $k | (forbidden_env | index($k)) != null or ($k | test("^(SPRING_AI_OPENAI_|SAIMAN_INGEST_MKK_|SPRINGDOC_)")))
       | "\($svc): environment defines \(.) (the OpenAI key must arrive only as a secret file; OPENAI_BASE_URL / SPRING_AI_OPENAI_* would redirect the key, OPENAI_LOG=debug dumps prompts, SPRING_APPLICATION_JSON / SPRING_CONFIG_* / *JAVA_OPTIONS can inject any property or load arbitrary config; SAIMAN_INGEST_MKK_* would redirect the MKK Basic credential; SPRINGDOC_* could turn the OpenAPI endpoint back on, ADR-0022)" ),
     ( ($s.environment // {}) | to_entries[] | select(.key == "X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS")

@@ -27,6 +27,9 @@ export type ApprovalView = Schemas["ApprovalView"];
 export type ApprovalResponse = Schemas["ApprovalResponse"];
 export type DecisionRequest = Schemas["DecisionRequest"];
 export type SpendOverview = Schemas["SpendOverview"];
+export type LlmDay = Schemas["SpendLlmDay"];
+/** `GET /api/v1/me` (ADR-0023); `roles` are the backend's role names ("READER", "OPERATOR"). */
+export type Me = Schemas["MeResponse"];
 export type SpendLimits = Schemas["SpendLimits"];
 export type SpendByTool = Schemas["SpendByTool"];
 export type ProblemDetail = Schemas["ProblemDetail"];

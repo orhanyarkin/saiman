@@ -8,6 +8,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -53,6 +54,9 @@ public class UnsettledRunGuard {
     private static final String STARTED_ATTRIBUTE = UnsettledRunGuard.class.getName() + ".STARTED";
 
     private static final Logger log = LoggerFactory.getLogger(UnsettledRunGuard.class);
+
+    /** A service caller name ({@code saiman.auth.service.tokens.<caller>}); never a payer address. */
+    private static final Pattern CALLER = Pattern.compile("[a-z][a-z0-9]{0,31}");
 
     private static final long INFLIGHT_KEY_TTL_SECONDS = 300;
     private static final long HOUR_KEY_TTL_SECONDS = 2 * 3600;
@@ -163,6 +167,75 @@ public class UnsettledRunGuard {
         }
     }
 
+    /**
+     * Reserves a model run for an internal, authenticated service {@code caller} that does not pay (the eval
+     * harness, ADR-0025). Same atomic script as {@link #tryStart}, under keys of their own ({@code
+     * seller:runs:caller:...}, never a payer address) and with the caller's own limits; such runs never touch
+     * the unsettled day budget. Pair it with {@link #finishCaller(String)} in a {@code finally} block.
+     *
+     * @param caller the service caller name, lowercase letters and digits
+     * @param maxInFlight runs the caller may have running at the same time
+     * @param maxPerHour runs the caller may start in any rolling hour
+     * @param maxPerDay runs the caller may start per UTC day (never given back: these runs are not paid)
+     * @throws RunLimitExceededException if a limit is reached (nothing was reserved)
+     * @throws RunGuardUnavailableException if the state store could not be reached (fail closed)
+     * @throws IllegalArgumentException for a malformed caller name or a non-positive limit
+     */
+    public void tryStartCaller(String caller, int maxInFlight, int maxPerHour, int maxPerDay) {
+        requireCaller(caller);
+        if (maxInFlight < 1 || maxPerHour < 1 || maxPerDay < 1) {
+            throw new IllegalArgumentException("caller limits must be positive");
+        }
+        long now = clock.millis();
+        Long verdict;
+        try {
+            verdict = redis.execute(
+                    START,
+                    List.of(callerInflightKey(caller), callerHourlyKey(caller), callerDayKey(caller)),
+                    Long.toString(now),
+                    Long.toString(Duration.ofHours(1).toMillis()),
+                    Integer.toString(maxInFlight),
+                    Integer.toString(maxPerHour),
+                    Integer.toString(maxPerDay),
+                    UUID.randomUUID().toString(),
+                    Long.toString(INFLIGHT_KEY_TTL_SECONDS),
+                    Long.toString(HOUR_KEY_TTL_SECONDS),
+                    Long.toString(DAY_KEY_TTL_SECONDS),
+                    // Counted against the caller's own UTC-day key (the script's day slot), never the payers'
+                    // unsettled budget.
+                    "1");
+        } catch (RuntimeException e) {
+            log.error("run guard unavailable: {}", e.getClass().getSimpleName());
+            throw new RunGuardUnavailableException();
+        }
+        if (verdict == null) {
+            throw new RunGuardUnavailableException();
+        }
+        if (verdict != ALLOWED) {
+            log.warn(
+                    "model run refused for caller {} ({})",
+                    caller,
+                    verdict == PAYER_BUSY ? "in-flight" : verdict == PAYER_HOURLY ? "hourly" : "daily");
+            throw new RunLimitExceededException();
+        }
+    }
+
+    /** Ends a run started with {@link #tryStartCaller}: frees the caller's in-flight slot. Never throws. */
+    public void finishCaller(String caller) {
+        requireCaller(caller);
+        try {
+            redis.execute(DECREMENT, List.of(callerInflightKey(caller)));
+        } catch (RuntimeException e) {
+            log.error("run guard finish failed: {}", e.getClass().getSimpleName());
+        }
+    }
+
+    private static void requireCaller(String caller) {
+        if (!CALLER.matcher(caller).matches()) {
+            throw new IllegalArgumentException("caller must be lowercase letters and digits, starting with a letter");
+        }
+    }
+
     /** Ends a run started with {@link #tryStart}: frees the payer's in-flight slot. Never throws. */
     public void finish(String payer) {
         try {
@@ -195,6 +268,18 @@ public class UnsettledRunGuard {
 
     private String unsettledKey() {
         return PREFIX + "unsettled:" + LocalDate.now(clock.withZone(ZoneOffset.UTC));
+    }
+
+    private static String callerInflightKey(String caller) {
+        return PREFIX + "caller:inflight:" + caller;
+    }
+
+    private String callerDayKey(String caller) {
+        return PREFIX + "caller:day:" + caller + ":" + LocalDate.now(clock.withZone(ZoneOffset.UTC));
+    }
+
+    private static String callerHourlyKey(String caller) {
+        return PREFIX + "caller:hourly:" + caller;
     }
 
     private static String inflightKey(String payer) {

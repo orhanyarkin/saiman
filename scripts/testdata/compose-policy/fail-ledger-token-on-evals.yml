@@ -1,0 +1,115 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# evals mounts the ledger service token.
+# expect: evals: mounts secret "seller_service_token_ledger"
+name: cptest-m6
+services:
+  postgres:
+    image: busybox:1
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_superuser_password
+    secrets:
+      - pg_superuser_password
+  db-init:
+    image: busybox:1
+    secrets:
+      - pg_superuser_password
+      - pg_orchestrator_owner_password
+      - pg_orchestrator_app_password
+      - pg_seller_api_owner_password
+      - pg_seller_api_app_password
+      - pg_ledger_owner_password
+      - pg_ledger_app_password
+      - pg_ingest_owner_password
+      - pg_ingest_app_password
+    volumes:
+      - ../../deploy/compose/postgres:/bootstrap:ro
+  orchestrator:
+    image: busybox:1
+    profiles: ["apps"]
+    pull_policy: never
+    secrets:
+      - source: pg_orchestrator_owner_password
+        target: spring.flyway.password
+      - source: pg_orchestrator_app_password
+        target: spring.datasource.password
+    environment:
+      SPRING_DATASOURCE_USERNAME: orchestrator_app
+      SPRING_FLYWAY_USER: orchestrator_owner
+      SAIMAN_AUTH_READER_TOKEN_SHA256: ${SAIMAN_AUTH_READER_TOKEN_SHA256:-}
+      SAIMAN_AUTH_OPERATOR_TOKEN_SHA256: ${SAIMAN_AUTH_OPERATOR_TOKEN_SHA256:-}
+  seller-api:
+    image: busybox:1
+    profiles: ["apps"]
+    pull_policy: never
+    secrets:
+      - source: pg_seller_api_owner_password
+        target: spring.flyway.password
+      - source: pg_seller_api_app_password
+        target: spring.datasource.password
+    environment:
+      SPRING_DATASOURCE_USERNAME: seller_api_app
+      SPRING_FLYWAY_USER: seller_api_owner
+      SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256: ${SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256:-}
+      SAIMAN_AUTH_SERVICE_TOKENS_EVALS_SHA256: ${SAIMAN_AUTH_SERVICE_TOKENS_EVALS_SHA256:-}
+  ledger:
+    image: busybox:1
+    profiles: ["apps"]
+    pull_policy: never
+    secrets:
+      - source: pg_ledger_owner_password
+        target: spring.flyway.password
+      - source: pg_ledger_app_password
+        target: spring.datasource.password
+      - source: seller_service_token_ledger
+        target: saiman.ledger.seller.service-token
+    environment:
+      SPRING_DATASOURCE_USERNAME: ledger_app
+      SPRING_FLYWAY_USER: ledger_owner
+      SAIMAN_AUTH_READER_TOKEN_SHA256: ${SAIMAN_AUTH_READER_TOKEN_SHA256:-}
+      SAIMAN_AUTH_OPERATOR_TOKEN_SHA256: ${SAIMAN_AUTH_OPERATOR_TOKEN_SHA256:-}
+  ingest:
+    image: busybox:1
+    profiles: ["apps"]
+    pull_policy: never
+    secrets:
+      - source: pg_ingest_owner_password
+        target: spring.flyway.password
+      - source: pg_ingest_app_password
+        target: spring.datasource.password
+    environment:
+      SPRING_DATASOURCE_USERNAME: ingest_app
+      SPRING_FLYWAY_USER: ingest_owner
+  evals:
+    image: busybox:1
+    profiles: ["evals"]
+    pull_policy: never
+    secrets:
+      - source: seller_service_token_evals
+        target: saiman.evals.seller.service-token
+      - source: seller_service_token_ledger
+        target: saiman.ledger.seller.service-token
+    volumes:
+      - ../../build/evals:/out
+secrets:
+  pg_superuser_password:
+    file: ../../secrets/pg_superuser_password
+  pg_orchestrator_owner_password:
+    file: ../../secrets/pg_orchestrator_owner_password
+  pg_orchestrator_app_password:
+    file: ../../secrets/pg_orchestrator_app_password
+  pg_seller_api_owner_password:
+    file: ../../secrets/pg_seller_api_owner_password
+  pg_seller_api_app_password:
+    file: ../../secrets/pg_seller_api_app_password
+  pg_ledger_owner_password:
+    file: ../../secrets/pg_ledger_owner_password
+  pg_ledger_app_password:
+    file: ../../secrets/pg_ledger_app_password
+  pg_ingest_owner_password:
+    file: ../../secrets/pg_ingest_owner_password
+  pg_ingest_app_password:
+    file: ../../secrets/pg_ingest_app_password
+  seller_service_token_ledger:
+    file: ../../secrets/seller_service_token_ledger
+  seller_service_token_evals:
+    file: ../../secrets/seller_service_token_evals

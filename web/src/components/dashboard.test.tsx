@@ -96,6 +96,16 @@ describe("ApprovalRow", () => {
     expiresAt: "2999-01-01T00:00:00Z",
   };
 
+  it("shows who decided an approval by role", async () => {
+    await renderWithProviders(
+      <ul>
+        <ApprovalRow approval={{ ...approval, status: "APPROVED", decidedBy: "OPERATOR" }} />
+      </ul>,
+    );
+    expect(screen.getByText("Decided by")).toBeVisible();
+    expect(screen.getByText("OPERATOR")).toBeVisible();
+  });
+
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
   });
@@ -152,6 +162,7 @@ describe("ApprovalRow", () => {
 describe("SpendOverviewView", () => {
   const spend: SpendOverview = {
     day: "2026-10-05",
+    llmDay: { spentUsdMicros: 4_950_000, capUsdMicros: 5_000_000 },
     dailyCap: money(1_000_000),
     dayReserved: money(10_000),
     dayCommitted: money(50_000),
@@ -181,6 +192,22 @@ describe("SpendOverviewView", () => {
     expect(table).toHaveTextContent("HELD");
     expect(screen.getByText("No separate limit")).toBeVisible();
     expect(screen.getByText(/outside the language model/)).toBeVisible();
+  });
+
+  it("shows the shared model budget with micro-dollar precision and the low-budget note", () => {
+    render(<SpendOverviewView spend={spend} />);
+    expect(screen.getByRole("heading", { name: "Model budget today (shared)" })).toBeVisible();
+    expect(screen.getByText(/\$4\.950000/)).toHaveTextContent("$4.950000 of $5.000000");
+    expect(screen.getByRole("note")).toHaveTextContent(/recorded demo/);
+  });
+
+  it("hides the low-budget note while plenty is left, and tolerates old recordings", () => {
+    const plenty = { ...spend, llmDay: { spentUsdMicros: 1_000, capUsdMicros: 5_000_000 } };
+    const { rerender } = render(<SpendOverviewView spend={plenty} />);
+    expect(screen.queryByRole("note")).toBeNull();
+    const old = { ...spend, llmDay: undefined } as unknown;
+    rerender(<SpendOverviewView spend={old as SpendOverview} />);
+    expect(screen.queryByText("Model budget today (shared)")).toBeNull();
   });
 
   it("shows an empty state without tool spend", () => {

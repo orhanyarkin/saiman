@@ -14,4 +14,8 @@
 - [springdoc + JSpecify OpenAPI](springdoc-jspecify-openapi.md) — nullability via ModelConverter, sorted required, Problem Details responses, snapshot-test recipe.
 - [Spring 7 Problem Details echo](spring7-problem-details-echo.md) — null bodies in ResponseEntityExceptionHandler, instance = URI, resource 404 bypasses advice, RestTestClient % re-encoding.
 - [Standalone MockMvc probes](standalone-mockmvc-probe-controllers.md) — inner @Controller probes for error-path tests; chain_tx_hash means canonical receipt, not party/amount match.
+- [M6 auth/roles gotchas](m6-auth-roles-gotchas.md) — SecurityFilterProperties order, RestTestClient default headers, Spring 7 DAO messages, app-role grants, Bash guard "eval".
+- [DB roles + /internal chain gotchas](db-roles-and-security-chain-gotchas.md) — Modulith CREATE SCHEMA as app role, StartupDatabase roles, auth-disabled default chain.
 - [M4b audit Lows findings](m4b-audit-lows-findings.md) — PaymentBook not redelivery-idempotent for F/C conflicts; 1 s epoch cushion in window tests; settleMargin() single source.
+- [Spring Security 7 resource server notes](spring-security7-resource-server-notes.md) — env vars cannot bind a Map under a dashed segment, two 401 paths, DEBUG logs query strings.
+- [x402 facilitator telemetry notes](x402-facilitator-telemetry-notes.md) — M6-T7: error-code source, TestObservationRegistry access, Prometheus tag-key rule, FacilitatorException.Failure.

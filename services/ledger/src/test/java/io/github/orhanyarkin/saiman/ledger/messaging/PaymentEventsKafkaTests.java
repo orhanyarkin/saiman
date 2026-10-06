@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import io.github.orhanyarkin.saiman.ledger.LedgerIntegrationTest;
+import io.github.orhanyarkin.saiman.ledger.Superuser;
 import io.github.orhanyarkin.saiman.ledger.journal.JournalRepository;
 import io.github.orhanyarkin.saiman.ledger.journal.TrialBalanceRow;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentProjection;
@@ -16,6 +17,7 @@ import io.github.orhanyarkin.saiman.shared.ledger.LedgerTopics;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentAuthorized;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentSettled;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
+import io.github.orhanyarkin.saiman.testsupport.PostgresContainerConfiguration.SuperuserDatabase;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
@@ -67,6 +69,9 @@ class PaymentEventsKafkaTests {
 
     @Autowired
     private ConsumerFactory<String, String> consumers;
+
+    @Autowired
+    private SuperuserDatabase superuserDatabase;
 
     @Autowired
     private JsonMapper json;
@@ -427,8 +432,13 @@ class PaymentEventsKafkaTests {
      */
     private String failingInboxTrigger(String eventId, String sqlState, String message) {
         String suffix = UUID.randomUUID().toString().replace("-", "");
-        jdbc.sql("CREATE SEQUENCE attempts_%s".formatted(suffix)).update();
-        jdbc.sql("""
+        // DDL needs the superuser (the service runs as ledger_app, ADR-0024); the trigger function runs as the
+        // inserting role, so ledger_app gets the sequence.
+        JdbcClient ddl = Superuser.jdbc(superuserDatabase);
+        ddl.sql("CREATE SEQUENCE attempts_%s".formatted(suffix)).update();
+        ddl.sql("GRANT USAGE, SELECT ON SEQUENCE attempts_%s TO ledger_app".formatted(suffix))
+                .update();
+        ddl.sql("""
                         CREATE FUNCTION fail_%1$s() RETURNS trigger LANGUAGE plpgsql AS $$
                         BEGIN
                             IF NEW.event_id = '%2$s' THEN
@@ -438,16 +448,17 @@ class PaymentEventsKafkaTests {
                             RETURN NEW;
                         END $$
                         """.formatted(suffix, eventId, sqlState, message)).update();
-        jdbc.sql("CREATE TRIGGER fail_%1$s BEFORE INSERT ON inbox FOR EACH ROW EXECUTE FUNCTION fail_%1$s()"
+        ddl.sql("CREATE TRIGGER fail_%1$s BEFORE INSERT ON inbox FOR EACH ROW EXECUTE FUNCTION fail_%1$s()"
                         .formatted(suffix))
                 .update();
         return suffix;
     }
 
     private void dropFailingInboxTrigger(String suffix) {
-        jdbc.sql("DROP TRIGGER fail_%1$s ON inbox".formatted(suffix)).update();
-        jdbc.sql("DROP FUNCTION fail_%1$s()".formatted(suffix)).update();
-        jdbc.sql("DROP SEQUENCE attempts_%s".formatted(suffix)).update();
+        JdbcClient ddl = Superuser.jdbc(superuserDatabase);
+        ddl.sql("DROP TRIGGER fail_%1$s ON inbox".formatted(suffix)).update();
+        ddl.sql("DROP FUNCTION fail_%1$s()".formatted(suffix)).update();
+        ddl.sql("DROP SEQUENCE attempts_%s".formatted(suffix)).update();
     }
 
     /** Delivery attempts that reached the failing trigger (0 before the first one). */

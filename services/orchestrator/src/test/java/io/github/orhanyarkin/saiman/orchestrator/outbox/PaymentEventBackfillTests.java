@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.orhanyarkin.saiman.orchestrator.outbox.OutboxTestAccess.Publication;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentHandle;
 import io.github.orhanyarkin.saiman.orchestrator.spendtest.SpendTestSupport;
+import io.github.orhanyarkin.saiman.orchestrator.spendtest.TestTables;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -34,7 +35,7 @@ class PaymentEventBackfillTests extends SpendTestSupport {
                 .update();
         PaymentIntentHandle unsigned = newIntent(run); // PENDING: nothing to publish
         // As before V6: no publications and no log rows.
-        jdbc.sql("TRUNCATE event_publication, payment_event_log").update();
+        TestTables.clearOutbox(superuser);
         assertThat(unsigned.id()).isNotNull();
 
         assertThat(backfill.backfill()).isEqualTo(3); // 2 x authorized + 1 x settled
@@ -67,7 +68,7 @@ class PaymentEventBackfillTests extends SpendTestSupport {
         jdbc.sql("UPDATE payment_intent SET auth_nonce = 'not-a-nonce' WHERE id = :id")
                 .param("id", bad.id())
                 .update();
-        jdbc.sql("TRUNCATE event_publication, payment_event_log").update();
+        TestTables.clearOutbox(superuser);
         double skippedBefore = skipped();
 
         assertThat(backfill.backfill()).isEqualTo(2); // the good intent's authorized + settled

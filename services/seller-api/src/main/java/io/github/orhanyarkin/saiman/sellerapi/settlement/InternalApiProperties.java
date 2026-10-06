@@ -13,10 +13,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *     ({@code localhost:8081}) and any rebound browser name are refused.
  */
 @ConfigurationProperties("seller.internal")
-record InternalApiProperties(
+public record InternalApiProperties(
         @DefaultValue({"seller-api", "seller-api:8081"}) List<String> allowedHosts) {
 
-    InternalApiProperties {
+    public InternalApiProperties {
         allowedHosts = allowedHosts.stream()
                 .map(h -> h.trim().toLowerCase(Locale.ROOT))
                 .filter(h -> !h.isEmpty())

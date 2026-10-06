@@ -6,8 +6,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerCreditNote;
+import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerUnauthorizedException;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerUnavailableException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationHandler;
 import io.micrometer.observation.ObservationRegistry;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -23,16 +26,23 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 /**
  * The real HTTP client against a loopback JDK {@link HttpServer} (no WireMock in this codebase): only a 200 with a
  * well-formed body or a typed 404 is a definite answer; everything else is "unavailable", never "no credit note".
  */
+@ExtendWith(OutputCaptureExtension.class)
 class RestSellerCreditNoteClientTests {
 
     private static final String KEY =
             "eip155:84532:0x036cbd53842c5426634e7929541ec2318f3dcf7e:0x" + "12".repeat(20) + ":0x" + "34".repeat(32);
     private static final String TX = "0x" + "AB".repeat(32);
+    /** A ledger service token (the value of TestTokens.SERVICE_LEDGER; any well-formed token works here). */
+    private static final String TOKEN = "saiman-test-service-ledger-token-0123456789abcdef";
+
     private static final String FOUND = """
             {"paymentKey":"%s","txHash":"%s","amountAtomic":20000,"httpStatus":503,
              "reasonCode":"handler_server_error","createdAt":"2026-10-01T10:00:00Z"}""".formatted(KEY, TX);
@@ -47,15 +57,31 @@ class RestSellerCreditNoteClientTests {
 
     private final Deque<Reply> replies = new ArrayDeque<>();
     private final List<String> paths = new CopyOnWriteArrayList<>();
+    private final List<String> authorizations = new CopyOnWriteArrayList<>();
     private HttpServer server;
     private RestSellerCreditNoteClient client;
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    private final List<Observation.Context> observed = new CopyOnWriteArrayList<>();
+    private String base;
 
     @BeforeEach
     void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", this::handle);
         server.start();
-        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        base = "http://127.0.0.1:" + server.getAddress().getPort();
+        ObservationRegistry observations = ObservationRegistry.create();
+        observations.observationConfig().observationHandler(new ObservationHandler<Observation.Context>() {
+            @Override
+            public boolean supportsContext(Observation.Context context) {
+                return true;
+            }
+
+            @Override
+            public void onStop(Observation.Context context) {
+                observed.add(context);
+            }
+        });
         client = new RestSellerCreditNoteClient(
                 new SellerProperties(
                         base,
@@ -64,9 +90,10 @@ class RestSellerCreditNoteClientTests {
                         Duration.ofMillis(500),
                         3,
                         Duration.ofMillis(1),
-                        Duration.ofSeconds(30)),
-                ObservationRegistry.NOOP,
-                new SimpleMeterRegistry());
+                        Duration.ofSeconds(30),
+                        TOKEN + "\n"), // as read from a configtree file
+                observations,
+                meters);
     }
 
     @AfterEach
@@ -76,6 +103,7 @@ class RestSellerCreditNoteClientTests {
 
     private void handle(HttpExchange exchange) throws IOException {
         paths.add(exchange.getRequestURI().getRawPath());
+        authorizations.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
         Reply reply;
         synchronized (replies) {
             reply = replies.isEmpty() ? Reply.of(500, "text/plain", "no reply queued") : replies.poll();
@@ -190,8 +218,10 @@ class RestSellerCreditNoteClientTests {
 
     @Test
     void theBaseUrlIsPinnedToTheAllowedHost() {
-        assertThat(SellerProperties.of("http://seller-api:8081").baseUrl()).isEqualTo("http://seller-api:8081");
-        assertThat(SellerProperties.of("http://seller-api:8081/").baseUrl()).isEqualTo("http://seller-api:8081");
+        assertThat(SellerProperties.of("http://seller-api:8081", TOKEN).baseUrl())
+                .isEqualTo("http://seller-api:8081");
+        assertThat(SellerProperties.of("http://seller-api:8081/", TOKEN).baseUrl())
+                .isEqualTo("http://seller-api:8081");
         for (String bad : List.of(
                 "http://evil.example:8081",
                 "http://seller-api.evil.example:8081",
@@ -201,7 +231,82 @@ class RestSellerCreditNoteClientTests {
                 "http://10.0.0.5:8081",
                 "ftp://seller-api",
                 "seller-api:8081")) {
-            assertThatThrownBy(() -> SellerProperties.of(bad)).as(bad).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> SellerProperties.of(bad, TOKEN))
+                    .as(bad)
+                    .isInstanceOf(IllegalArgumentException.class);
         }
+    }
+
+    @Test
+    void everyLookupCarriesTheServiceTokenAsABearerHeader() {
+        queue(Reply.of(503, "text/plain", ""), Reply.of(200, "application/json", FOUND));
+
+        assertThat(client.find(KEY)).isPresent();
+        assertThat(authorizations).hasSize(2).allMatch(("Bearer " + TOKEN)::equals);
+    }
+
+    @Test
+    void aRefusedTokenIsUnavailableNotRetriedAndNeverNoCreditNote(CapturedOutput output) {
+        queue(Reply.of(401, "application/problem+json", "{\"status\":401,\"detail\":\"Authentication required\"}"));
+        assertThatThrownBy(() -> client.find(KEY))
+                .isInstanceOf(SellerUnavailableException.class)
+                .isInstanceOf(SellerUnauthorizedException.class)
+                .hasMessage("seller answered HTTP 401");
+        assertThat(paths).hasSize(1);
+
+        queue(Reply.of(403, "application/problem+json", "{\"status\":403,\"detail\":\"Access denied\"}"));
+        assertThatThrownBy(() -> client.find(KEY))
+                .isInstanceOf(SellerUnavailableException.class)
+                .hasMessage("seller answered HTTP 403");
+        assertThat(paths).hasSize(2);
+
+        assertThat(output.getAll()).doesNotContain(TOKEN);
+        assertThat(meters.counter("saiman.ledger.seller.credit_note_lookups", "outcome", "unauthorized")
+                        .count())
+                .isEqualTo(2.0);
+        assertThat(meters.counter("saiman.ledger.seller.credit_note_lookups", "outcome", "unavailable")
+                        .count())
+                .isZero();
+    }
+
+    @Test
+    void spansCarryThePathTemplateNeverThePaymentKey() {
+        queue(Reply.of(200, "application/json", FOUND));
+
+        assertThat(client.find(KEY)).isPresent();
+
+        Observation.Context http = observed.stream()
+                .filter(c -> "http.client.requests".equals(c.getName()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(http.getHighCardinalityKeyValue("http.url").getValue())
+                .isEqualTo(base + "/internal/credit-notes/{paymentKey}");
+        assertThat(http.getLowCardinalityKeyValue("uri").getValue()).isEqualTo("/internal/credit-notes/{paymentKey}");
+        String payer = "0x" + "12".repeat(20);
+        for (Observation.Context context : observed) {
+            context.getAllKeyValues()
+                    .forEach(kv -> assertThat(kv.getValue())
+                            .as(context.getName() + " " + kv.getKey())
+                            .doesNotContain(payer)
+                            .doesNotContain(TOKEN));
+        }
+    }
+
+    @Test
+    void theTokenIsRequiredWellFormedAndNeverPrinted(CapturedOutput output) {
+        for (String missing : java.util.Arrays.asList(null, "", "  \n")) {
+            assertThatThrownBy(() -> SellerProperties.of("http://seller-api:8081", missing))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("service-token is required");
+        }
+        String malformed = "short-" + TOKEN.substring(0, 10) + "!";
+        assertThatThrownBy(() -> SellerProperties.of("http://seller-api:8081", malformed))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageNotContaining(malformed);
+
+        SellerProperties properties = SellerProperties.of("http://seller-api:8081", TOKEN);
+        assertThat(properties.toString()).doesNotContain(TOKEN).contains("[PROTECTED]");
+        System.out.println(properties);
+        assertThat(output.getAll()).doesNotContain(TOKEN);
     }
 }

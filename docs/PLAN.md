@@ -51,7 +51,8 @@ Each milestone ends with something demo-able and a short write-up in `docs/PROGR
 **Accept:** a new user can start a run, approve a payment and see it land in the ledger without reading docs; Lighthouse accessibility ≥ 90.
 
 ## M6 — Evals, deploy, publish (1 week)
-- Golden set, `evals` harness, model-route comparison report (tier1: GPT-5.6 Luna vs Gemini 3.8 Flash vs DeepSeek V4.1 Flash).
+- Hardening (design `docs/design/m6-hardening.md`; ADRs 0023-0026): API authentication (static role tokens, JWT upgrade path), per-service Postgres roles, `CREDIT_NOTE_UNCORROBORATED` on Kafka, replay mode + daily-cap fallback, facilitator settle metrics.
+- Golden set (incl. a freshness question), `evals` harness with deterministic metrics. The cross-provider route comparison (tier1: GPT-5.6 Luna vs Gemini 3.8 Flash vs DeepSeek V4.1 Flash) and an LLM judge wait for the human's go on new provider keys (ADR-0025).
 - Terraform `demo-lite` + bootstrap (state bucket, OIDC roles); `demo-up` / `demo-down` workflows; `make capture-demo`.
 - Human runs `demo-up`, the captured runs + 3-minute video + Grafana screenshots are recorded, then `demo-down` (verify nothing but the state bucket remains).
 - SPA replay mode on Cloudflare Pages; blog post (EN + TR).

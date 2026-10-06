@@ -1,8 +1,8 @@
 # Progress
 
 ## Current milestone
-M5 — Dashboard: **built and verified live** on branch `m5-dashboard` (not pushed). Human decisions (2026-10-05): nginx `web` service (same-origin, no CORS), the human installed Chromium, live acceptance once. Contract `docs/design/m5-dashboard.md`; ADR-0022. Status: T0-T5 done: per-task audit and its one re-review (fixes in), live acceptance passed, milestone audit done (Low and Infos fixed). Next: push and PR (needs the human's go).
-M4b (settle-before-serve, ADR-0021, PR #16), the Redis/Kafka swap (ADR-0020, PR #15) and M4 are done and merged.
+M6 — Hardening, evals, replay: **built, audited and live-verified** on branch `m6-hardening` (not pushed). Per-task audits (T1+T4, T7+T5a, T2, T3 ledger, T3b seller-api) and the milestone audit (no Critical/High/Medium; six Lows fixed) are done. Next: push and PR (needs the human's go). Out of this plan (human-only): Terraform demo-lite + Infracost, AWS capture session, Cloudflare deploy, blog, video; cross-provider route comparison and LLM judge (needs new provider keys). Design `docs/design/m6-hardening.md`; ADRs 0023-0026.
+M5 (dashboard), M4b, the Redis/Kafka swap and M4 are done and merged.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->

@@ -12,6 +12,7 @@ export default tseslint.config([
     // Never hand-edited or linted (it also self-excludes via its own generated header).
     ignores: [
       "dist",
+      "dist-replay",
       "src/routeTree.gen.ts",
       "src/lib/api/generated",
       "playwright-report",
@@ -35,6 +36,36 @@ export default tseslint.config([
         projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
+    },
+  },
+  {
+    // ADR-0023: the API token lives in memory (optionally sessionStorage for the tab), never in
+    // localStorage, which survives the tab and is shared by every script on the origin.
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-globals": [
+        "error",
+        { name: "localStorage", message: "Never persist the API token: see ADR-0023." },
+      ],
+      "no-restricted-properties": [
+        "error",
+        ...["window", "globalThis", "self", "top", "parent"].map((object) => ({
+          object,
+          property: "localStorage",
+          message: "Never persist the API token: see ADR-0023.",
+        })),
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "MemberExpression[computed=true][property.value='localStorage']",
+          message: "Never persist the API token: see ADR-0023.",
+        },
+        {
+          selector: "Identifier[name='localStorage']",
+          message: "Never persist the API token: see ADR-0023.",
+        },
+      ],
     },
   },
   {

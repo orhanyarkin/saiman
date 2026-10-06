@@ -16,6 +16,7 @@ import type {
   LedgerBook,
   PaymentDetail,
   PaymentPage,
+  Me,
   ReconciliationReport,
   ReconciliationRunList,
   ReconciliationStarted,
@@ -32,6 +33,7 @@ import { isTerminalStatus } from "@/lib/api/types";
 
 export const queryKeys = {
   ping: ["ping"] as const,
+  me: ["me"] as const,
   runs: ["runs"] as const,
   runList: (limit: number) => ["runs", "list", limit] as const,
   runRecent: ["runs", "recent"] as const,
@@ -46,6 +48,18 @@ export const queryKeys = {
 };
 
 export const pingQuery = () => queryOptions({ queryKey: queryKeys.ping, queryFn: fetchPing });
+
+/**
+ * Who the token is (ADR-0023). Not retried and kept for a minute: a failure (401, no endpoint on an
+ * older backend, network) means "unknown", which the UI treats as a reader.
+ */
+export const meQuery = () =>
+  queryOptions({
+    queryKey: queryKeys.me,
+    queryFn: ({ signal }) => apiGet<Me>("/api/v1/me", signal),
+    retry: false,
+    staleTime: 60_000,
+  });
 
 const SUMMARY_POLL_MS = 3000;
 const PAYMENTS_POLL_MS = 10_000;

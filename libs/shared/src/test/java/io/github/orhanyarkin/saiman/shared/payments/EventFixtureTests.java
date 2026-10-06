@@ -25,7 +25,9 @@ class EventFixtureTests {
                 Arguments.of("payments.failed.v1", PaymentFailed.class),
                 Arguments.of("payments.credit-note-issued.v1", CreditNoteIssued.class),
                 Arguments.of("ledger.entry-posted.v1", EntryPosted.class),
-                Arguments.of("ledger.reconciliation-mismatch.v1", ReconciliationMismatch.class));
+                Arguments.of("ledger.reconciliation-mismatch.v1", ReconciliationMismatch.class),
+                Arguments.of(
+                        "ledger.reconciliation-mismatch.v1.CREDIT_NOTE_UNCORROBORATED", ReconciliationMismatch.class));
     }
 
     @ParameterizedTest(name = "{0}")

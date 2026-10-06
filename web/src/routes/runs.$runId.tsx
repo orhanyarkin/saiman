@@ -7,12 +7,16 @@ import { BudgetMeter } from "@/components/run/budget-meter";
 import { PaymentIntentsPanel } from "@/components/run/payment-intents-panel";
 import { PaymentsPanel } from "@/components/run/payments-panel";
 import { RunLedgerPanel } from "@/components/run/run-ledger-panel";
+import { AnnotationCallout } from "@/components/replay/run-annotation";
+import { runAnnotation } from "@/lib/run-annotation";
 import { StatusBadge } from "@/components/run/status-badge";
+import { ReplayOffer } from "@/components/replay/replay-offer";
 import { ReportPanel } from "@/components/run/report-panel";
 import { Stepper } from "@/components/run/stepper";
 import { Timeline } from "@/components/run/timeline";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LLM_DAILY_CAP_CODE } from "@/lib/api/errors";
 import { queryKeys, runPaymentsQuery } from "@/lib/api/queries";
 import { ApiError } from "@/lib/api/source";
 import { isTerminalStatus } from "@/lib/api/types";
@@ -82,6 +86,7 @@ function RunView({ runId }: { runId: string }) {
   const run = summary.data;
   const finished = isTerminalStatus(run.status);
   const report = run.report ?? view.report;
+  const annotation = runAnnotation(run.runId);
 
   return (
     <div className="space-y-6">
@@ -100,6 +105,8 @@ function RunView({ runId }: { runId: string }) {
           {run.question}
         </p>
       </header>
+
+      {annotation ? <AnnotationCallout annotation={annotation} /> : null}
 
       {/* Polite, throttled: step changes are announced calmly; approvals use their own alert. */}
       <p role="status" aria-live="polite" className="sr-only">
@@ -144,11 +151,16 @@ function RunView({ runId }: { runId: string }) {
       ) : null}
 
       {run.status === "FAILED" ? (
-        <p role="alert" className="text-destructive font-medium">
-          <span aria-hidden="true">{"⚠ "}</span>
-          The run failed ({run.failureCode ?? view.failureCode ?? "unknown reason"}). Nothing more
-          will be paid.
-        </p>
+        <div className="space-y-3">
+          <p role="alert" className="text-destructive font-medium">
+            <span aria-hidden="true">{"⚠ "}</span>
+            The run failed ({run.failureCode ?? view.failureCode ?? "unknown reason"}). Nothing more
+            will be paid.
+          </p>
+          {(run.failureCode ?? view.failureCode) === LLM_DAILY_CAP_CODE ? (
+            <ReplayOffer text="The daily model budget was reached during this run. You can still watch a recorded run." />
+          ) : null}
+        </div>
       ) : null}
 
       <Card>

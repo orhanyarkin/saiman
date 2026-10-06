@@ -2,6 +2,7 @@ package io.github.orhanyarkin.saiman.sellerapi.settlement;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.orhanyarkin.saiman.apisecurity.testfixtures.TestTokens;
 import io.github.orhanyarkin.saiman.sellerapi.testsupport.SettlementTestBase;
 import io.github.orhanyarkin.x402.core.X402Headers;
 import java.io.IOException;
@@ -156,11 +157,13 @@ class CreditNoteLookupEndpointTests extends SettlementTestBase {
         }
     }
 
+    /** As the ledger: its service token is the only one {@code /internal/credit-notes/**} accepts (ADR-0023). */
     private Response get(String path, String host) throws IOException {
         try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(10_000);
             OutputStream out = socket.getOutputStream();
             out.write(("GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nAccept: application/json\r\n"
+                            + "Authorization: " + TestTokens.bearer(TestTokens.SERVICE_LEDGER) + "\r\n"
                             + "Connection: close\r\n\r\n")
                     .getBytes(StandardCharsets.ISO_8859_1));
             out.flush();

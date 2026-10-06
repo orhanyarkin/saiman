@@ -82,6 +82,12 @@ Observation `x402.server.payment` with low-cardinality keys `x402.network`, `x40
 already counted as `settled`, and then not served) and `x402.payment.paid_not_served.amount`
 (their amounts, in atomic units).
 
+## Client configuration
+
+| Property | Default | Meaning |
+|---|---|---|
+| `x402.client.clock-skew-seconds` | `600` | Seconds before now at which a signed EIP-3009 authorization's `validAfter` is back-dated, tolerating a buyer clock ahead of the chain's. Range 0 to 600; anything else fails startup (never clamped). |
+
 ## Upgrade notes (pre-1.0)
 
 The public API may still change before 1.0. Source-incompatible changes so far:

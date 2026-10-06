@@ -36,6 +36,10 @@ class LimitsConsistencyCheck {
         RouterProperties routerProperties = router.getIfAvailable();
         if (routerProperties != null) {
             warn(llmBudgetWarning(runs.llmBudgetUsdMicros(), routerProperties.maxScopeBudgetUsdMicros()));
+            String impossible = llmBudgetAboveDailyCap(runs.llmBudgetUsdMicros(), routerProperties.dailyCapUsdMicros());
+            if (impossible != null) {
+                throw new IllegalStateException(impossible);
+            }
         }
         warn(hourlyPaidCallsWarning(spend.maxPaidCallsPerHour(), seller.maxPaidCallsPerHourAtSeller()));
     }
@@ -44,6 +48,19 @@ class LimitsConsistencyCheck {
         if (warning != null) {
             LOG.warn(warning);
         }
+    }
+
+    /**
+     * The startup error for a run LLM budget above the router's daily cap, or null if it fits: no run could ever be
+     * admitted (the cap pre-check needs one run's budget left), so every run would be answered with the replay offer.
+     */
+    static @Nullable String llmBudgetAboveDailyCap(long runLlmBudgetUsdMicros, long routerDailyCapUsdMicros) {
+        if (runLlmBudgetUsdMicros <= routerDailyCapUsdMicros) {
+            return null;
+        }
+        return "saiman.orchestrator.runs.llm-budget-usd-micros (" + runLlmBudgetUsdMicros
+                + ") is above saiman.router.daily-cap-usd-micros (" + routerDailyCapUsdMicros
+                + "): no run could ever start";
     }
 
     /** The warning for a run LLM budget above the router's scope maximum, or null if it fits. */

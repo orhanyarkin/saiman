@@ -135,7 +135,8 @@ public final class HttpFacilitatorClient implements FacilitatorClient {
         try {
             return call.get();
         } catch (CallNotPermittedException circuitOpen) {
-            throw new FacilitatorException("the x402 facilitator circuit breaker is open");
+            throw new FacilitatorException(
+                    "the x402 facilitator circuit breaker is open", FacilitatorException.Failure.CIRCUIT_OPEN, 0);
         } catch (FacilitatorException alreadyTranslated) {
             throw alreadyTranslated;
         } catch (RuntimeException other) {
@@ -160,18 +161,41 @@ public final class HttpFacilitatorClient implements FacilitatorClient {
 
     private <T> T decode(RestClient.RequestHeadersSpec.ConvertibleClientHttpResponse response, Class<T> responseType)
             throws IOException {
-        byte[] bytes = readBounded(response.getBody(), MAX_RESPONSE_BYTES);
+        boolean oversized = false;
+        byte[] bytes = new byte[0];
+        try {
+            bytes = readBounded(response.getBody(), MAX_RESPONSE_BYTES);
+        } catch (BodyTooLargeException tooLarge) {
+            oversized = true;
+        }
         if (response.getStatusCode().is4xxClientError()) {
-            throw new FacilitatorClientErrorException("the x402 facilitator rejected the request");
+            throw new FacilitatorClientErrorException(
+                    "the x402 facilitator rejected the request",
+                    response.getStatusCode().value());
         }
         if (!response.getStatusCode().is2xxSuccessful()) {
-            throw new FacilitatorException("the x402 facilitator responded with an error status");
+            throw new FacilitatorException(
+                    "the x402 facilitator responded with an error status",
+                    FacilitatorException.Failure.TRANSPORT,
+                    response.getStatusCode().value());
         }
-        try {
-            return codec.readJson(new String(bytes, StandardCharsets.UTF_8), responseType);
-        } catch (X402CodecException undecodable) {
-            throw new FacilitatorException("the x402 facilitator response could not be decoded");
+        // A 2xx answer did arrive: an oversized, undecodable, JSON-null or non-object body is
+        // malformed (not a transport failure), with the real status.
+        T decoded = null;
+        if (!oversized) {
+            try {
+                decoded = codec.readJson(new String(bytes, StandardCharsets.UTF_8), responseType);
+            } catch (X402CodecException undecodable) {
+                decoded = null;
+            }
         }
+        if (decoded == null) {
+            throw new FacilitatorException(
+                    "the x402 facilitator response could not be decoded",
+                    FacilitatorException.Failure.MALFORMED,
+                    response.getStatusCode().value());
+        }
+        return decoded;
     }
 
     private static URI parseAndValidate(String url) {
@@ -220,10 +244,19 @@ public final class HttpFacilitatorClient implements FacilitatorClient {
         while ((read = in.read(chunk)) != -1) {
             total += read;
             if (total > maxBytes) {
-                throw new IOException("response body exceeds " + maxBytes + " bytes");
+                throw new BodyTooLargeException("response body exceeds " + maxBytes + " bytes");
             }
             buffer.write(chunk, 0, read);
         }
         return buffer.toByteArray();
+    }
+
+    /** The body exceeded the size bound (distinct from a network read error). */
+    private static final class BodyTooLargeException extends IOException {
+        private static final long serialVersionUID = 1L;
+
+        BodyTooLargeException(String message) {
+            super(message);
+        }
     }
 }

@@ -15,6 +15,24 @@ spring:
         max.block.ms: 1000
         request.timeout.ms: 1000
         delivery.timeout.ms: 2000
+saiman:
+  test:
+    db:
+      # As in production (ADR-0024): the pool runs as seller_api_app (DML only), Flyway as seller_api_owner. Tests
+      # that clean up or tamper on purpose use PostgresContainerConfiguration.SuperuserDatabase.
+      runtime-role: app
+  # The service-token digests of libs/api-security's TestTokens (SERVICE_LEDGER_SHA256, SERVICE_EVALS_SHA256):
+  # test-only tokens, never used by a deployment. The READER/OPERATOR digests are not needed by seller-api; they are
+  # configured here only so the tests can prove a valid human token is still refused on /internal/**.
+  auth:
+    reader-token-sha256: bb8a7703e6054c96e9442f822efebaa7c3b1690de33838d7ea49ffbf6f23a8ac
+    operator-token-sha256: 064f3fe639ff9d727d0c62769168ce319345c94ea3833c66c792b81aa50f37a3
+    service:
+      tokens:
+        ledger:
+          sha256: 84c219d596b3e201f6829cf73bd4ad3516facd7d7f5c3babb2f799d3ffb6ee46
+        evals:
+          sha256: 011b6f777f716526cd7cdfb963234b97d9fe8ae1d6c3c6adb7f1dcfbe4ae9794
 logging:
   level:
     org.apache.kafka: error

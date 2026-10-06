@@ -3,6 +3,7 @@ package io.github.orhanyarkin.x402.client;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 /**
  * {@code x402.client.*} configuration for the buyer side of this starter.
@@ -28,14 +29,35 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *     {@code http}, e.g. {@code seller-api} on a private compose network; empty by default. No
  *     wildcard, suffix, port, path or range (see {@link PlaintextHostAllowlist}); startup fails if
  *     non-empty on any network other than the Base Sepolia testnet
+ * @param clockSkewSeconds {@code x402.client.clock-skew-seconds}: how many seconds before now the
+ *     signed EIP-3009 authorization's {@code validAfter} is back-dated, to tolerate a buyer clock
+ *     ahead of the chain's; 0 to 600, default 600 (EIP-3009 requires {@code block.timestamp >
+ *     validAfter}, so a smaller value narrows tolerance for drift). Out of range fails startup;
+ *     it is never clamped
  */
 @ConfigurationProperties(prefix = "x402.client")
 public record X402ClientProperties(
         @Nullable String privateKey,
         @Nullable Long maxAmountPerRequest,
         List<String> allowedPayTo,
-        List<String> allowedPlaintextHosts) {
+        List<String> allowedPlaintextHosts,
+        @Nullable Long clockSkewSeconds) {
 
+    /** Back-compatible constructor: default clock skew. */
+    public X402ClientProperties(
+            @Nullable String privateKey,
+            @Nullable Long maxAmountPerRequest,
+            List<String> allowedPayTo,
+            List<String> allowedPlaintextHosts) {
+        this(privateKey, maxAmountPerRequest, allowedPayTo, allowedPlaintextHosts, null);
+    }
+
+    /** The configured skew, or the default 600 when unset. */
+    public long effectiveClockSkewSeconds() {
+        return clockSkewSeconds == null ? 600L : clockSkewSeconds;
+    }
+
+    @ConstructorBinding
     public X402ClientProperties {
         allowedPayTo = allowedPayTo == null ? List.of() : List.copyOf(allowedPayTo);
         allowedPlaintextHosts = allowedPlaintextHosts == null ? List.of() : List.copyOf(allowedPlaintextHosts);
@@ -57,6 +79,8 @@ public record X402ClientProperties(
                 + allowedPayTo
                 + ", allowedPlaintextHosts="
                 + allowedPlaintextHosts
+                + ", clockSkewSeconds="
+                + clockSkewSeconds
                 + "]";
     }
 }

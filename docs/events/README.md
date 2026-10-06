@@ -18,4 +18,5 @@ Common rules (ADR-0016):
 - Events never carry a signature, an idempotency key or free text from a facilitator (failure reasons are `[a-z0-9_]{1,64}` codes). `payments.*` carry the payer and nonce (public on chain once used); `ledger.*` do not carry the nonce.
 - Delivery order is not guaranteed (Spring Modulith externalization); consumers are order-independent.
 - `CONFLICTING_FACT` mismatches are recorded in the ledger database and report only; `ledger.reconciliation-mismatch.v1` carries mismatches found by a reconciliation run.
+- `ledger.reconciliation-mismatch.v1` `kind` is an open set in practice: adding an enum value is not a new topic version, so consumers treat an unknown `kind` as a generic finding. `CREDIT_NOTE_UNCORROBORATED` (ADR-0021) has `ledgerAmount` = the credited amount, `reportedTxHash` = the seller tx from the books, and null `chainAmount`, `chainTxHash` and `adjustmentEntryId` (the chain said nothing, nothing is posted). Findings recorded before M6 are not republished.
 - Breaking changes create a new `.vN` topic.

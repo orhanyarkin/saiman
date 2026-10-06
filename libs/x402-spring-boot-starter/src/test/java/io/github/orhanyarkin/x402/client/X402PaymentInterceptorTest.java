@@ -930,6 +930,61 @@ class X402PaymentInterceptorTest {
     }
 
     @Test
+    void validAfterIsBackdatedByTheConfiguredSkew() {
+        for (long skew : new long[] {30, 0}) {
+            SpendGuard spendGuard = passthroughSpendGuard();
+            PaymentSigner signer = spy(realSigner);
+            X402PaymentInterceptor interceptor = new X402PaymentInterceptor(
+                    signer,
+                    spendGuard,
+                    codec,
+                    5000,
+                    List.of(PAY_TO),
+                    List.of(),
+                    ObservationRegistry.NOOP,
+                    fixedClock,
+                    skew);
+            bindServer(interceptor);
+            server.expect(requestTo(RESOURCE_URL))
+                    .andRespond(withStatus(HttpStatus.PAYMENT_REQUIRED)
+                            .header(X402Headers.PAYMENT_REQUIRED, encodedPaymentRequired(offer(PAY_TO, AMOUNT, 60))));
+            server.expect(requestTo(RESOURCE_URL)).andRespond(withStatus(HttpStatus.PAYMENT_REQUIRED));
+
+            assertThatThrownBy(() -> restClientBuilder
+                            .build()
+                            .get()
+                            .uri(RESOURCE_URL)
+                            .header("Idempotency-Key", "req-skew-" + skew)
+                            .retrieve()
+                            .toBodilessEntity())
+                    .isInstanceOf(PaymentDeclinedAfterSigningException.class);
+
+            org.mockito.ArgumentCaptor<Eip3009Authorization> captor =
+                    org.mockito.ArgumentCaptor.forClass(Eip3009Authorization.class);
+            verify(signer).signTransferWithAuthorization(captor.capture());
+            long now = fixedClock.instant().getEpochSecond();
+            assertThat(captor.getValue().validAfter()).isEqualTo(Long.toString(now - skew));
+        }
+    }
+
+    @Test
+    void outOfRangeSkewIsRejectedNotClamped() {
+        for (long skew : new long[] {-1, 601}) {
+            assertThatThrownBy(() -> new X402PaymentInterceptor(
+                            realSigner,
+                            passthroughSpendGuard(),
+                            codec,
+                            5000,
+                            List.of(PAY_TO),
+                            List.of(),
+                            ObservationRegistry.NOOP,
+                            skew))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("between 0 and 600");
+        }
+    }
+
+    @Test
     void timeWindowUsesTheFixedClockExactly() {
         SpendGuard spendGuard = passthroughSpendGuard();
         PaymentSigner signer = spy(realSigner);

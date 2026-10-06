@@ -11,6 +11,10 @@ public final class FacilitatorClientErrorException extends FacilitatorException 
     private static final long serialVersionUID = 1L;
 
     public FacilitatorClientErrorException(String message) {
-        super(message);
+        super(message, Failure.REJECTED, 0);
+    }
+
+    public FacilitatorClientErrorException(String message, int httpStatus) {
+        super(message, Failure.REJECTED, httpStatus);
     }
 }

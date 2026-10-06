@@ -5,9 +5,13 @@ import io.github.orhanyarkin.x402.core.SettlementResponse;
 import io.github.orhanyarkin.x402.core.X402Codec;
 import io.github.orhanyarkin.x402.core.X402Headers;
 import io.github.orhanyarkin.x402.facilitator.FacilitatorClient;
+import io.github.orhanyarkin.x402.facilitator.FacilitatorReason;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.time.Clock;
 import java.util.List;
 import java.util.Map;
@@ -46,13 +50,27 @@ final class PaymentSettler {
     private final X402ServerProperties properties;
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
+    private final FacilitatorTelemetry telemetry;
+
+    /** What the single settle-failure WARN reports about the call itself. */
+    private record SettleTrace(
+            int httpStatus,
+            long durationMs,
+            long verifyToSettleGapMs,
+            @Nullable String txHash,
+            boolean txHashPresent,
+            long startedAtEpochSecond,
+            String outcome,
+            @Nullable String rawFacilitatorMessage) {}
 
     PaymentSettler(
             FacilitatorClient facilitatorClient,
             X402Codec codec,
             X402ServerProperties properties,
             ApplicationEventPublisher eventPublisher,
-            Clock clock) {
+            Clock clock,
+            ObservationRegistry observationRegistry) {
+        this.telemetry = new FacilitatorTelemetry(observationRegistry);
         this.facilitatorClient = facilitatorClient;
         this.codec = codec;
         this.properties = properties;
@@ -71,23 +89,38 @@ final class PaymentSettler {
     boolean settle(HttpServletRequest request, HttpServletResponse response, X402PaymentAttempt attempt)
             throws IOException {
         SettlementResponse settlement;
+        Observation observation = telemetry.start(FacilitatorTelemetry.SETTLE_OBSERVATION, attempt.observation());
+        long startedAt = System.nanoTime();
+        long startedAtEpochSecond = clock.instant().getEpochSecond();
         try {
             settlement =
                     facilitatorClient.settle(attempt.payload(), attempt.entry().offer());
         } catch (RuntimeException settleError) {
-            log.warn(
-                    "x402 facilitator /settle call failed: {}",
-                    settleError.getClass().getSimpleName());
-            failSettlement(request, response, attempt, null);
+            FacilitatorTelemetry.Result result = FacilitatorTelemetry.ofFailure(settleError);
+            FacilitatorTelemetry.finish(observation, result);
+            failSettlement(
+                    request,
+                    response,
+                    attempt,
+                    null,
+                    trace(attempt, startedAt, startedAtEpochSecond, result, null, null));
             return false;
         }
-        // Anything unexpected from here on (a null/malformed transaction hash -- the field isn't
-        // @Nullable on SettlementResponse, but the tolerant facilitator-response mapper leaves it
-        // null when a hostile or buggy facilitator omits it; or any other failure while finishing
-        // the response) must never let a caller deliver the handler's response as paid. Route every
-        // such case through failSettlement (reset, keep the nonce claim, ask again) instead of
-        // letting an exception escape -- this is the money-safe default, not merely an error handler.
+        // Classification, telemetry and the trace all sit inside the fail-safe try below: ANY
+        // exception (even a null answer a buggy client let through) ends in failSettlement with the
+        // observation stopped exactly once.
+        FacilitatorTelemetry.Result settleResult = null;
+        SettleTrace settleTrace = null;
         try {
+            settleResult = FacilitatorTelemetry.ofSettle(settlement);
+            FacilitatorTelemetry.finish(observation, settleResult);
+            settleTrace = trace(
+                    attempt,
+                    startedAt,
+                    startedAtEpochSecond,
+                    settleResult,
+                    settlement.transaction(),
+                    settlement.errorMessage());
             String transaction = settlement.transaction();
             if (!settlement.success()
                     || transaction == null
@@ -96,7 +129,11 @@ final class PaymentSettler {
                 // ambiguous, not as success: never echo an unvalidated facilitator-supplied value
                 // into the client-facing PAYMENT-RESPONSE.
                 failSettlement(
-                        request, response, attempt, settlement.success() ? "ambiguous" : settlement.errorReason());
+                        request,
+                        response,
+                        attempt,
+                        settlement.success() ? "ambiguous" : settlement.errorReason(),
+                        settleTrace);
                 return false;
             }
 
@@ -123,7 +160,16 @@ final class PaymentSettler {
                     request.getRequestURI(),
                     unexpected.getClass().getSimpleName(),
                     unexpected);
-            failSettlement(request, response, attempt, "internal_error");
+            if (settleResult == null) {
+                // Failed before the observation was stopped: close it once, as malformed.
+                settleResult = new FacilitatorTelemetry.Result(
+                        FacilitatorTelemetry.Outcome.MALFORMED, FacilitatorReason.NONE, 200);
+                FacilitatorTelemetry.finish(observation, settleResult);
+            }
+            if (settleTrace == null) {
+                settleTrace = trace(attempt, startedAt, startedAtEpochSecond, settleResult, null, null);
+            }
+            failSettlement(request, response, attempt, "internal_error", settleTrace);
             return false;
         }
     }
@@ -152,7 +198,8 @@ final class PaymentSettler {
             HttpServletRequest request,
             HttpServletResponse response,
             X402PaymentAttempt attempt,
-            @Nullable String errorReason)
+            @Nullable String errorReason,
+            SettleTrace trace)
             throws IOException {
         response.reset();
         restoreHeaders(response, attempt.headerSnapshot());
@@ -160,16 +207,40 @@ final class PaymentSettler {
         // The facilitator's reason is untrusted text: log and publish it only as a bounded code.
         String reasonCode =
                 errorReason != null && REASON_CODE.matcher(errorReason).matches() ? errorReason : "unrecognised";
-        log.warn("x402 settlement failed: reason={}", reasonCode);
+        UUID eventId = UUID.randomUUID();
+        Eip3009Authorization authorization = attempt.payload().payload().authorization();
+        // Only public or one-way values (ADR-0008, THREAT_MODEL): never the signature, the payload
+        // or the raw nonce. The facilitator's message is untrusted free text: it is logged only in
+        // this one line, sanitised and bounded (see FacilitatorTelemetry#sanitizeMessage), and never
+        // reaches a tag, span, event or exception.
+        String sanitizedMessage = FacilitatorTelemetry.sanitizeMessage(
+                trace.rawFacilitatorMessage(), attempt.payload().payload().signature(), authorization.nonce());
+        log.warn(
+                "x402 settlement failed: reason={} attemptId={} payer={} nonceRef={} validAfter={} validBefore={}"
+                        + " secondsLeft={} verifyToSettleGapMs={} settleDurationMs={} facilitatorStatus={}"
+                        + " txHashPresent={} txHash={} outcome={}{}",
+                reasonCode,
+                eventId,
+                authorization.from(),
+                FacilitatorTelemetry.nonceRef(authorization.from(), authorization.nonce()),
+                authorization.validAfter(),
+                authorization.validBefore(),
+                secondsLeft(authorization.validBefore(), trace.startedAtEpochSecond()),
+                trace.verifyToSettleGapMs(),
+                trace.durationMs(),
+                trace.httpStatus(),
+                trace.txHashPresent(),
+                trace.txHash() == null ? "-" : trace.txHash(),
+                trace.outcome(),
+                sanitizedMessage == null ? "" : " facilitatorMessage=\"" + sanitizedMessage + "\"");
         RequiresPaymentInterceptor.writePaymentRequired(
                 response,
                 codec,
                 RequiresPaymentInterceptor.resourceInfo(request, attempt.entry(), properties.publicBaseUrl()),
                 attempt.entry().offer(),
                 "payment settlement failed");
-        Eip3009Authorization authorization = attempt.payload().payload().authorization();
         publishSafely(new X402PaymentFailedEvent(
-                UUID.randomUUID(),
+                eventId,
                 request.getRequestURI(),
                 attempt.entry().offer(),
                 authorization.from(),
@@ -179,6 +250,39 @@ final class PaymentSettler {
                 attempt.payer(),
                 reasonCode,
                 clock.instant()));
+    }
+
+    private SettleTrace trace(
+            X402PaymentAttempt attempt,
+            long startedAtNanos,
+            long startedAtEpochSecond,
+            FacilitatorTelemetry.Result result,
+            @Nullable String transaction,
+            @Nullable String rawFacilitatorMessage) {
+        long now = System.nanoTime();
+        boolean present = transaction != null && !transaction.isEmpty();
+        String wellFormed = present
+                        && FacilitatorTelemetry.TRANSACTION_HASH
+                                .matcher(transaction)
+                                .matches()
+                ? transaction
+                : null;
+        return new SettleTrace(
+                result.httpStatus(),
+                (now - startedAtNanos) / 1_000_000L,
+                (startedAtNanos - attempt.verifiedAtNanos()) / 1_000_000L,
+                wellFormed,
+                present,
+                startedAtEpochSecond,
+                result.outcome().tag(),
+                rawFacilitatorMessage);
+    }
+
+    /** Seconds from the settle start until {@code validBefore} (negative if expired); exact for any uint256. */
+    private static String secondsLeft(String validBefore, long settleStartEpochSecond) {
+        return new BigInteger(validBefore)
+                .subtract(BigInteger.valueOf(settleStartEpochSecond))
+                .toString();
     }
 
     /**

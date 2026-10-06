@@ -74,7 +74,7 @@ class RagDisclosureSummaryService implements DisclosureSummaryService {
 
     private DisclosureSummaryResponse generate(String ticker, List<RetrievedChunk> excerpts, Deadline deadline) {
         GroundedGenerator.Reply reply =
-                generator.generate(Tier.TIER1, DataClass.PUBLIC, "summary", excerpts, "TASK", TASK, deadline);
+                generator.generate(Tier.TIER1, DataClass.PUBLIC, "summary", excerpts, "TASK", TASK, deadline, false);
         List<RetrievedChunk> cited = GroundedGenerator.validCitations(excerpts, reply.citedChunkIds());
         if (cited.isEmpty()) {
             throw new InsufficientCitationsException();

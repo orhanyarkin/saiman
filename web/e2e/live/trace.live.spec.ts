@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./live-test";
 
 /**
  * M0 acceptance, automated: the dashboard's "System check" produces a trace that spans the browser,

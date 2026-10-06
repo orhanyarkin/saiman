@@ -25,6 +25,9 @@
             "format" : "date-time",
             "type" : [ "string", "null" ]
           },
+          "decidedBy" : {
+            "type" : [ "string", "null" ]
+          },
           "expiresAt" : {
             "format" : "date-time",
             "type" : "string"
@@ -81,6 +84,21 @@
             "type" : [ "string", "null" ]
           }
         },
+        "type" : "object"
+      },
+      "MeResponse" : {
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "roles" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "name", "roles" ],
         "type" : "object"
       },
       "Money" : {
@@ -372,6 +390,20 @@
         "required" : [ "approvalThreshold", "defaultRunBudget", "maxRunBudget" ],
         "type" : "object"
       },
+      "SpendLlmDay" : {
+        "properties" : {
+          "capUsdMicros" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "spentUsdMicros" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "capUsdMicros", "spentUsdMicros" ],
+        "type" : "object"
+      },
       "SpendOverview" : {
         "properties" : {
           "byTool" : {
@@ -395,9 +427,12 @@
           },
           "limits" : {
             "$ref" : "#/components/schemas/SpendLimits"
+          },
+          "llmDay" : {
+            "$ref" : "#/components/schemas/SpendLlmDay"
           }
         },
-        "required" : [ "byTool", "dailyCap", "day", "dayCommitted", "dayReserved", "limits" ],
+        "required" : [ "byTool", "dailyCap", "day", "dayCommitted", "dayReserved", "limits", "llmDay" ],
         "type" : "object"
       },
       "StartRunRequest" : {
@@ -427,6 +462,13 @@
         },
         "required" : [ "eventsUrl", "runId" ],
         "type" : "object"
+      }
+    },
+    "securitySchemes" : {
+      "bearerAuth" : {
+        "description" : "A static role token (READER or OPERATOR), sent as Authorization: Bearer <token>. Never in the URL.",
+        "scheme" : "bearer",
+        "type" : "http"
       }
     }
   },
@@ -474,6 +516,25 @@
         },
         "summary" : "Approvals in one status (default PENDING), newest first",
         "tags" : [ "approval-controller" ]
+      }
+    },
+    "/api/v1/me" : {
+      "get" : {
+        "operationId" : "getMe",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description" : "The caller"
+          }
+        },
+        "summary" : "The caller's principal name and effective roles",
+        "tags" : [ "me-controller" ]
       }
     },
     "/api/v1/ping" : {
@@ -590,7 +651,7 @@
                 }
               }
             },
-            "description" : "The service is not ready; Retry-After says when to try again"
+            "description" : "The service is not ready, or the daily model budget is used up (code LLM_DAILY_CAP_REACHED, replayAvailable true); Retry-After says when to try again"
           }
         },
         "summary" : "Start a research run",
@@ -853,5 +914,8 @@
         "tags" : [ "spend-controller" ]
       }
     }
-  }
+  },
+  "security" : [ {
+    "bearerAuth" : [ ]
+  } ]
 }

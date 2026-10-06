@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.x402.observation;
 
 import io.github.orhanyarkin.x402.core.AssetAmount;
+import io.github.orhanyarkin.x402.facilitator.FacilitatorReason;
 import io.github.orhanyarkin.x402.server.X402PaidRequestFailedEvent;
 import io.github.orhanyarkin.x402.server.X402PaymentFailedEvent;
 import io.github.orhanyarkin.x402.server.X402PaymentSettledEvent;
@@ -37,6 +38,13 @@ public final class X402PaymentMetricsListener {
     static final String PAID_NOT_SERVED_COUNTER_NAME = "x402.payments.paid_not_served";
     static final String PAID_NOT_SERVED_AMOUNT_COUNTER_NAME = "x402.payment.paid_not_served.amount";
 
+    /**
+     * Bounded (closed {@link FacilitatorReason} set). Present on every {@code x402.payments}
+     * series -- {@code none} when settled -- because Prometheus rejects one meter name registered
+     * with different tag keys.
+     */
+    static final String REASON_TAG = "reason";
+
     private final ObjectProvider<MeterRegistry> meterRegistry;
 
     public X402PaymentMetricsListener(ObjectProvider<MeterRegistry> meterRegistry) {
@@ -52,6 +60,7 @@ public final class X402PaymentMetricsListener {
         Counter.builder(PAYMENTS_COUNTER_NAME)
                 .tag("network", event.requirements().network())
                 .tag("outcome", "settled")
+                .tag(REASON_TAG, FacilitatorReason.NONE.code())
                 .register(registry)
                 .increment();
         DistributionSummary.builder(PAYMENT_AMOUNT_SUMMARY_NAME)
@@ -97,6 +106,7 @@ public final class X402PaymentMetricsListener {
         Counter.builder(PAYMENTS_COUNTER_NAME)
                 .tag("network", event.requirements().network())
                 .tag("outcome", "failed")
+                .tag(REASON_TAG, FacilitatorReason.fromCode(event.errorReason()).code())
                 .register(registry)
                 .increment();
     }

@@ -14,8 +14,10 @@ import io.github.orhanyarkin.saiman.ledger.payment.PaymentProjection;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentRepository;
 import io.github.orhanyarkin.saiman.ledger.payment.SellerState;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerCreditNote;
+import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerUnauthorizedException;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.SellerCreditNoteClient.SellerUnavailableException;
 import io.github.orhanyarkin.saiman.shared.events.EventMetadata;
+import io.github.orhanyarkin.saiman.shared.ledger.MismatchKind;
 import io.github.orhanyarkin.saiman.shared.ledger.ReconciliationMismatch;
 import io.github.orhanyarkin.saiman.shared.payments.AuthorizationRef;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -83,9 +85,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  *   <li><b>No row, or another tx hash or amount:</b> a {@value #CREDIT_NOTE_UNCORROBORATED} mismatch, never MATCHED.
  *       <em>Nothing is posted</em>: the chain did not move, so there is no wallet difference for suspense, and
  *       reversing the CREDIT_NOTE automatically would let one unauthenticated record (or a seller-side data loss)
- *       rewrite the books. The liability stays until a human posts a REVERSAL. The kind is not a {@code
- *       MismatchKind} and not in the {@code ledger.reconciliation-mismatch.v1} enum, so it is recorded in {@code
- *       reconciliation_mismatch} and the report only (and counted), not published.
+ *       rewrite the books. The liability stays until a human posts a REVERSAL. Recorded in {@code
+ *       reconciliation_mismatch} and the report, counted, and (since M6, design B3) published once on {@code
+ *       ledger.reconciliation-mismatch.v1} with null chain fields; findings recorded before M6 are not republished.
  *   <li><b>Seller unreachable or no definite answer:</b> the item is PENDING and the run PARTIAL, exactly like an
  *       unavailable chain: never MATCHED by default, never a false finding.
  * </ul>
@@ -105,9 +107,8 @@ public class ReconciliationService {
     /** A safe block further ahead of the local clock than this is not trusted: the run skips its chain part. */
     static final long MAX_SAFE_AHEAD_SECONDS = 60;
 
-    /** A CREDITED payment whose credit note seller-api does not confirm (ledger-only kind, V5). */
+    /** A CREDITED payment whose credit note seller-api does not confirm (V5; {@code MismatchKind} since M6). */
     static final String CREDIT_NOTE_UNCORROBORATED = "CREDIT_NOTE_UNCORROBORATED";
-
     /** Base produces a block every two seconds; used only to aim the bounded log search. */
     private static final long SECONDS_PER_BLOCK = 2;
 
@@ -126,6 +127,7 @@ public class ReconciliationService {
     private final SellerCreditNoteClient sellers;
     private final AtomicBoolean running = new AtomicBoolean();
     private final AtomicReference<@Nullable Instant> lastManualStart = new AtomicReference<>();
+    private final AtomicReference<@Nullable UUID> lastUnauthorizedRun = new AtomicReference<>();
     private final AtomicLong unbalancedEntries = new AtomicLong();
     private final AtomicLong dueBacklog = new AtomicLong();
     private final AtomicLong oldestUncheckedSeconds = new AtomicLong();
@@ -340,6 +342,16 @@ public class ReconciliationService {
             return transactions.execute(tx -> book(runId, key, evidence, creditNote));
         } catch (ChainUnavailableException e) {
             return skipped(runId, snapshot);
+        } catch (SellerUnauthorizedException e) {
+            // A wrong or missing service token fails every lookup: one ERROR per run, never the token itself.
+            if (!runId.equals(lastUnauthorizedRun.getAndSet(runId))) {
+                log.error(
+                        "Reconciliation run {}: seller-api refused the ledger's service token ({}); credited payments"
+                                + " stay PENDING until saiman.ledger.seller.service-token is fixed",
+                        runId,
+                        e.getMessage());
+            }
+            return skipped(runId, snapshot);
         } catch (SellerUnavailableException e) {
             log.warn(
                     "Reconciliation run {}: credit note of payment {} not corroborated yet (seller: {})",
@@ -513,7 +525,9 @@ public class ReconciliationService {
 
     /**
      * Records a {@value #CREDIT_NOTE_UNCORROBORATED} finding once per payment: the seller has no credit note for it,
-     * or one with another tx hash or amount. Reported and counted only; nothing is posted (see the class comment).
+     * or one with another tx hash or amount. Nothing is posted (see the class comment). Runs inside the item's
+     * transaction, so the {@link ReconciliationMismatch} publication (Modulith registry, the outbox) commits with the
+     * finding or not at all; it is published only when this call inserted the row, so a rerun publishes nothing.
      */
     private void uncorroborated(UUID runId, PaymentProjection p, @Nullable SellerCreditNote seller) {
         UUID mismatchId = mismatchId(p.id(), CREDIT_NOTE_UNCORROBORATED);
@@ -528,6 +542,20 @@ public class ReconciliationService {
                 seller == null ? null : seller.txHash(),
                 null);
         if (inserted) {
+            Instant now = clock.instant();
+            // Event semantics (design B3): ledgerAmount = the credited amount, reportedTxHash = the seller's tx hash
+            // from the books; the chain said nothing, so chainAmount, chainTxHash and adjustmentEntryId are null.
+            events.publishEvent(new ReconciliationMismatch(
+                    new EventMetadata(mismatchId.toString(), now, PaymentLedgerService.CONSUMER, runId.toString()),
+                    mismatchId,
+                    runId,
+                    p.id(),
+                    MismatchKind.CREDIT_NOTE_UNCORROBORATED,
+                    p.amount(),
+                    null,
+                    p.sellerTxHash(),
+                    null,
+                    null));
             log.warn(
                     "Reconciliation run {}: payment {} is CREDITED but seller-api {} the credit note",
                     runId,

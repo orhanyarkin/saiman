@@ -296,6 +296,7 @@
     },
     "/api/v1/spend": {
       "day": "2026-10-05",
+      "llmDay": { "spentUsdMicros": 1250000, "capUsdMicros": 5000000 },
       "dailyCap": {
         "atomicUnits": 1000000,
         "asset": "USDC",

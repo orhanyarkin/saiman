@@ -5,6 +5,7 @@
 #     backends' CSRF protection relies on a cross-site JSON POST having nothing to preflight against;
 #   - pin or rewrite the Host header (only `proxy_set_header Host $http_host;`): the backends'
 #     DNS-rebinding guards must see the Host the browser sent.
+# Also: no `proxy_set_header Authorization`, no /internal anywhere, no seller-api/ingest upstream (ADR-0023, ADR-0025).
 # It must keep a default server that answers 444 and a named server for localhost/127.0.0.1, set
 # server_tokens off at http level and keep regex locations under /api/ nested in `location ^~ /api/`.
 # Override the file with NGINX_CONF=<path> (used by the self-test fixtures).
@@ -38,6 +39,51 @@ if grep -qE '\bOPTIONS\b' <<<"${conf}"; then
   fail_check "OPTIONS handling found: nothing may answer a preflight (ADR-0022)"
   violations=1
 fi
+
+# ADR-0023/0025: nginx injects no credentials (a token in the proxy would authenticate anyone who
+# reaches the dashboard port), and nothing under /internal is ever routed (the eval endpoint
+# /internal/v1/eval/** lives on seller-api and must stay unreachable from the browser origin);
+# seller-api and ingest are not proxy targets at all.
+if grep -qiE 'proxy_set_header[[:space:]]+Authorization' <<<"${conf}"; then
+  fail_check "proxy_set_header Authorization found: nginx must not inject credentials (ADR-0023)"
+  violations=1
+fi
+if grep -qiE '/internal' <<<"${conf}"; then
+  fail_check "/internal found: no location, rewrite or proxy_pass may mention /internal (eval endpoint must never be reachable through nginx, ADR-0025)"
+  violations=1
+fi
+if grep -qiE '(seller-api|ingest)(:[0-9]+)?' <<<"${conf}"; then
+  fail_check "seller-api/ingest referenced: nginx may only proxy to orchestrator, ledger and the otel collector"
+  violations=1
+fi
+
+# Upstream allowlist: the only places nginx may send traffic are the orchestrator, the ledger and
+# the OTel collector, spelled exactly (a variable holding one of them, or the literal URL).
+allowed_upstreams=(http://ledger:8082 http://orchestrator:8080 http://otel-collector:4318)
+is_allowed_upstream() {
+  local u
+  for u in "${allowed_upstreams[@]}"; do [[ "$1" == "${u}" ]] && return 0; done
+  return 1
+}
+while read -r _ name value; do
+  value="${value%;}"
+  if ! is_allowed_upstream "${value}"; then
+    fail_check "'set ${name} ${value}': only ${allowed_upstreams[*]} may be upstream values"
+    violations=1
+  fi
+done < <(grep -E '^[[:space:]]*set[[:space:]]+\$[A-Za-z_]+[[:space:]]+[^;]+;' <<<"${conf}" | sed -E 's/^[[:space:]]+//')
+while read -r _ target; do
+  target="${target%;}"
+  case "${target}" in
+    '$ledger' | '$orchestrator' | '$collector') ;;
+    *)
+      if ! is_allowed_upstream "${target}"; then
+        fail_check "proxy_pass ${target}: only the exact orchestrator, ledger and collector upstreams are allowed"
+        violations=1
+      fi
+      ;;
+  esac
+done < <(grep -E '^[[:space:]]*proxy_pass[[:space:]]+[^;]+;' <<<"${conf}" | sed -E 's/^[[:space:]]+//')
 
 host_lines="$(grep -iE 'proxy_set_header[[:space:]]+Host\b' <<<"${conf}" || true)"
 if [[ -z "${host_lines}" ]]; then

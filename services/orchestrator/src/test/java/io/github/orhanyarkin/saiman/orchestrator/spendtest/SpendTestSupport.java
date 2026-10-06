@@ -6,6 +6,7 @@ import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentHandle;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentIntentService;
 import io.github.orhanyarkin.saiman.orchestrator.payment.PaymentTestAccess;
 import io.github.orhanyarkin.saiman.orchestrator.payment.SellerEndpoint;
+import io.github.orhanyarkin.saiman.testsupport.PostgresContainerConfiguration.SuperuserDatabase;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +48,9 @@ public abstract class SpendTestSupport {
     protected JdbcClient jdbc;
 
     @Autowired
+    protected SuperuserDatabase superuser;
+
+    @Autowired
     protected PaymentIntentService intents;
 
     @Autowired
@@ -62,9 +66,7 @@ public abstract class SpendTestSupport {
 
     @BeforeEach
     void resetState() {
-        jdbc.sql("TRUNCATE event_publication, payment_event_log, tool_result, approval, payment_intent,"
-                        + " run_event, spend_day, run")
-                .update();
+        TestTables.clearAll(superuser);
         seller.reset();
         signer.reset();
         PaymentTestAccess.resetCircuitBreaker(client);

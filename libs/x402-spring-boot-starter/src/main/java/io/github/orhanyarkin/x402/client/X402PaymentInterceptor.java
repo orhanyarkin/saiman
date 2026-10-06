@@ -60,8 +60,8 @@ import org.springframework.http.client.support.HttpRequestWrapper;
  * <em>before</em> any
  * signing (rule 3 in {@code CLAUDE.md}); a denial means {@link
  * PaymentSigner#signTransferWithAuthorization} is never called. Only once a reservation is granted
- * is an EIP-3009 authorization built (payer = the signer's address, {@code validAfter} {@value
- * #CLOCK_SKEW_SECONDS} seconds in the past — generous enough to tolerate real clock drift, since
+ * is an EIP-3009 authorization built (payer = the signer's address, {@code validAfter} {@code
+ * x402.client.clock-skew-seconds} (default {@value #DEFAULT_CLOCK_SKEW_SECONDS}) seconds in the past — generous enough to tolerate real clock drift, since
  * EIP-3009 requires {@code block.timestamp > validAfter} — {@code validBefore} at most {@value
  * #MAX_VALIDITY_SECONDS} seconds ahead, a fresh random nonce), signed and retried with a {@code
  * PAYMENT-SIGNATURE} header — never more than once. If signing or encoding itself fails, nothing
@@ -111,7 +111,9 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
     /** Name of the {@link Observation} this interceptor records for every payment attempt. */
     public static final String OBSERVATION_NAME = "x402.client.payment";
 
-    private static final long CLOCK_SKEW_SECONDS = 600;
+    /** Default back-dating of {@code validAfter}, in seconds (also the maximum allowed). */
+    public static final long DEFAULT_CLOCK_SKEW_SECONDS = 600;
+
     private static final long MAX_VALIDITY_SECONDS = 60;
     private static final String UNKNOWN_TAG = "unknown";
     private static final Pattern TX_HASH_PATTERN = Pattern.compile("0x[0-9a-fA-F]{64}");
@@ -124,6 +126,7 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
     private final List<String> allowedPlaintextHosts;
     private final ObservationRegistry observationRegistry;
     private final Clock clock;
+    private final long clockSkewSeconds;
 
     /** Creates an interceptor that pays only over {@code https} or to a loopback host. */
     public X402PaymentInterceptor(
@@ -174,6 +177,35 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
         this(signer, spendGuard, codec, maxAmountPerRequest, allowedPayTo, List.of(), observationRegistry, clock);
     }
 
+    /**
+     * As the plaintext-hosts constructor, with {@code validAfter} back-dated by {@code
+     * clockSkewSeconds} instead of the default {@value #DEFAULT_CLOCK_SKEW_SECONDS}.
+     *
+     * @param clockSkewSeconds seconds before now at which an authorization becomes valid, 0 to
+     *     {@value #DEFAULT_CLOCK_SKEW_SECONDS}
+     * @throws IllegalArgumentException if {@code clockSkewSeconds} is outside that range
+     */
+    public X402PaymentInterceptor(
+            PaymentSigner signer,
+            SpendGuard spendGuard,
+            X402Codec codec,
+            long maxAmountPerRequest,
+            List<String> allowedPayTo,
+            List<String> allowedPlaintextHosts,
+            ObservationRegistry observationRegistry,
+            long clockSkewSeconds) {
+        this(
+                signer,
+                spendGuard,
+                codec,
+                maxAmountPerRequest,
+                allowedPayTo,
+                allowedPlaintextHosts,
+                observationRegistry,
+                Clock.systemUTC(),
+                clockSkewSeconds);
+    }
+
     /** Package-private: lets tests fix "now" instead of racing the system clock. */
     X402PaymentInterceptor(
             PaymentSigner signer,
@@ -184,6 +216,33 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
             List<String> allowedPlaintextHosts,
             ObservationRegistry observationRegistry,
             Clock clock) {
+        this(
+                signer,
+                spendGuard,
+                codec,
+                maxAmountPerRequest,
+                allowedPayTo,
+                allowedPlaintextHosts,
+                observationRegistry,
+                clock,
+                DEFAULT_CLOCK_SKEW_SECONDS);
+    }
+
+    /** Package-private: fixed clock and explicit skew. */
+    X402PaymentInterceptor(
+            PaymentSigner signer,
+            SpendGuard spendGuard,
+            X402Codec codec,
+            long maxAmountPerRequest,
+            List<String> allowedPayTo,
+            List<String> allowedPlaintextHosts,
+            ObservationRegistry observationRegistry,
+            Clock clock,
+            long clockSkewSeconds) {
+        if (clockSkewSeconds < 0 || clockSkewSeconds > DEFAULT_CLOCK_SKEW_SECONDS) {
+            throw new IllegalArgumentException("clockSkewSeconds must be between 0 and " + DEFAULT_CLOCK_SKEW_SECONDS);
+        }
+        this.clockSkewSeconds = clockSkewSeconds;
         this.signer = Objects.requireNonNull(signer, "signer must not be null");
         this.spendGuard = Objects.requireNonNull(spendGuard, "spendGuard must not be null");
         this.codec = Objects.requireNonNull(codec, "codec must not be null");
@@ -335,7 +394,7 @@ public final class X402PaymentInterceptor implements ClientHttpRequestIntercepto
 
     private Eip3009Authorization buildAuthorization(PaymentRequirements chosen) {
         Instant now = Instant.now(clock);
-        long validAfter = Math.max(now.getEpochSecond() - CLOCK_SKEW_SECONDS, 0);
+        long validAfter = Math.max(now.getEpochSecond() - clockSkewSeconds, 0);
         long validitySeconds = Math.min(chosen.maxTimeoutSeconds(), MAX_VALIDITY_SECONDS);
         long validBefore = now.getEpochSecond() + Math.max(validitySeconds, 0);
         return new Eip3009Authorization(

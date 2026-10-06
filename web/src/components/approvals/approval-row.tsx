@@ -2,15 +2,17 @@ import { Link } from "@tanstack/react-router";
 
 import { ErrorNotice } from "@/components/error-notice";
 import { Button } from "@/components/ui/button";
-import { isReplayMode } from "@/lib/api/source";
 import type { ApprovalView } from "@/lib/api/types";
 import { useNow } from "@/lib/hooks";
 import { formatMoney, moneyTitle, usdc } from "@/lib/money";
 import { useApprovalDecision } from "@/lib/use-approval-decision";
+import { useCapabilities } from "@/lib/use-capabilities";
+import { isReplayMode } from "@/lib/mode";
 
 /** One pending approval in the cross-run list; same decision logic as the inline run card. */
 export function ApprovalRow({ approval }: { approval: ApprovalView }) {
   const { decision, conflict } = useApprovalDecision(approval.runId, approval.id);
+  const { canOperate } = useCapabilities();
   const amount = usdc(approval.amountAtomic);
   const expires = new Date(approval.expiresAt);
   const now = useNow(5000);
@@ -34,6 +36,12 @@ export function ApprovalRow({ approval }: { approval: ApprovalView }) {
           <time dateTime={approval.expiresAt}>{expires.toLocaleTimeString()}</time>
           {expired ? <strong> (expired)</strong> : null}
         </dd>
+        {approval.decidedBy ? (
+          <>
+            <dt className="text-muted-foreground font-medium">Decided by</dt>
+            <dd>{approval.decidedBy}</dd>
+          </>
+        ) : null}
         <dt className="text-muted-foreground font-medium">Run</dt>
         <dd>
           <Link
@@ -57,9 +65,11 @@ export function ApprovalRow({ approval }: { approval: ApprovalView }) {
           {decision.data.status === "APPROVED" ? "Approved" : "Rejected"}.
         </p>
       ) : null}
-      {isReplayMode ? (
+      {!canOperate ? (
         <p className="text-muted-foreground text-sm">
-          Recorded demo: approvals are disabled because nothing here can change state.
+          {isReplayMode
+            ? "Recorded demo: approvals are disabled because nothing here can change state."
+            : "Read-only: deciding approvals needs an operator token."}
         </p>
       ) : (
         <div className="flex gap-3">

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { mergeEvents, type RunEvent } from "@/lib/api/run-events";
 import {
@@ -10,6 +10,7 @@ import {
 } from "@/lib/api/queries";
 import { subscribeRunEvents } from "@/lib/api/source";
 import { isTerminalStatus } from "@/lib/api/types";
+import { getAuthState, subscribeAuth } from "@/lib/auth/token-store";
 
 /** Re-renders every `intervalMs` with the current time (visual countdowns only). */
 export function useNow(intervalMs = 1000): number {
@@ -86,6 +87,8 @@ export function useRunEvents(runId: string) {
   const exported = useQuery({ ...runEventsExportQuery(runId), enabled: terminal });
   const [live, setLive] = useState<RunEvent[]>([]);
   const [stream, setStream] = useState<StreamState>("idle");
+  // A new token (after a 401 the user connects) must restart a stream that stopped on it.
+  const connected = useSyncExternalStore(subscribeAuth, () => getAuthState().connected);
 
   useEffect(() => {
     if (!shouldStream) {
@@ -123,7 +126,7 @@ export function useRunEvents(runId: string) {
     return () => {
       subscription.close();
     };
-  }, [runId, shouldStream, queryClient]);
+  }, [runId, shouldStream, queryClient, connected]);
 
   const events = mergeEvents(live, exported.data ?? []);
   return { events, summary, exported, stream, terminal };

@@ -1,0 +1,7 @@
+{
+  "4feeba86-8601-4797-be23-960a2908e8ff": {
+    "label": "Failed run: payment not completed, no answer",
+    "detail": "The x402 facilitator rejected both settlements with invalid_exact_evm_transaction_failed (an intermittent Base Sepolia testnet failure under investigation). No USDC moved and no credit note was issued: the seller recorded the settlements as failed, the buyer's reservations were released, and the run ended without an answer (NO_EVIDENCE). Shown on purpose, as recorded.",
+    "tone": "warning"
+  }
+}
