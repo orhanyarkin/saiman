@@ -46,7 +46,7 @@ x-app-common: &app-common
 
 services:
   postgres:
-    image: pgvector/pgvector:0.8.6-pg17-trixie
+    image: pgvector/pgvector:0.8.7-pg17-trixie
     restart: unless-stopped
     environment:
       POSTGRES_DB: saiman
@@ -73,7 +73,7 @@ services:
   # run it explicitly (docker compose run --rm db-init) in addition: `up --wait` treats a
   # one-shot as a failure on some Compose versions.
   db-init:
-    image: pgvector/pgvector:0.8.6-pg17-trixie
+    image: pgvector/pgvector:0.8.7-pg17-trixie
     restart: "no"
     pull_policy: missing
     entrypoint: ["bash", "/bootstrap/bootstrap-roles.sh"]
@@ -159,7 +159,7 @@ services:
       start_period: 5s
 
   otel-collector:
-    image: otel/opentelemetry-collector:0.161.0
+    image: otel/opentelemetry-collector:0.162.0
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
@@ -361,7 +361,7 @@ services:
   # backends on one origin. No environment, secrets or env_file; scripts/check-compose-policy.sh
   # and scripts/check-nginx-conf.sh pin that. `make up` builds web/dist first (make web-build).
   web:
-    image: nginx:1.30.5-alpine
+    image: nginx:1.31.0-alpine
     profiles: ["apps"]
     restart: unless-stopped
     ports:
