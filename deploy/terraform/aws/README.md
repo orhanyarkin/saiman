@@ -67,3 +67,37 @@ terraform test                       # mock_provider assertions on trust, denies
 tests/check-prevent-destroy.sh       # lifecycle is invisible to terraform test
 ```
 `.github/workflows/terraform.yml` runs the same on pull requests and on `main`.
+
+## demo-lite (foundation)
+
+`demo-lite/` is a root module (state key `demo-lite/terraform.tfstate`). This part holds the network,
+RDS, IAM, logs and the expiry backstop; the ECS cluster, service and containers are added next to it.
+Everything is tagged `project=saiman`, `saiman:stack=demo-lite`, `saiman:session=<session_id>`.
+
+| File | Contents |
+| --- | --- |
+| `network.tf` | VPC, two public subnets (no NAT, no ALB), internet gateway, free S3 gateway endpoint; task SG with no ingress and egress 443 and 5432 to RDS only; RDS SG accepting 5432 from the task SG only |
+| `rds.tf` | PostgreSQL 17, `db.t4g.micro`, 20 GB gp3, private, encrypted, no backups or final snapshot; parameter group pins `log_statement=none`, `log_min_error_statement=panic` (role-bootstrap passwords never reach RDS logs) and `rds.force_ssl=1` |
+| `iam.tf` | task execution role (reads only SSM `/saiman/demo/*`, writes the log group), task role (S3 GetObject on `artifacts/*` and `demo/*`, ECS Exec), scheduler role; all under `/saiman/demo/` with the bootstrap boundary |
+| `logs.tf` | log group `/saiman-demo-lite`, 1 day retention (the `saiman-demo` prefix is what the bootstrap apply role and boundary allow) |
+| `scheduler.tf` | one-time EventBridge Scheduler schedules at `expires_at` + 30 minutes: ECS `desiredCount=0` and RDS stop (universal targets, no Lambda) |
+
+Notes:
+- SSM SecureString parameters under `/saiman/demo/` are created by the `demo-up` workflow, never by
+  Terraform; the module only references their ARN pattern.
+- The RDS master password is `var.db_master_password` (ephemeral, sensitive) passed as `password_wo`
+  with `password_wo_version = 1`: it never lands in plan or state. Pass it as `TF_VAR_db_master_password`.
+- `expires_at` must be UTC (`2026-10-06T18:00:00Z`). The backstop stops compute only; RDS storage and
+  the VPC remain until `demo-down` destroys the stack, and AWS restarts a stopped RDS after 7 days.
+- Required variables: `image_tag`, `session_id`, `expires_at`, `x402_seller_payto_address`,
+  `auth_digests`, `state_bucket_name` (see `variables.tf`).
+
+Offline checks (no credentials):
+```bash
+cd deploy/terraform/aws/demo-lite
+terraform fmt -check -recursive
+terraform init -backend=false
+terraform validate
+terraform test                 # mock_provider assertions
+tests/check-foundation.sh      # default tags, single ingress rule, write-only password
+```
