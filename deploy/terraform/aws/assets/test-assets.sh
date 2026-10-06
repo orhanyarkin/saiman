@@ -43,12 +43,16 @@ echo 'body{}' >"${fixture}/assets/nested/app.css"
 # --- 1. build, manifest, layout -------------------------------------------------------------------
 build_a="${work}/a"
 build_b="${work}/b"
-"${here}/build-assets.sh" --web-dist "${fixture}" "${build_a}" >"${work}/manifest-a.txt" 2>"${work}/build-a.err" \
+"${here}/build-assets.sh" --web-dist "${fixture}" "${build_a}" >"${work}/stdout-a.txt" 2>"${work}/build-a.err" \
   && ok "build-assets.sh builds from a fixture web dist" \
   || {
     bad "build-assets.sh failed"
     cat "${work}/build-a.err" >&2
   }
+# stdout = manifest lines, then one `manifest-sha256 <hex>` line (aggregate over the manifest text).
+grep -v '^manifest-sha256 ' "${work}/stdout-a.txt" >"${work}/manifest-a.txt" || true
+aggregate="$(sed -n 's/^manifest-sha256 \([0-9a-f]\{64\}\)$/\1/p' "${work}/stdout-a.txt")"
+if [[ "$(tail -n 1 "${work}/stdout-a.txt")" == "manifest-sha256 ${aggregate}" && -n "${aggregate}" && "$(sha256sum <"${work}/manifest-a.txt" | cut -d' ' -f1)" == "${aggregate}" ]]; then ok "last line is the aggregate sha256 of the manifest"; else bad "aggregate manifest digest line is missing or wrong"; fi
 for f in web/dist/index.html web/dist/assets/app.js web/dist/assets/nested/app.css nginx/default.conf \
   otel/config.yaml otel/grafana.yaml postgres/bootstrap-roles.sh postgres/bootstrap-roles.sql postgres/corpus-restore.sh; do
   if [[ -f "${build_a}/${f}" ]] && grep -q "  ${f}\$" "${work}/manifest-a.txt"; then ok "staged and in manifest: ${f}"; else bad "missing or not in manifest: ${f}"; fi
@@ -111,8 +115,8 @@ mutate "CORS header" m_cors
 mutate "444 default server removed" m_444
 
 # --- 4. determinism ----------------------------------------------------------------------------------
-"${here}/build-assets.sh" --web-dist "${fixture}" "${build_b}" >"${work}/manifest-b.txt" 2>/dev/null
-if cmp -s "${work}/manifest-a.txt" "${work}/manifest-b.txt"; then ok "two builds produce identical manifests"; else bad "manifests differ between builds"; fi
+"${here}/build-assets.sh" --web-dist "${fixture}" "${build_b}" >"${work}/stdout-b.txt" 2>/dev/null
+if cmp -s "${work}/stdout-a.txt" "${work}/stdout-b.txt"; then ok "two builds produce identical manifests"; else bad "manifests differ between builds"; fi
 if diff -r "${build_a}" "${build_b}" >/dev/null; then ok "two builds produce identical trees"; else bad "trees differ between builds"; fi
 
 # --- 5. no secret-looking strings ---------------------------------------------------------------------
