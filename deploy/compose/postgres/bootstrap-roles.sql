@@ -5,12 +5,25 @@
 -- Grants inside the schemas (DML on tables, the ledger's INSERT-only postings, ...) are NOT
 -- here: each service versions them in its own Flyway migration, run by <svc>_owner.
 
+-- Mode flag set by bootstrap-roles.sh (-v rds=true|false). `rds` = the connecting role is NOT a
+-- superuser but a CREATEROLE/CREATEDB administrator (AWS RDS rds_superuser, ADR-0028): no superuser-only
+-- settings or attributes, no superuser-password rotation, no changes to databases we do not own, and
+-- the vector extension must already exist (the caller creates it).
+\if :{?rds}
+\else
+  \set rds false
+\endif
+
 -- Keep every statement below (they carry passwords) out of the server log, whatever the cluster
--- logging is set to. Superuser-only settings; they apply to this session.
-SET log_statement = 'none';
-SET log_min_duration_statement = -1;
-SET log_min_error_statement = 'panic';
-SET log_duration = off;
+-- logging is set to. Superuser-only settings; they apply to this session (skipped on RDS, whose
+-- parameter group keeps log_statement at its default 'none').
+\if :rds
+\else
+  SET log_statement = 'none';
+  SET log_min_duration_statement = -1;
+  SET log_min_error_statement = 'panic';
+  SET log_duration = off;
+\endif
 
 \getenv pw_superuser PW_SUPERUSER
 \getenv pw_orchestrator_owner PW_ORCHESTRATOR_OWNER
@@ -35,14 +48,29 @@ INSERT INTO bootstrap_role (name, svc, pw) VALUES
   ('ingest_app',         'ingest',       :'pw_ingest_app');
 
 -- 0. The superuser password follows the file secret (existing volumes still hold the legacy one).
-SELECT format('ALTER ROLE %I PASSWORD %L', current_user, :'pw_superuser') \gexec
+--    Not on RDS: the master password is Terraform's business.
+\if :rds
+\else
+  SELECT format('ALTER ROLE %I PASSWORD %L', current_user, :'pw_superuser') \gexec
+\endif
 
 -- 1. Roles. CREATE ROLE has no IF NOT EXISTS; the attributes and the password are re-applied on
 --    every run, so a rotated secret file takes effect with `make db-roles`.
 SELECT format('CREATE ROLE %I LOGIN', name) FROM bootstrap_role
  WHERE NOT EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = bootstrap_role.name) \gexec
-SELECT format('ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', name, pw)
-  FROM bootstrap_role \gexec
+\if :rds
+  -- A non-superuser may not mention SUPERUSER, REPLICATION or BYPASSRLS at all (not even the NO forms);
+  -- CREATE ROLE already defaults to NOSUPERUSER NOREPLICATION NOBYPASSRLS.
+  SELECT format('ALTER ROLE %I LOGIN NOCREATEDB NOCREATEROLE PASSWORD %L', name, pw)
+    FROM bootstrap_role \gexec
+  -- PG16+: CREATE SCHEMA ... AUTHORIZATION <role> needs SET on that role; the creator's implicit grant
+  -- carries only ADMIN. (The WITH SET syntax needs PG16+; RDS runs PG17.)
+  SELECT format('GRANT %I TO %I WITH SET TRUE', name, current_user)
+    FROM bootstrap_role WHERE name LIKE '%\_owner' \gexec
+\else
+  SELECT format('ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', name, pw)
+    FROM bootstrap_role \gexec
+\endif
 -- Search path per role; the ingest roles also see `public`, where pgvector lives.
 SELECT format('ALTER ROLE %I SET search_path = %s', name,
               CASE WHEN svc = 'ingest' THEN 'ingest, public' ELSE svc END)
@@ -137,16 +165,31 @@ END
 $adopt$;
 
 -- 4. Database access: nobody but the superuser and the eight roles may connect.
-REVOKE ALL ON DATABASE saiman FROM PUBLIC;
-SELECT format('GRANT CONNECT ON DATABASE saiman TO %I', name) FROM bootstrap_role \gexec
+SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database()) \gexec
+SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), name) FROM bootstrap_role \gexec
 
 -- 4b. The roles must not reach the maintenance databases either (a fresh cluster lets PUBLIC connect
 --     to postgres and template1, and use TEMP there). Idempotent; the superuser is unaffected.
-REVOKE ALL ON DATABASE postgres FROM PUBLIC;
-REVOKE ALL ON DATABASE template1 FROM PUBLIC;
-SELECT format('REVOKE ALL ON DATABASE postgres FROM %I', name) FROM bootstrap_role \gexec
-SELECT format('REVOKE ALL ON DATABASE template1 FROM %I', name) FROM bootstrap_role \gexec
+--     Skipped on RDS: those databases belong to rdsadmin and the master user cannot change them.
+\if :rds
+\else
+  REVOKE ALL ON DATABASE postgres FROM PUBLIC;
+  REVOKE ALL ON DATABASE template1 FROM PUBLIC;
+  SELECT format('REVOKE ALL ON DATABASE postgres FROM %I', name) FROM bootstrap_role \gexec
+  SELECT format('REVOKE ALL ON DATABASE template1 FROM %I', name) FROM bootstrap_role \gexec
+\endif
 
 -- 5. pgvector stays superuser-owned in `public` (the ingest roles reach it via their search_path).
 --    A volume where an older migration put it in another schema keeps it there (no move).
-CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+--     On RDS the caller (the demo-up workflow, as the master user) creates it before this script runs.
+\if :rds
+  DO $ext$
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+      RAISE EXCEPTION 'bootstrap-roles: extension "vector" is missing; create it as the master user first';
+    END IF;
+  END
+  $ext$;
+\else
+  CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+\endif
