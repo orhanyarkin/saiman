@@ -63,3 +63,5 @@ jobs:
             done
       - name: Bucket keeps prevent_destroy
         run: deploy/terraform/aws/bootstrap/tests/check-prevent-destroy.sh
+      - name: demo-lite foundation checks (default tags, no IAM resources)
+        run: deploy/terraform/aws/demo-lite/tests/check-foundation.sh
