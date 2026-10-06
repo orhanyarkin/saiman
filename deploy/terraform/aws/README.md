@@ -127,3 +127,31 @@ terraform validate
 terraform test                 # mock_provider assertions
 tests/check-foundation.sh      # default tags, single ingress rule, write-only password
 ```
+
+## demo-lite (ECS task)
+
+`ecs.tf` declares the cluster `saiman-demo`, the single Fargate ARM64 task definition (family
+`saiman-demo-lite`, roles = the fixed bootstrap ARNs) and the service `saiman-demo-lite`
+(`desired_count = 1`, public IP, `enable_execute_command`, `force_delete`, no steady-state wait).
+`containers.tf` mirrors `deploy/compose/docker-compose.yml` for one task, all containers on localhost:
+
+| Container | Kind | Notes |
+| --- | --- | --- |
+| `assets` | one-shot | `aws s3 sync` of `s3://<state bucket>/demo/assets/<session_id>/` into the `assets` volume (layout of `aws/assets/build-assets.sh`), copies `web/dist` and `nginx/default.conf` into `web-html` / `web-conf`, fetches the corpus dump + `.meta.json` (`corpus_object_key`) into `corpus` |
+| `db-init` | one-shot | creates the `vector` extension, then `postgres/bootstrap-roles.sh` (`BOOTSTRAP_SECRET_SOURCE=env`, `BOOTSTRAP_RDS=1`); master password and `PW_*` via `secrets` only |
+| `<svc>-migrate` x4 | one-shot | `SAIMAN_RUN_MODE=migrate`, owner user, `SPRING_FLYWAY_PASSWORD` via `secrets` only |
+| `corpus-restore` | one-shot | `postgres/corpus-restore.sh /corpus` as `ingest_owner` (after `ingest-migrate`) |
+| `kafka`, `redis` | essential | loopback only, health checks |
+| `orchestrator`, `seller-api`, `ledger`, `ingest` | essential | app password only, `SPRING_FLYWAY_ENABLED=false`, 768 MiB hard limit |
+| `otel-collector` | non-essential | `assets/otel/config.yaml`; `grafana.yaml` overlay only when `grafana_otlp_endpoint` is set |
+| `web` | essential | nginx on port 80, the SSM port-forward target |
+| `readiness` | one-shot | runs `/assets/scripts/readiness.sh` (the assets prefix must contain `scripts/readiness.sh`), exits 0 when all four services are UP |
+
+SSM parameters the `demo-up` workflow must create under `/saiman/demo/` (SecureString):
+`pg_master_password`, `pg_<schema>_{owner,app}_password` for `orchestrator`, `ledger`, `seller_api`, `ingest`,
+`x402_buyer_private_key`, `openai_api_key`, `seller_service_token_ledger`, and `grafana_otlp_auth`
+(only when `grafana_otlp_endpoint` is set). Spring cannot read file secrets on ECS, so the secrets are env vars
+with relaxed-binding names (`X402_CLIENT_PRIVATE_KEY`, `SAIMAN_ROUTER_OPENAI_API_KEY`,
+`SAIMAN_LEDGER_SELLER_SERVICE_TOKEN`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_FLYWAY_PASSWORD`).
+
+Extra offline check: `tests/check-task.sh` (no secret reads, no IAM, buyer key only on the orchestrator).
