@@ -191,14 +191,17 @@ Teardown check: `ops/check-demo-down.sh` (exit 0 clean, 1 leftovers, 2 usage/cre
 list every service (tagging API, ELB, ECR, Cloud Map, Secrets Manager, S3 bucket list, IAM roles), so the workflow
 runs it with `--allow-unverified` and prints which checks were UNVERIFIED; `make demo-down-check` is the strict run.
 
-Permissions the bootstrap roles are missing for these workflows (follow-up for `bootstrap/iam.tf`, found while
-building A4; `demo-up` fails at the asset upload until the first is added):
-1. apply role: `s3:PutObject` on `<bucket>/demo/*` (assets are uploaded with `aws s3 cp --recursive`, which needs
-   no listing).
-2. destroy role: none needed for the reaper (it reads the expiry TAG: the roles have an explicit Deny on
-   `ssm:GetParameter*`), but for a full automated check add `tag:GetResources`, `elasticloadbalancing:Describe*`,
-   `ecr:DescribeRepositories`, `servicediscovery:List*`, `secretsmanager:ListSecrets`, `s3:ListAllMyBuckets` and
-   `iam:ListRoles`/`iam:ListPolicies` on `*` (all read-only).
+Bootstrap permissions these workflows rely on (reconciled in `bootstrap/iam.tf`):
+1. apply role: `s3:PutObject` on `<bucket>/demo/*` only (assets are uploaded with `aws s3 cp --recursive`, which
+   needs no listing; reads of `demo/*` stay denied), plus `ssm:PutParameter` and `ssm:AddTagsToResource` on
+   `/saiman/demo/*` for the parameters and the `expires-at` tag. Re-apply bootstrap once after pulling this.
+2. destroy role: the reaper reads the expiry from the `expires-at` TAG (`ssm:DescribeParameters`,
+   `ssm:ListTagsForResource`) because both CI roles are denied `ssm:GetParameter*`; cleanup deletes with
+   `ssm:DeleteParameters`/`DeleteParameter` on `/saiman/demo/*`.
+   The strict teardown check needs read access the destroy role deliberately does not have (`tag:GetResources`,
+   `elasticloadbalancing:Describe*`, `ecr:Describe*`, `servicediscovery:List*`, `secretsmanager:ListSecrets`,
+   `s3:ListAllMyBuckets`, `iam:ListRoles`/`ListPolicies`). Do not add them: the workflow runs the check with
+   `--allow-unverified`, and you run the strict check yourself (`make demo-down-check`) with an admin profile.
 3. `CORPUS_SHA256` is a repository variable because the CI roles are denied `s3:GetObject` on `artifacts/*`, so the
    workflow cannot hash the dump itself.
 
