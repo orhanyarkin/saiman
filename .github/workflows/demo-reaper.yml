@@ -1,0 +1,56 @@
+name: demo-reaper
+
+# TTL enforcement (ADR-0028, the only relaxation of CLAUDE.md rule 7): every 30 minutes, destroy the demo
+# IF AND ONLY IF /saiman/demo/expires-at is in the past. It never creates anything and never touches a
+# demo that has not expired: `only_if_expired` makes demo-destroy re-check under the `demo-lite` lock.
+# GitHub cron can be delayed; the EventBridge Scheduler backstop stops compute 30 minutes after expiry.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check expiry
+    if: github.repository == 'orhanyarkin/saiman'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: demo-destroy
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: eu-central-1
+    outputs:
+      expired: ${{ steps.expiry.outputs.expired }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Configure AWS credentials (OIDC, destroy role)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.DESTROY_ROLE_ARN }}
+          aws-region: eu-central-1
+          role-session-name: demo-reaper
+          role-duration-seconds: 900
+      - name: Read the expiry (tag of /saiman/demo/expires-at)
+        id: expiry
+        run: |
+          set -euo pipefail
+          deploy/terraform/aws/ops/demo-expiry.sh --region "$AWS_REGION" | tee -a "$GITHUB_OUTPUT"
+
+  destroy:
+    name: destroy expired demo
+    needs: check
+    if: needs.check.outputs.expired == 'true'
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/demo-destroy.yml
+    with:
+      only_if_expired: true
