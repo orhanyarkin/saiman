@@ -1,7 +1,8 @@
 name: Terraform
 
-# Static checks only: fmt, init -backend=false, validate and offline `terraform test` (mock providers).
-# No cloud credentials and no OIDC role are used here. plan/infracost comments come with the demo-lite module.
+# `static`: fmt, init -backend=false, validate, offline `terraform test` (mock providers) and the ops
+# self-tests; no cloud credentials. `plan`: read-only OIDC role (PLAN_ROLE_ARN), placeholder inputs, never
+# apply. `infracost`: cost estimate when INFRACOST_API_KEY exists. apply/destroy live in demo-up/demo-destroy.
 on:
   pull_request:
     paths:
@@ -67,3 +68,128 @@ jobs:
         run: deploy/terraform/aws/demo-lite/tests/check-foundation.sh
       - name: demo-lite task checks (secret reads, buyer key placement)
         run: deploy/terraform/aws/demo-lite/tests/check-task.sh
+      - name: ops self-tests (teardown check, scripts; fake aws, offline)
+        run: |
+          bash deploy/terraform/aws/ops/test-check-demo-down.sh
+          bash deploy/terraform/aws/ops/test-ops-scripts.sh
+      - name: SSM parameters created by demo-up equal containers.tf valueFrom
+        run: deploy/terraform/aws/ops/check-ssm-names.sh
+      - name: Workflow run blocks (no expressions, no set -x, shellcheck)
+        run: deploy/terraform/aws/ops/check-workflow-run-blocks.sh
+
+  # Read-only `terraform plan` of demo-lite with PLACEHOLDER inputs (ops/tf-dummy-env.sh: non-secret dummy
+  # image tag, payTo, digests, expiry). It shows what the module would create, not a real session. Runs only
+  # when the repository variable PLAN_ROLE_ARN is set, for same-repository pull requests and pushes to main:
+  # never for forks or Dependabot (their runs get no OIDC trust and no secrets). The plan role cannot read
+  # SSM values or private artifacts and has no S3 write, hence -lock=false. The artifact is the redacted
+  # `terraform show` text (sensitive values print as "(sensitive value)"; db_master_password stays null).
+  plan:
+    name: terraform plan (demo-lite, read-only role)
+    needs: static
+    if: >-
+      vars.PLAN_ROLE_ARN != ''
+      && github.actor != 'dependabot[bot]'
+      && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: eu-central-1
+      TF_IN_AUTOMATION: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+      - name: Configure AWS credentials (OIDC, plan role)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.PLAN_ROLE_ARN }}
+          aws-region: eu-central-1
+          role-session-name: terraform-plan
+          role-duration-seconds: 3600
+      - name: Placeholder inputs and terraform init
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          [[ -n "$STATE_BUCKET" ]] || { echo "::error::repository variable TF_STATE_BUCKET is not set"; exit 1; }
+          deploy/terraform/aws/ops/tf-dummy-env.sh "$STATE_BUCKET" >>"$GITHUB_ENV"
+          deploy/terraform/aws/ops/tf-init-demo-lite.sh "$STATE_BUCKET"
+      - name: terraform plan (no lock)
+        run: |
+          set -euo pipefail
+          dir="deploy/terraform/aws/demo-lite"
+          terraform -chdir="$dir" plan -lock=false -input=false -no-color -out="${RUNNER_TEMP}/tfplan"
+          terraform -chdir="$dir" show -no-color "${RUNNER_TEMP}/tfplan" >"${RUNNER_TEMP}/plan.txt"
+          {
+            echo "### terraform plan (placeholder inputs)"
+            echo '```'
+            tail -n 5 "${RUNNER_TEMP}/plan.txt"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Upload the plan text
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: demo-lite-plan
+          path: ${{ runner.temp }}/plan.txt
+          retention-days: 7
+
+  # Cost estimate from code (infracost runs locally on the runner; only the API key authenticates the pricing
+  # API). Runs only when the secret INFRACOST_API_KEY exists (never for forks or Dependabot: no secrets).
+  # Fargate and RDS hours have no usage knob, so the figure is an always-on month; the summary divides it by
+  # 730 for an hourly figure and multiplies by 4 for a 4-hour session (infracost-usage.yml).
+  infracost:
+    name: infracost (demo-lite cost estimate)
+    needs: static
+    if: >-
+      github.actor != 'dependabot[bot]'
+      && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+    steps:
+      - name: Check whether infracost is configured
+        id: enabled
+        run: |
+          if [[ -n "$INFRACOST_API_KEY" ]]; then echo "enabled=true" >>"$GITHUB_OUTPUT"; else echo "INFRACOST_API_KEY is not set: skipping the cost estimate."; fi
+      - name: Check out repository
+        if: steps.enabled.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up infracost
+        if: steps.enabled.outputs.enabled == 'true'
+        uses: infracost/actions/setup@e9d6e6cd65e168e76b0de50ff9957d2fe8bb1832 # v3.0.1
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+      - name: infracost breakdown and summary
+        if: steps.enabled.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2163  # exporting a NAME=value line on purpose
+          while IFS= read -r line; do export "$line"; done < <(deploy/terraform/aws/ops/tf-dummy-env.sh saiman-placeholder-tfstate)
+          infracost breakdown --path deploy/terraform/aws/demo-lite \
+            --usage-file deploy/terraform/aws/infracost-usage.yml \
+            --format json --out-file "${RUNNER_TEMP}/infracost.json"
+          infracost output --path "${RUNNER_TEMP}/infracost.json" --format table >"${RUNNER_TEMP}/infracost.txt"
+          monthly="$(jq -r '.totalMonthlyCost // "0"' "${RUNNER_TEMP}/infracost.json")"
+          {
+            echo "### Cost estimate: demo-lite (infracost)"
+            echo ""
+            awk -v m="$monthly" 'BEGIN { printf "- always-on month (730 h): $%.2f\n- per hour: $%.3f\n- one 4-hour session: $%.2f\n", m, m / 730, m / 730 * 4 }'
+            echo ""
+            echo '```'
+            cat "${RUNNER_TEMP}/infracost.txt"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,14 @@
+# Infracost usage assumptions for demo-lite (ADR-0028): one 4-hour session.
+#
+# Infracost has no "hours of runtime" knob for Fargate tasks or RDS instances: it prices them as always-on
+# (730 h/month). The terraform.yml `infracost` job therefore reports the always-on month and derives
+#   per hour      = monthly / 730
+#   4-hour session = monthly / 730 * 4
+# Only the request/volume-driven items below take usage. Values are deliberately small: a few hours of logs
+# (1 day retention), no data-heavy paths (no NAT Gateway, no load balancer, no VPC endpoints).
+version: 0.1
+resource_usage:
+  aws_cloudwatch_log_group.main:
+    storage_gb: 1
+    monthly_data_ingested_gb: 1
+    monthly_data_scanned_gb: 0
