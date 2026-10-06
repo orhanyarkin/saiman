@@ -18,3 +18,4 @@
 - [M6 T3 ledger audit](m6-t3-ledger-audit.md) — owner cred residual undocumented/overstated, audit tables over-granted, 401 suppression signal (2026-10-05)
 - [M6 T2 orchestrator auth audit](m6-t2-orchestrator-auth-audit.md) — no Crit/High/Med; app DELETE resets spend_day, decided_by digest prefix to READER, auth-off locked closed (2026-10-05)
 - [M6 T3 seller audit](m6-t3-seller-audit.md) — eval drains shared router day cap, owner cred residual, /internal no body limit, firewall wraps /v1 (2026-10-05)
+- [M6b db-migrate audit](m6b-db-migrate-audit.md) — exit 0 w/o migrating (lazy/exclude), URL user= bypasses *_owner check, ADR-0024 residual open till wiring (2026-10-06)
