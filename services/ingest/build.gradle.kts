@@ -6,6 +6,7 @@ dependencies {
     implementation(platform(libs.spring.ai.bom))
     implementation(project(":libs:shared"))
     implementation(project(":libs:model-router"))
+    implementation(project(":libs:db-migrate")) // one-shot entry point: Flyway as the owner role (ADR-0027)
 
     implementation(libs.spring.boot.starter.webmvc)
     implementation(libs.spring.boot.starter.restclient)
