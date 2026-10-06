@@ -25,3 +25,12 @@ The Gradle multi-project build has seven modules (two libraries, five Spring Boo
 − The first local image build downloads the Paketo builder (~1 GB).
 − The multi-arch manifest is an extra CI step, deferred to M6.
 Revisit if: build times exceed ~10 minutes in CI, or Fargate needs something the buildpack images can't provide.
+
+## Update (M6): publishing to GHCR (ADR-0028)
+Status: Accepted (2026-10-06). Completes the "publishing comes in M6" step above; the build-logic and Buildpacks decisions are unchanged.
+
+- **Gradle gating.** `saiman.spring-boot-service` publishes only with `-PimagePublish=true`, and then requires an explicit `-PimageTag` other than `dev`/`latest`. Credentials come from the environment (`GITHUB_ACTOR`, `GITHUB_TOKEN`) through `docker { publishRegistry { ... } }`, never from files. Without the properties the task is exactly the local `ghcr.io/orhanyarkin/saiman-<svc>:dev` build with no push, so `make images` and Compose are untouched.
+- **CI.** On a push to `main` of this repository only (never PRs, forks or Dependabot branches) the `images` job builds and pushes `sha-<12 hex>-amd64` on `ubuntu-24.04` and `sha-<12 hex>-arm64` on `ubuntu-24.04-arm`, natively, for orchestrator, seller-api, ledger, ingest and evals. `packages: write` is granted to that job and to `images-manifest` only; the workflow default stays `contents: read`. The `images-manifest` job joins the two tags into `sha-<12>` with `docker buildx imagetools create` and fails unless `imagetools inspect` lists both `linux/amd64` and `linux/arm64`. There is no `latest` tag.
+- **Web** is not an image: Compose serves the Vite build with a stock `nginx` image, and the replay demo goes to Cloudflare Pages, so nothing is published for it.
+- **Human steps.** After the first publish, set the five GHCR packages (`saiman-orchestrator`, `saiman-seller-api`, `saiman-ledger`, `saiman-ingest`, `saiman-evals`) to public in the package settings (Fargate pulls without credentials), and link them to the repository so `GITHUB_TOKEN` can keep pushing.
+- **Not provable before the first merge to `main`.** The push path, in particular arm64 on the native runner and the manifest verification, runs only on `main`; PRs never exercise it. Locally only the Gradle configuration is checked (`--dry-run`).
