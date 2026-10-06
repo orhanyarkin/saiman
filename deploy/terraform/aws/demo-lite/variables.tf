@@ -138,3 +138,19 @@ variable "corpus_sha256" {
     error_message = "corpus_sha256 must be 64 lowercase hex characters."
   }
 }
+
+variable "image_digests" {
+  description = "Index digests (sha256:<64 hex>) of the five service images for image_tag, resolved by demo-up from the GHCR manifests. The containers pull by digest, so a re-pushed tag cannot change what runs."
+  type        = map(string)
+
+  validation {
+    condition = (
+      length(var.image_digests) == 5
+      && alltrue([
+        for k in ["orchestrator", "seller-api", "ledger", "ingest", "evals"] :
+        contains(keys(var.image_digests), k) && can(regex("^sha256:[0-9a-f]{64}$", var.image_digests[k]))
+      ])
+    )
+    error_message = "image_digests needs exactly the keys orchestrator, seller-api, ledger, ingest and evals, each sha256:<64 lowercase hex>."
+  }
+}
