@@ -1,0 +1,41 @@
+# OpenTelemetry Collector config for the AWS demo-lite task (ADR-0028). Copied into the assets
+# bundle by build-assets.sh as otel/config.yaml. Derived from deploy/compose/otel-collector.yaml:
+# same receiver and processors, but everything listens on loopback (all containers share the task's
+# network namespace) and there is no Jaeger; traces and metrics go to the debug exporter only.
+#
+# Grafana Cloud is an optional overlay (otel/grafana.yaml): the task command passes it as a second
+# --config only when the Grafana variables are set on the collector container. The API key is read
+# from the container environment by the collector and is never written into any asset file.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 150
+    spike_limit_mib: 30
+  batch: {}
+
+exporters:
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+  telemetry:
+    logs:
+      level: info

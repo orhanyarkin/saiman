@@ -1,0 +1,40 @@
+# Optional Grafana Cloud overlay (free tier), merged over otel/config.yaml with a second --config.
+# The task command includes this file only when GRAFANA_OTLP_ENDPOINT and GRAFANA_OTLP_AUTH are set.
+#   GRAFANA_OTLP_ENDPOINT  e.g. https://otlp-gateway-prod-eu-west-0.grafana.net/otlp
+#   GRAFANA_OTLP_AUTH      base64("<instance id>:<api token>"), an SSM SecureString injected by ECS
+# Values are expanded by the collector at start-up from its own environment (${env:...}); this file
+# holds no secret. The attributes processor drops high-cardinality attributes so the series count
+# stays far below the free-tier limit (10k active series).
+
+exporters:
+  otlp_http/grafana-cloud:
+    endpoint: ${env:GRAFANA_OTLP_ENDPOINT}
+    headers:
+      Authorization: "Basic ${env:GRAFANA_OTLP_AUTH}"
+
+processors:
+  attributes/drop-high-cardinality:
+    actions:
+      - key: http.url
+        action: delete
+      - key: url.full
+        action: delete
+      - key: url.query
+        action: delete
+      - key: user_agent.original
+        action: delete
+      - key: client.address
+        action: delete
+      - key: network.peer.port
+        action: delete
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/drop-high-cardinality, batch]
+      exporters: [debug, otlp_http/grafana-cloud]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/drop-high-cardinality, batch]
+      exporters: [debug, otlp_http/grafana-cloud]
