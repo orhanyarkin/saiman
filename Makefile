@@ -56,6 +56,19 @@ db-roles: ## (Re)run the idempotent per-service Postgres role bootstrap (db-init
 	$(COMPOSE) up -d --wait postgres
 	$(COMPOSE) run --rm db-init
 
+.PHONY: corpus-export test-bootstrap-roles
+CORPUS_DIR ?= build/corpus
+
+corpus-export: ## Export the ingest corpus (data-only dump + JSON metadata) from the local postgres to CORPUS_DIR (default build/corpus/) (ADR-0028).
+	scripts/ensure-secret-files.sh
+	$(COMPOSE) up -d --wait postgres
+	mkdir -p $(CORPUS_DIR)
+	$(COMPOSE) run --rm --no-deps --user "$$(id -u):$$(id -g)" -v "$$PWD/$(CORPUS_DIR):/out" \
+		-e PGPASSWORD_FILE=/run/secrets/pg_superuser_password --entrypoint bash db-init /bootstrap/corpus-export.sh /out
+
+test-bootstrap-roles: ## Self-test of the Postgres role bootstrap (superuser + RDS-style) and corpus export/restore in throwaway containers.
+	scripts/test-bootstrap-roles.sh
+
 psql: ## Open a psql shell as the superuser inside the postgres container (unix socket, no password in argv or env).
 	$(COMPOSE) exec postgres psql -U saiman -d saiman
 
