@@ -122,11 +122,6 @@ run "network_has_no_ingress_and_narrow_egress" {
     condition     = length(aws_subnet.public) == 2 && length(toset([for s in aws_subnet.public : s.availability_zone])) == 2
     error_message = "two public subnets in two AZs"
   }
-
-  assert {
-    condition     = aws_vpc_endpoint.s3.vpc_endpoint_type == "Gateway" && aws_vpc_endpoint.s3.service_name == "com.amazonaws.eu-central-1.s3"
-    error_message = "free S3 gateway endpoint expected"
-  }
 }
 
 run "logs_expire_after_one_day" {

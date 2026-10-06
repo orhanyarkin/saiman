@@ -46,15 +46,8 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Gateway endpoints are free; S3 traffic (corpus dump) stays off the internet path.
-resource "aws_vpc_endpoint" "s3" {
-  vpc_id            = aws_vpc.main.id
-  service_name      = "com.amazonaws.${local.region}.s3"
-  vpc_endpoint_type = "Gateway"
-  route_table_ids   = [aws_route_table.public.id]
-
-  tags = { Name = "${local.name_prefix}-s3" }
-}
+# No S3 gateway endpoint on purpose: without NAT, in-region S3 over the public IP costs nothing, and
+# an endpoint would need extra ec2:*VpcEndpoint permissions on the apply/destroy roles.
 
 # --- Security groups -----------------------------------------------------------------------------
 # aws_security_group without inline rules makes Terraform remove AWS's default allow-all egress, so
