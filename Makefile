@@ -24,7 +24,7 @@ export X402_SELLER_PAYTO_ADDRESS
 	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check \
 	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask \
 	research-run research-approve research-status web-build e2e e2e-live lighthouse gen-api \
-	shellcheck recon-run recon-report ledger-balance ledger-tamper-demo db-roles db-migrate psql auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest test-aws-assets
+	shellcheck recon-run recon-report ledger-balance ledger-tamper-demo db-roles db-migrate psql auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest test-aws-assets tf-check demo-tunnel demo-capture demo-down-check
 
 help: ## Show this help.
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -306,6 +306,38 @@ capture-demo-selftest: ## Self-test the capture scrubber against fixtures (no st
 
 test-aws-assets: ## Self-test the demo-lite deploy assets (nginx/otel/readiness; offline).
 	bash deploy/terraform/aws/assets/test-assets.sh
+
+# AWS demo-lite (ADR-0028). The ops targets use YOUR AWS identity (AWS_PROFILE, SSO), never a CI role.
+TF_AWS := deploy/terraform/aws
+REGION ?= eu-central-1
+STATE_BUCKET ?=
+
+tf-check: test-aws-assets ## Offline Terraform checks (fmt, validate, test) for bootstrap + demo-lite and every ops/check script; no credentials.
+	terraform fmt -check -recursive $(TF_AWS)
+	@set -e; for d in bootstrap demo-lite; do \
+	  terraform -chdir=$(TF_AWS)/$$d init -backend=false -input=false >/dev/null; \
+	  terraform -chdir=$(TF_AWS)/$$d validate; \
+	  terraform -chdir=$(TF_AWS)/$$d test; \
+	done
+	$(TF_AWS)/bootstrap/tests/check-prevent-destroy.sh
+	$(TF_AWS)/demo-lite/tests/check-foundation.sh
+	$(TF_AWS)/demo-lite/tests/check-task.sh
+	bash $(TF_AWS)/ops/test-check-demo-down.sh
+	bash $(TF_AWS)/ops/test-ops-scripts.sh
+	$(TF_AWS)/ops/check-ssm-names.sh
+	$(TF_AWS)/ops/check-workflow-run-blocks.sh
+
+demo-tunnel: ## Port-forward localhost:8088 to the running demo's web container (SSM; needs session-manager-plugin and AWS_PROFILE).
+	$(TF_AWS)/ops/demo-tunnel.sh --region $(REGION)
+
+demo-capture: ## With `make demo-tunnel` running: fetch the demo's tokens from SSM and capture its runs (ADR-0026).
+	@set -e; dir="$$($(TF_AWS)/ops/demo-tokens.sh --region $(REGION))"; trap 'rm -rf "$$dir"' EXIT; \
+	ORCH_URL=http://localhost:8088 LEDGER_URL=http://localhost:8088 SECRETS_DIR="$$dir" \
+	CAPTURE_ENVIRONMENT="AWS eu-central-1 (ECS Fargate ARM)" $(MAKE) capture-demo
+
+demo-down-check: ## Strict teardown check with your admin profile. Usage: make demo-down-check STATE_BUCKET=<bucket> [REGION=eu-central-1]
+	@[ -n "$(STATE_BUCKET)" ] || { echo "Set STATE_BUCKET (the bootstrap state bucket)." >&2; exit 1; }
+	$(TF_AWS)/ops/check-demo-down.sh --region $(REGION) --state-bucket $(STATE_BUCKET) --strict
 
 profile-pro: ## Switch agent usage to the Pro-plan profile (lean mode; .claude/profiles/pro.json).
 	scripts/usage-profile.sh pro
