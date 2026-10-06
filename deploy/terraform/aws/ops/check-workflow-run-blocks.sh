@@ -5,7 +5,14 @@
 #   3. no `set -x` (it would echo secrets);
 #   4. every run block passes shellcheck (`-x -S warning`, the digest-pinned image of the root Makefile).
 #
-# Usage: check-workflow-run-blocks.sh [<workflow.yml>...]     (default: the demo-* workflows and terraform.yml)
+#   5. no `pull_request_target` or `workflow_run` trigger anywhere;
+#   6. a job with `id-token: write` OR `packages: write` must not set up a toolchain, use `cache:` or run a
+#      package manager (build code must not run with publish/deploy credentials; audit M1). The only exception is
+#      the explicit allowlist ALLOWED_BUILD_WITH_PUBLISH below;
+#   7. meta-check: terraform.yml's path filters (push and pull_request) cover the workflows and the scripts the
+#      Terraform guards depend on, so the guards cannot be bypassed by editing those files (audit M2).
+#
+# Usage: check-workflow-run-blocks.sh [<workflow.yml>...]     (default: EVERY file in .github/workflows)
 # Needs python3 with PyYAML and either `shellcheck` or docker. Exit 0 clean, 1 findings, 2 usage/tooling.
 set -euo pipefail
 
@@ -15,8 +22,8 @@ image="${SHELLCHECK_IMAGE:-koalaman/shellcheck@sha256:2097951f02e735b613f4a34de2
 
 files=("$@")
 if [[ ${#files[@]} -eq 0 ]]; then
-  for f in demo-up demo-down demo-destroy demo-reaper terraform; do
-    files+=("${repo}/.github/workflows/${f}.yml")
+  for f in "${repo}"/.github/workflows/*.yml; do
+    files+=("${f}")
   done
 fi
 
@@ -34,13 +41,40 @@ import yaml
 out, files = sys.argv[1], sys.argv[2:]
 n = 0
 bad = 0
+# The ONLY job that builds third-party code while holding packages: write: it publishes the images (ADR-0007).
+# Its residual risk is documented in docs/THREAT_MODEL.md (Image integrity). Nothing else may be added here
+# without an ADR.
+ALLOWED_BUILD_WITH_PUBLISH = {("ci.yml", "images")}
+REQUIRED_TF_PATHS = [
+    ".github/workflows/**",
+    "scripts/ensure-secret-files.sh",
+    "scripts/with-auth-digests.sh",
+    "deploy/compose/postgres/**",
+    "deploy/compose/nginx.conf",
+    "deploy/terraform/**",
+]
 for path in files:
     with open(path, encoding="utf-8") as fh:
         doc = yaml.safe_load(fh)
     base = os.path.basename(path)
+    triggers = doc.get("on", doc.get(True)) or {}
+    trigger_names = triggers if isinstance(triggers, (list, dict)) else [triggers]
+    for forbidden in ("pull_request_target", "workflow_run"):
+        if forbidden in trigger_names:
+            print(f"FAIL {base}: trigger {forbidden} is forbidden (runs with secrets in the context of untrusted code)")
+            bad += 1
+    if base == "terraform.yml" and isinstance(triggers, dict):
+        for event in ("push", "pull_request"):
+            have = (triggers.get(event) or {}).get("paths") or []
+            for want in REQUIRED_TF_PATHS:
+                if want not in have:
+                    print(f"FAIL {base}: {event} path filter lacks {want} (a guard change would skip the guards)")
+                    bad += 1
     for job_id, job in (doc.get("jobs") or {}).items():
         perms = job.get("permissions", doc.get("permissions"))
-        privileged = isinstance(perms, dict) and perms.get("id-token") == "write"
+        privileged = isinstance(perms, dict) and (perms.get("id-token") == "write" or perms.get("packages") == "write")
+        if (base, job_id) in ALLOWED_BUILD_WITH_PUBLISH:
+            privileged = False
         for i, step in enumerate(job.get("steps") or []):
             if privileged:
                 uses = str(step.get("uses", ""))
@@ -48,13 +82,13 @@ for path in files:
                 run_txt = str(step.get("run", ""))
                 label = f"{base}:{job_id}:step{i + 1}"
                 if any(t in uses for t in ("pnpm/action-setup", "actions/setup-node", "actions/setup-java", "gradle/actions")):
-                    print(f"FAIL {label}: toolchain setup ({uses.split('@')[0]}) in a job with id-token: write (M1)")
+                    print(f"FAIL {label}: toolchain setup ({uses.split('@')[0]}) in a job with id-token/packages: write (M1)")
                     bad += 1
                 if "cache" in wth or "cache-dependency-path" in wth:
-                    print(f"FAIL {label}: cache: in a job with id-token: write (cache poisoning, M1)")
+                    print(f"FAIL {label}: cache: in a job with id-token/packages: write (cache poisoning, M1)")
                     bad += 1
                 if re.search(r"(^|[\s;&|(])(pnpm|npm|npx|yarn|\./gradlew|gradle)\s", run_txt):
-                    print(f"FAIL {label}: package-manager/build command in a job with id-token: write (M1)")
+                    print(f"FAIL {label}: package-manager/build command in a job with id-token/packages: write (M1)")
                     bad += 1
             run = step.get("run")
             if run is None:

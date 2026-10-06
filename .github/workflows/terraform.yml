@@ -4,15 +4,25 @@ name: Terraform
 # self-tests; no cloud credentials. `plan`: read-only OIDC role (PLAN_ROLE_ARN), placeholder inputs, never
 # apply. `infracost`: cost estimate when INFRACOST_API_KEY exists. apply/destroy live in demo-up/demo-destroy.
 on:
+  # The filters include every file the guards and the demo workflows depend on: a change to any of them must
+  # run the guards (ops/check-workflow-run-blocks.sh enforces this list).
   pull_request:
     paths:
       - "deploy/terraform/**"
-      - ".github/workflows/terraform.yml"
+      - ".github/workflows/**"
+      - "scripts/ensure-secret-files.sh"
+      - "scripts/with-auth-digests.sh"
+      - "deploy/compose/postgres/**"
+      - "deploy/compose/nginx.conf"
   push:
     branches: [main]
     paths:
       - "deploy/terraform/**"
-      - ".github/workflows/terraform.yml"
+      - ".github/workflows/**"
+      - "scripts/ensure-secret-files.sh"
+      - "scripts/with-auth-digests.sh"
+      - "deploy/compose/postgres/**"
+      - "deploy/compose/nginx.conf"
 
 permissions:
   contents: read
