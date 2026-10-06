@@ -17,6 +17,7 @@ dependencies {
     implementation(libs.spring.boot.starter.jdbc) // settlement records (schema seller_api)
     implementation(libs.spring.boot.starter.flyway)
     implementation(libs.flyway.database.postgresql)
+    implementation(project(":libs:db-migrate")) // `SAIMAN_RUN_MODE=migrate` one-shot (ADR-0027)
     implementation(project(":libs:eventing")) // Modulith registry defaults (ADR-0016)
     implementation(platform(libs.spring.modulith.bom))
     implementation(libs.spring.modulith.starter.jdbc) // transactional outbox: JDBC event publication registry
