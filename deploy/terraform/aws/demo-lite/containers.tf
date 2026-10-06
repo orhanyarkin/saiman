@@ -282,7 +282,7 @@ locals {
       memory        = 128
       restartPolicy = { enabled = true, restartAttemptPeriod = 60 }
       entryPoint    = ["sh", "-c"]
-      command       = ["exec redis-server --bind 127.0.0.1 --save '' --appendonly no --requirepass \"$REDIS_PASSWORD\""]
+      command       = ["exec redis-server --bind 127.0.0.1 --save '' --appendonly no --maxmemory 96mb --maxmemory-policy noeviction --requirepass \"$REDIS_PASSWORD\""]
       secrets       = { REDIS_PASSWORD = "redis_password" }
       healthCheck = {
         command     = ["CMD-SHELL", "REDISCLI_AUTH=\"$REDIS_PASSWORD\" redis-cli -h 127.0.0.1 ping | grep -q PONG"]

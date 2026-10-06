@@ -437,6 +437,18 @@ run "ordering_and_images" {
   }
 }
 
+run "redis_bounded_and_not_evicting" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
+      c.name != "redis" || (strcontains(join(" ", c.command), "--maxmemory 96mb") && strcontains(join(" ", c.command), "--maxmemory-policy noeviction"))
+    ])
+    error_message = "redis must be capped at 96mb with noeviction (a full Redis must reject writes, never drop nonce claims or day-cap counters)"
+  }
+}
+
 run "otel_collector_config" {
   assert {
     condition     = [for c in jsondecode(aws_ecs_task_definition.main.container_definitions) : c.command if c.name == "otel-collector"][0] == ["--config=/assets/otel/config.yaml"]
