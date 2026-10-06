@@ -6,7 +6,6 @@ name: demo-destroy
 # it cannot create anything. `terraform destroy` -> SSM parameters -> demo/ objects -> task definitions ->
 # ops/check-demo-down.sh. The expiry parameter is deleted last, so a failed teardown is retried by the reaper.
 on:
-  workflow_dispatch:
   workflow_call:
     inputs:
       only_if_expired:

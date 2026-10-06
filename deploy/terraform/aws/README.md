@@ -208,3 +208,20 @@ Bootstrap permissions these workflows rely on (reconciled in `bootstrap/iam.tf`)
 Cost: about $0.55-0.80 per 4-hour session (ADR-0028), roughly $0.14-0.20 per hour; idle is about $0.003 per month
 (state bucket only: `demo-down` leaves no other resource). The `infracost` job in `terraform.yml` reports the
 always-on month and derives the hourly and 4-hour figures (Fargate and RDS hours have no usage knob).
+
+### Who may trigger what, and recommended Claude Code deny rules
+
+`demo-destroy.yml` is `workflow_call` only: `demo-down` (you, `workflow_dispatch`) and `demo-reaper` (cron, expired demos only)
+call it. That `demo-up` and `demo-down` are triggered only by a human is a convention enforced by the GitHub
+environments (reviewer on `demo-apply`, main-only deployments), not by code. To keep an agent session from
+triggering them or reading demo secrets, add these deny rules to your own Claude Code settings (this repository
+does not edit `.claude/settings.json` for you):
+```
+Bash(gh workflow run *)
+Bash(gh workflow run:*)
+Bash(aws ssm get-parameter*)
+Bash(aws ssm put-parameter*)
+Bash(aws ecs execute-command*)
+Bash(aws ssm start-session*)
+Bash(make demo-*)
+```
