@@ -20,6 +20,8 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.client.RestTestClient;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @ExtendWith(OutputCaptureExtension.class)
 class RetrievalTests extends IngestIntegrationTests {
@@ -32,6 +34,9 @@ class RetrievalTests extends IngestIntegrationTests {
 
     @Autowired
     private RestTestClient client;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void index() {
@@ -51,6 +56,19 @@ class RetrievalTests extends IngestIntegrationTests {
                 .getResponseBody();
         assertThat(response).isNotNull();
         return response;
+    }
+
+    /**
+     * The vector leg as production runs it: inside one transaction with relaxed iterative HNSW scans
+     * (see {@code HybridRetriever}). Without that setting a ticker-filtered HNSW query is approximate and can
+     * return far fewer rows than the endpoint does, or the same rows when the planner happens to pick an exact scan,
+     * so an expectation computed outside the transaction is flaky.
+     */
+    private List<String> vectorLeg(float[] embedding, List<String> tickers) {
+        return new TransactionTemplate(transactionManager).execute(status -> {
+            repository.enableIterativeScan();
+            return repository.vectorLeg(embedding, tickers);
+        });
     }
 
     private String textOf(String chunkId) {
@@ -218,7 +236,7 @@ class RetrievalTests extends IngestIntegrationTests {
         List<String> tickers = List.of("THYAO");
         float[] embedding = RecordingEmbeddingModel.vector(query);
         List<String> expected = RrfFusion.fuse(
-                        repository.vectorLeg(embedding, tickers),
+                        vectorLeg(embedding, tickers),
                         repository.lexicalLeg(query, tickers),
                         repository.recencyLeg(tickers),
                         HybridRetriever.DEFAULT_RECENCY_WEIGHT,
@@ -242,7 +260,7 @@ class RetrievalTests extends IngestIntegrationTests {
             List<String> tickers = request.getValue();
             float[] embedding = RecordingEmbeddingModel.vector(query);
             List<String> twoLeg = RrfFusion.fuse(
-                            repository.vectorLeg(embedding, tickers),
+                            vectorLeg(embedding, tickers),
                             repository.lexicalLeg(query, tickers),
                             RrfFusion.DEFAULT_K,
                             20)
