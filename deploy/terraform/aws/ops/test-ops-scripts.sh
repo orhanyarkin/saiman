@@ -79,6 +79,45 @@ expect "run-blocks: pnpm/cache in an id-token job is rejected" 1 "(M1)" "${ops}/
 sed -i 's/id-token: write/contents: read/' "${work}/bad.yml"
 expect "run-blocks: the same job without id-token is fine" 0 "clean" "${ops}/check-workflow-run-blocks.sh" "${work}/bad.yml"
 
+cat >"${work}/pkg.yml" <<'EOF'
+name: pkg
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - run: ./gradlew bootBuildImage
+EOF
+expect "run-blocks: gradle in a packages: write job is rejected (not allowlisted)" 1 "(M1)" "${ops}/check-workflow-run-blocks.sh" "${work}/pkg.yml"
+cat >"${work}/prt.yml" <<'EOF'
+name: prt
+on:
+  pull_request_target:
+jobs:
+  x:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo hi
+EOF
+expect "run-blocks: pull_request_target is rejected" 1 "pull_request_target" "${ops}/check-workflow-run-blocks.sh" "${work}/prt.yml"
+mkdir -p "${work}/wf"
+cat >"${work}/wf/terraform.yml" <<'EOF'
+name: Terraform
+on:
+  pull_request:
+    paths: ["deploy/terraform/**"]
+  push:
+    paths: ["deploy/terraform/**"]
+jobs:
+  x:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo hi
+EOF
+expect "run-blocks: terraform.yml path filters must cover the guard inputs" 1 "path filter lacks" "${ops}/check-workflow-run-blocks.sh" "${work}/wf/terraform.yml"
+
 # --- check-ssm-names -----------------------------------------------------------------------------------
 cp "${here}/../demo-lite/containers.tf" "${work}/containers.tf"
 if grep -q 'redis_password' "${work}/containers.tf"; then
