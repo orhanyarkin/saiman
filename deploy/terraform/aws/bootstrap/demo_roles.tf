@@ -23,7 +23,8 @@ locals {
   demo_rds_arn       = "arn:aws:rds:${var.region}:${local.account_id}:db:${local.demo_name_prefix}"
   demo_log_group_arn = "arn:aws:logs:${var.region}:${local.account_id}:log-group:/${local.demo_name_prefix}-lite"
 
-  demo_s3_read_arns = ["${local.bucket_arn}/artifacts/*", "${local.bucket_arn}/demo/*"]
+  # Read scope of the task role (and the boundary ceiling): the corpus dump and the per-session assets only.
+  demo_s3_read_arns = ["${local.bucket_arn}/artifacts/corpus/*", "${local.bucket_arn}/demo/assets/*"]
 
   demo_trust = { for svc in ["ecs-tasks", "scheduler"] : svc => jsonencode({
     Version = "2012-10-17"

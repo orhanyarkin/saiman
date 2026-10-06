@@ -413,7 +413,7 @@ run "ordering_and_images" {
   assert {
     condition = alltrue([
       for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
-      startswith(c.image, "ghcr.io/orhanyarkin/saiman-") ? can(regex("^ghcr.io/orhanyarkin/saiman-[a-z-]+@sha256:[0-9a-f]{64}$", c.image)) : startswith(c.image, "public.ecr.aws/") ? can(regex(":[0-9][^:@]*$", c.image)) : can(regex("^[a-z0-9./-]+:[0-9][0-9.]*@sha256:[0-9a-f]{64}$", c.image))
+      startswith(c.image, "ghcr.io/orhanyarkin/saiman-") ? can(regex("^ghcr.io/orhanyarkin/saiman-[a-z-]+@sha256:[0-9a-f]{64}$", c.image)) : startswith(c.image, "public.ecr.aws/") ? can(regex(":[0-9][^:@]*(@sha256:[0-9a-f]{64})?$", c.image)) : can(regex("^[a-z0-9./-]+:[0-9][0-9.]*@sha256:[0-9a-f]{64}$", c.image))
     ])
     error_message = "service images are pinned by @sha256 digest, mirror images a version tag, Docker Hub images tag@sha256 digests"
   }

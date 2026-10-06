@@ -61,3 +61,24 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+
+  # Terraform provider versions of the AWS stacks (ADR-0028). Provider majors by hand.
+  - package-ecosystem: terraform
+    directory: /deploy/terraform/aws/bootstrap
+    patterns: ["*"]
+    multi-ecosystem-group: weekly
+    cooldown:
+      default-days: 3
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: terraform
+    directory: /deploy/terraform/aws/demo-lite
+    patterns: ["*"]
+    multi-ecosystem-group: weekly
+    cooldown:
+      default-days: 3
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

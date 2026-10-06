@@ -20,13 +20,13 @@ locals {
     # public.ecr.aws mirror, which has no anonymous pull limit from AWS. kafka and otel (Docker Hub, not
     # mirrored) are pinned by index digest, resolved with `docker buildx imagetools inspect <image:tag>`;
     # both indexes contain linux/arm64.
-    awscli   = "public.ecr.aws/aws-cli/aws-cli:2.36.33"
+    awscli   = "public.ecr.aws/aws-cli/aws-cli:2.36.33@sha256:4a48238a344c36bdb37922c00f5364941c9decc6efe9cef70fa45c260278024b"
     postgres = "public.ecr.aws/docker/library/postgres:17.10" # Debian: db-init needs bash
     kafka    = "apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837"
     redis    = "public.ecr.aws/docker/library/redis:8.10.2-alpine"
     otel     = "otel/opentelemetry-collector:0.162.0@sha256:310a800ad69ee430e7c541796852a242c9c7db97aaad4daa5ccf843c525fbdb2"
     nginx    = "public.ecr.aws/docker/library/nginx:1.31.0-alpine"
-    busybox  = "public.ecr.aws/docker/library/busybox:1.38.0"
+    busybox  = "public.ecr.aws/docker/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
   }
 
   # Shared ephemeral volumes. The `assets` container syncs s3://<state bucket>/demo/assets/<session>/ into
