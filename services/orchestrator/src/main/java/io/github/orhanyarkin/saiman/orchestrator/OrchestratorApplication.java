@@ -11,9 +11,6 @@ public class OrchestratorApplication {
         if (DbMigrate.requested(args)) { // one image, two entry points (ADR-0027)
             System.exit(DbMigrate.run(args));
         }
-        if (DbMigrate.requested(args)) { // one image, two entry points (ADR-0027)
-            System.exit(DbMigrate.run(args));
-        }
         SpringApplication.run(OrchestratorApplication.class, args);
     }
 }
