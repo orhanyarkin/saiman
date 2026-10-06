@@ -19,3 +19,7 @@
 - [M6 T2 orchestrator auth audit](m6-t2-orchestrator-auth-audit.md) — no Crit/High/Med; app DELETE resets spend_day, decided_by digest prefix to READER, auth-off locked closed (2026-10-05)
 - [M6 T3 seller audit](m6-t3-seller-audit.md) — eval drains shared router day cap, owner cred residual, /internal no body limit, firewall wraps /v1 (2026-10-05)
 - [M6b db-migrate audit](m6b-db-migrate-audit.md) — exit 0 w/o migrating (lazy/exclude), URL user= bypasses *_owner check, ADR-0024 residual open till wiring (2026-10-06)
+- [M6b TF bootstrap audit](m6b-tf-bootstrap-audit.md) — no Crit/High; apply mints demo-role trust, env sub unbound to ref, PR-readable state (2026-10-06)
+- [M6b compose migrate audit](m6b-compose-migrate-audit.md) — no Crit/High; policy rules profile-gated, volumes_from copies owner secret (live), relaxed env spellings (2026-10-06)
+- [M6b ECS task audit](m6b-ecs-task-audit.md) — no Crit/High; tftest passes master pw on kafka, injection variants, pid_mode; shared netns makes Redis/ingest gaps live (2026-10-06)
+- [M6b demo lifecycle audit](m6b-demo-lifecycle-audit.md) — no Crit/High; pnpm build in OIDC apply job (Med), tag-pinned images, no TTL ceiling, reaper disarmed

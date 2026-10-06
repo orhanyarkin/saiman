@@ -1,11 +1,40 @@
 # Progress
 
 ## Current milestone
-M6 — Hardening, evals, replay: **built, audited, live-verified and merged** (PR #29). Per-task audits (T1+T4, T7+T5a, T2, T3 ledger, T3b seller-api) and the milestone audit (no Critical/High/Medium; six Lows fixed) are done. Facilitator WARN message cap raised 120 → 300 chars (branch `fix/facilitator-message-cap`). Out of this plan (human-only): Terraform demo-lite + Infracost, AWS capture session, Cloudflare deploy, blog, video; cross-provider route comparison and LLM judge (needs new provider keys). Design `docs/design/m6-hardening.md`; ADRs 0023-0026.
-M5 (dashboard), M4b, the Redis/Kafka swap and M4 are done and merged.
+M6b — migrate one-shot (ADR-0027) and AWS demo-lite automation (ADR-0028): **built, audited, verified locally; not yet pushed**. Branch `m6b-deploy-migrate` (not merged). Remaining work is human-only: bootstrap apply, `demo-up`, capture, `demo-down`, Cloudflare Pages, video, blog.
+M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4 are done and merged.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
+
+### 2026-10-06 — M6b: migrate one-shot, demo-lite Terraform and demo workflows (ADR-0027, ADR-0028)
+
+**What changed**
+- **Migrate one-shot (ADR-0027, amends ADR-0024):** new `libs/db-migrate` (`DbMigrate`): a Flyway-only Spring context that runs as `<svc>_owner` and exits; every service `main` calls it when `SAIMAN_RUN_MODE=migrate`. Hardened after audit: a `MigrationOutcome` sentinel (exit 0 only if the strategy ran), preflight before any connection (owner-role regex, schema match, no `?user=`/`password=` in the URL, no lazy-init or Flyway auto-config exclusion), and a session check against the database (current_user = session_user, not superuser, no BYPASSRLS, owns the schema). Compose gets `<svc>-migrate` one-shots; the owner secret is mounted only there; apps run `spring.flyway.enabled=false`. The compose policy script pins the split by service name and schema, not by profile (volumes_from, privileged, host-bound volumes and config-injection env spellings are rejected; 32 mutation cases in `scripts/test-check-compose-policy.sh`).
+- **AWS demo-lite (ADR-0028, `deploy/terraform/aws/`):** `bootstrap` (state bucket, OIDC provider, 3 CI roles + 3 fixed workload roles, permissions boundary), `demo-lite` (VPC without NAT/ALB, private RDS, one Fargate ARM task with all containers, expiry backstop via EventBridge Scheduler), `assets` (nginx.aws.conf derived from compose, otel config, readiness), `ops` (teardown check, SSM tunnel, token and cleanup scripts, SSM-name check). All tested offline with `terraform test` and mock providers; nothing was applied, no AWS call was made.
+- **Workflows:** `demo-up`, `demo-down`, `demo-destroy` (workflow_call only), `demo-reaper` (destroys only expired demos, the single relaxation of rule 7), plan/infracost jobs in `terraform.yml`, GHCR image publishing from `main` (sha-tagged, digest-recorded). README gets architecture diagrams, cost, eval and scaling sections; unknown figures are marked TBD.
+- **RDS role bootstrap and corpus export/restore** (`deploy/compose/postgres/`), with a self-test that emulates a non-superuser master.
+- Test fix: `IngestPipelineTests` waited only for the first visible effect of the async DLQ retry, which leaked a background run into later tests (c35a288).
+
+**How verified**
+- `make test` (1850 JVM tests, 282 web tests), `make lint`, `make tf-check` (bootstrap 12 + demo-lite 32 Terraform tests, ops/assets self-tests, SSM-name and workflow run-block checks), `scripts/test-check-compose-policy.sh`, `scripts/test-bootstrap-roles.sh` (87 checks) all green at 5c4ec0a.
+- Every task went through reviewer and security-auditor; the milestone audit (`security-auditor-milestone`) found no Critical/High; its 2 Medium (image provenance, CI guards not triggering on workflow edits) and 7 Low were fixed, except mirror-image digests (rate limit 429 on public.ecr.aws; tag-pinned and documented).
+- Not run anywhere: real `bootBuildImage` with the digest-pinned Paketo builder, the GHCR push, `terraform plan/apply`, Infracost, tflint, the live-image migrator run on the existing compose volume.
+
+**What's next (human-only, in order; details in the milestone audit and `deploy/terraform/aws/README.md`)**
+1. Review and push `m6b-deploy-migrate`, open the PR, let CI run (the arm64 image job and the GHCR push prove themselves only on `main`).
+2. Run `make images && make db-migrate` and `make up` locally once (the compose migrators were verified only statically and with busybox).
+3. Dedicated AWS account, budget alert, `terraform plan` of `bootstrap`, then apply; GitHub environments (`demo-apply` with reviewer, `demo-destroy`), `main` ruleset, Actions settings, optional `ENV_AUDIT_TOKEN`, repo variables, fresh testnet buyer wallet and a capped OpenAI key as `demo-apply` secrets; GHCR packages public after the first publish; upload the corpus dump and set `CORPUS_SHA256`.
+4. First `demo-up`, capture, `demo-down`, strict `make demo-down-check`; then Cloudflare Pages replay, Infracost and plan output into the README, video, blog.
+5. Add the recommended Claude Code deny rules listed in `deploy/terraform/aws/README.md`.
+
+**Open questions / watch**
+- Kafka-based tests timed out once each in the orchestrator and seller-api full `check` runs (passed on rerun); the ingest async-test race above is fixed by reasoning, not reproduced. Watch CI for repeats.
+- The `assets` container's digest check assumes `find`, `xargs`, `sed` and `sha256sum` exist in the aws-cli image (unverified: public ECR rate limit). If the first `demo-up` fails there, move the check to the bash-capable postgres image.
+- `make cost-report` is listed in CLAUDE.md but not implemented.
+- Redis on ECS has no persistence: the router day cap resets on restart; the OpenAI project hard limit is the backstop.
+- Possible bootstrap surprises on the first apply/demo-up: S3 backend `ListBucket` on `env:/`, RDS `aws/rds` key grants, `startTimeout=300`, RDS `vector` extension as master.
+
 
 ### 2026-10-05 — M5: dashboard (T0-T5)
 - **Backend read surface:** orchestrator `GET /api/v1/runs` (keyset), `/runs/{id}/payments`, `/approvals`, `/spend`; ledger `GET /api/v1/ledger/payments` (+ detail), `/ledger/revenue`, `/reconciliation/runs` (history), typed `ReconciliationStarted`. springdoc 3.1.1 (disabled at runtime) + a `ModelConverter` for JSpecify nullability; checked-in contracts `docs/api/{orchestrator,ledger}.openapi.json` with snapshot tests; `agent.run-step.v1` JSON Schema + 14 golden fixtures. No response carries a nonce, signature, idempotency key or `payment_key`.
