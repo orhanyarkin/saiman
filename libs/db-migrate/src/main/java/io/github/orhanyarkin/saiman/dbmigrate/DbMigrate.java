@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.dbmigrate;
 
 import java.util.Map;
+import java.util.regex.Pattern;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.output.MigrateResult;
@@ -36,13 +37,17 @@ public final class DbMigrate {
     public static final String RUN_MODE = "saiman.run-mode";
 
     private static final String MIGRATE = "migrate";
+    private static final Pattern OWNER_ROLE = Pattern.compile("[a-z][a-z0-9_]*_owner");
     private static final Logger LOG = LoggerFactory.getLogger(DbMigrate.class);
 
     private DbMigrate() {}
 
     /** {@code true} when {@code SAIMAN_RUN_MODE} or {@code --saiman.run-mode} is {@code migrate}. */
     public static boolean requested(String[] args) {
-        StandardEnvironment environment = new StandardEnvironment();
+        return requested(args, new StandardEnvironment());
+    }
+
+    static boolean requested(String[] args, ConfigurableEnvironment environment) {
         environment.getPropertySources().addFirst(new SimpleCommandLinePropertySource(args));
         return MIGRATE.equalsIgnoreCase(environment.getProperty(RUN_MODE));
     }
@@ -55,9 +60,31 @@ public final class DbMigrate {
         try (ConfigurableApplicationContext context = newBuilder().run(args)) {
             return SpringApplication.exit(context);
         } catch (Throwable failure) { // the one-shot must turn every failure into exit code 1
-            // Class name only: Boot's failure report carries the cause, and a message could echo a URL.
-            LOG.error("db-migrate: failed ({})", failure.getClass().getSimpleName());
+            PreflightException preflight = preflightCause(failure);
+            if (preflight != null) {
+                // Names properties, never values.
+                LOG.error("db-migrate: preflight failed: {}", preflight.getMessage());
+            } else {
+                // Class name only: Boot's failure report carries the cause, and a message could echo a URL.
+                LOG.error("db-migrate: failed ({})", failure.getClass().getSimpleName());
+            }
             return 1;
+        }
+    }
+
+    private static @Nullable PreflightException preflightCause(Throwable failure) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            if (t instanceof PreflightException preflight) {
+                return preflight;
+            }
+        }
+        return null;
+    }
+
+    /** Invalid configuration found before any connection; distinguishes it from a Flyway failure in the log. */
+    private static final class PreflightException extends IllegalStateException {
+        PreflightException(String message) {
+            super(message);
         }
     }
 
@@ -74,13 +101,18 @@ public final class DbMigrate {
     private static void preflight(ApplicationEnvironmentPreparedEvent event) {
         ConfigurableEnvironment env = event.getEnvironment();
         if (!"true".equalsIgnoreCase(env.getProperty("spring.flyway.enabled", "true"))) {
-            throw new IllegalStateException("db-migrate: spring.flyway.enabled=false, nothing to run");
+            throw new PreflightException("spring.flyway.enabled=false, nothing to run");
         }
         String user = required(env, "spring.flyway.user");
         required(env, "spring.flyway.password");
         required(env, "spring.flyway.url");
-        if (!user.endsWith("_owner")) {
-            throw new IllegalStateException("db-migrate: spring.flyway.user must be a *_owner role (ADR-0024)");
+        if (!OWNER_ROLE.matcher(user).matches()) {
+            throw new PreflightException("spring.flyway.user must be a *_owner role (ADR-0024)");
+        }
+        String defaultSchema = env.getProperty("spring.flyway.default-schema");
+        if (StringUtils.hasText(defaultSchema) && !user.equals(defaultSchema + "_owner")) {
+            // Catches a secret mounted from another service.
+            throw new PreflightException("spring.flyway.user must be <spring.flyway.default-schema>_owner");
         }
     }
 
@@ -92,7 +124,7 @@ public final class DbMigrate {
             value = null; // e.g. ${spring.datasource.url} with no datasource url configured
         }
         if (value == null || !StringUtils.hasText(value)) {
-            throw new IllegalStateException("db-migrate: " + key + " must be set");
+            throw new PreflightException(key + " must be set");
         }
         return value;
     }
@@ -119,7 +151,7 @@ public final class DbMigrate {
 
     private static String schemaOf(Flyway flyway) {
         String defaultSchema = flyway.getConfiguration().getDefaultSchema();
-        if (defaultSchema != null && StringUtils.hasText(defaultSchema)) {
+        if (StringUtils.hasText(defaultSchema)) {
             return defaultSchema;
         }
         String[] schemas = flyway.getConfiguration().getSchemas();
@@ -127,6 +159,7 @@ public final class DbMigrate {
     }
 
     private static @Nullable String currentVersion(Flyway flyway) {
+        // A second, short connection: MigrateResult has no final version when nothing was applied.
         MigrationInfo current = flyway.info().current();
         return current == null || current.getVersion() == null
                 ? null
