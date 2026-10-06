@@ -58,9 +58,15 @@ The repository stays free of state, `.tfvars` and `backend.hcl` (all gitignored)
 
 | Role | Trust (`sub`) | Can |
 | --- | --- | --- |
-| `saiman-gha-plan` | `repo:orhanyarkin/saiman:pull_request`, `repo:orhanyarkin/saiman:ref:refs/heads/main` | read/describe, read the demo-lite state. No S3 write at all, so plan workflows must run `terraform plan -lock=false`. Explicit Deny: `ssm:GetParameter*` on `/saiman/*`, `s3:GetObject` on `artifacts/*` and `demo/*` (PR code runs during plan) |
-| `saiman-gha-apply` | `repo:orhanyarkin/saiman:environment:demo-apply` | create/update/delete `saiman-demo*` resources. IAM: `iam:PassRole` of the three fixed demo roles (path `/saiman/demo/`, ecs-tasks and scheduler only) and nothing else: it cannot create, edit or re-trust a role. `s3:DeleteObject` only on the state lock object |
-| `saiman-gha-destroy` | `repo:orhanyarkin/saiman:environment:demo-destroy` | delete, stop and modify existing `saiman-demo*` resources (including `rds:ModifyDBInstance`); no create/register/run/put action and no IAM write. Residual: it can still alter what exists (cost denial of service, not escalation). Teardown relies on `ecs delete-service --force` (so demo-lite's `aws_ecs_service` needs `force_delete = true`); scale-to-zero is the Scheduler role's job |
+| `saiman-gha-plan` | `repo:orhanyarkin@44910233/saiman@1390957366:pull_request`, `repo:orhanyarkin@44910233/saiman@1390957366:ref:refs/heads/main` | read/describe, read the demo-lite state. No S3 write at all, so plan workflows must run `terraform plan -lock=false`. Explicit Deny: `ssm:GetParameter*` on `/saiman/*`, `s3:GetObject` on `artifacts/*` and `demo/*` (PR code runs during plan) |
+| `saiman-gha-apply` | `repo:orhanyarkin@44910233/saiman@1390957366:environment:demo-apply` | create/update/delete `saiman-demo*` resources. IAM: `iam:PassRole` of the three fixed demo roles (path `/saiman/demo/`, ecs-tasks and scheduler only) and nothing else: it cannot create, edit or re-trust a role. `s3:DeleteObject` only on the state lock object |
+| `saiman-gha-destroy` | `repo:orhanyarkin@44910233/saiman@1390957366:environment:demo-destroy` | delete, stop and modify existing `saiman-demo*` resources (including `rds:ModifyDBInstance`); no create/register/run/put action and no IAM write. Residual: it can still alter what exists (cost denial of service, not escalation). Teardown relies on `ecs delete-service --force` (so demo-lite's `aws_ecs_service` needs `force_delete = true`); scale-to-zero is the Scheduler role's job |
+
+The `sub` values use the repository's **immutable subject claim** (owner and repository IDs, GitHub's default for newer
+repositories; it also stops a renamed or re-created repository from inheriting the trust). Read the value for your
+repository with `gh api repos/<owner>/<repo>/actions/oidc/customization/sub --jq .sub_claim_prefix` and set
+`oidc_subject_repo` (without the `repo:` prefix) if it differs from the default. A wrong value shows up as
+"Not authorized to perform sts:AssumeRoleWithWebIdentity" in the workflow.
 
 All three are locked to `eu-central-1` (`aws:RequestedRegion`; IAM, STS and Budgets are global and exempt),
 and all three carry explicit Denies for secret values (`ssm:GetParameter*` on `/saiman/*`) and for reading
