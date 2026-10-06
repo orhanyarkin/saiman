@@ -20,7 +20,14 @@
       "Bash(terraform apply *)",
       "Bash(terraform destroy *)",
       "Bash(aws * create-*)",
-      "Bash(aws * delete-*)"
+      "Bash(aws * delete-*)",
+      "Bash(gh workflow run *)",
+      "Bash(gh workflow run:*)",
+      "Bash(aws ssm get-parameter*)",
+      "Bash(aws ssm put-parameter*)",
+      "Bash(aws ecs execute-command*)",
+      "Bash(aws ssm start-session*)",
+      "Bash(make demo-*)"
     ]
   },
   "env": {
