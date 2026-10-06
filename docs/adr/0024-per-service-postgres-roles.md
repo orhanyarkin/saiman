@@ -1,6 +1,6 @@
 # ADR-0024: Per-service Postgres roles
 
-Status: Accepted (2026-10-05). Amends ADR-0001 (one instance, one schema per service) and ADR-0020 (test containers).
+Status: Accepted (2026-10-05). Amended by ADR-0027 (2026-10-06): migrations run in a per-service one-shot. Amends ADR-0001 (one instance, one schema per service) and ADR-0020 (test containers).
 
 ## Context
 Every service connects as the `saiman` superuser. A bug or injection in any service can read or rewrite any schema, disable triggers (`session_replication_role`), and falsify the ledger. THREAT_MODEL lists the shared superuser role as a known gap.
@@ -15,10 +15,10 @@ Every service connects as the `saiman` superuser. A bug or injection in any serv
 
 ## Consequences
 + SQL injection through a service reaches only that schema with DML; insert-only tables (ledger postings, journal entries, credit notes, findings) can't be rewritten, and the orchestrator's counters are monotonic and can't be deleted.
-− **Residual (audit, M6):** the `<svc>_owner` password is mounted in each running service (Flyway runs at startup), so code execution inside a service can still disable its triggers. A migrate one-shot per database would close it; not done in M6 (see THREAT_MODEL).
+− **Residual closed by ADR-0027:** the `<svc>_owner` password used to be mounted in each running service; migrations now run in a per-service one-shot and the service holds only `<svc>_app`.
 − The superuser password is a generated secret (`secrets/pg_superuser_password`) held by postgres and `db-init`; `db-init` rotates a pre-M6 `saiman/saiman` password once.
 − More secrets and a bootstrap step; mistakes show up as permission errors (tests run as the app role to catch them).
 − Same DB instance: a superuser/host compromise is out of scope.
 
 ## Alternatives
-Separate migration job (more infrastructure); one role per service owning its tables (the app could still alter schema and disable triggers it owns); per-service databases (breaks ADR-0001, costs on RDS).
+Separate migration job (accepted later, see ADR-0027); one role per service owning its tables (the app could still alter schema and disable triggers it owns); per-service databases (breaks ADR-0001, costs on RDS).

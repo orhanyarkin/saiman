@@ -42,3 +42,11 @@ web/dist/
 services/*/bin/
 libs/*/bin/
 build-logic/bin/
+
+# Terraform (state and variables never enter the repo)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+backend.hcl
+build/corpus/

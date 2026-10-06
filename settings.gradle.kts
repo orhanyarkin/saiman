@@ -22,6 +22,7 @@ include(
     ":libs:eventing",
     ":libs:evm-rpc",
     ":libs:api-security",
+    ":libs:db-migrate",
     ":libs:test-support",
     ":services:seller-api",
     ":services:orchestrator",
