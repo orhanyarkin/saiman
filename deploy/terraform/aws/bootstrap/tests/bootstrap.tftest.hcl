@@ -143,6 +143,46 @@ run "apply_role_cannot_mint_or_retrust_roles" {
   }
 }
 
+run "only_apply_can_write_demo_assets" {
+  # apply may PutObject on demo/* (assets) and the demo-lite state; nothing on artifacts/* or bootstrap keys
+  assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+      [for r in try(tolist(s.Resource), [s.Resource]) : contains(["arn:aws:s3:::saiman-test-tfstate/demo/*", "arn:aws:s3:::saiman-test-tfstate/demo-lite/*"], r)]
+      if s.Effect == "Allow" && anytrue([for a in try(tolist(s.Action), []) : startswith(a, "s3:Put")])
+    ]))
+    error_message = "apply s3:PutObject only on demo/* and demo-lite/*"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+      try(s.Effect == "Allow" && s.Action == ["s3:PutObject"] && s.Resource == "arn:aws:s3:::saiman-test-tfstate/demo/*", false)
+    ])
+    error_message = "apply needs PutObject on demo/* exactly"
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for pol in [aws_iam_role_policy.plan.policy, aws_iam_role_policy.demo_task.policy, aws_iam_role_policy.demo_task_execution.policy, aws_iam_role_policy.demo_scheduler.policy] : [
+        for s in jsondecode(pol).Statement :
+        [for a in try(tolist(s.Action), []) : !startswith(a, "s3:Put") && a != "s3:*"] if s.Effect == "Allow"
+      ]
+    ]))
+    error_message = "plan and the three demo roles must have no S3 write"
+  }
+
+  # destroy writes only the demo-lite state/lock (terraform destroy), never demo/*
+  assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.destroy.policy).Statement :
+      [for r in try(tolist(s.Resource), [s.Resource]) : r == "arn:aws:s3:::saiman-test-tfstate/demo-lite/*"]
+      if s.Effect == "Allow" && anytrue([for a in try(tolist(s.Action), []) : startswith(a, "s3:Put")])
+    ]))
+    error_message = "destroy may PutObject only on demo-lite/*"
+  }
+}
+
 run "state_object_cannot_be_deleted_by_ci" {
   assert {
     condition = alltrue(flatten([

@@ -265,14 +265,20 @@ resource "aws_iam_role_policy" "apply" {
         Resource = "arn:aws:scheduler:${var.region}:${local.account_id}:schedule/default/saiman-demo*"
       },
       {
-        # Parameters are created or deleted here but their values are never readable (Deny below).
-        Sid    = "SsmDemoParameters"
-        Effect = "Allow"
-        Action = [
-          "ssm:PutParameter", "ssm:DeleteParameter", "ssm:DeleteParameters",
-          "ssm:AddTagsToResource", "ssm:RemoveTagsFromResource",
-        ]
+        # demo-up writes SecureStrings and the expires-at String (+ its tag). Values are never readable
+        # (Deny below) and deletion is the destroy role's job.
+        Sid      = "SsmWriteDemoParameters"
+        Effect   = "Allow"
+        Action   = ["ssm:PutParameter", "ssm:AddTagsToResource"]
         Resource = local.ssm_demo_arn
+      },
+      {
+        # demo-up uploads demo/assets/<session>/ with `aws s3 cp --recursive` (no list needed). Write-only:
+        # the explicit Deny on GetObject for demo/* stays, and nothing here covers artifacts/* or state keys.
+        Sid      = "WriteDemoAssets"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${local.bucket_arn}/demo/*"
       },
       {
         Sid      = "BudgetsDemo"
