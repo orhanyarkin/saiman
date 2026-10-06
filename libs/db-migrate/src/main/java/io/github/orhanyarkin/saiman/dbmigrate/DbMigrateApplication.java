@@ -16,7 +16,12 @@ import org.springframework.core.env.Environment;
 class DbMigrateApplication {
 
     @Bean
-    FlywayMigrationStrategy dbMigrateStrategy(Environment environment) {
-        return DbMigrate.loggingStrategy(environment);
+    MigrationOutcome migrationOutcome() {
+        return new MigrationOutcome();
+    }
+
+    @Bean
+    FlywayMigrationStrategy dbMigrateStrategy(Environment environment, MigrationOutcome outcome) {
+        return DbMigrate.loggingStrategy(environment, outcome);
     }
 }
