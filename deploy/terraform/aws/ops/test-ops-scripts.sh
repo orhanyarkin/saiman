@@ -132,6 +132,10 @@ printf '{"x":"%s"}\n' "$(tr -d '\n' <"${secrets}/openai_api_key")" >"${work}/dir
 expect "scan: the OpenAI key is found" 1 "'openai_api_key'" "${ops}/scan-tf-state.sh" "${secrets}" "${work}/dirty2.json"
 printf '{"x":"sk-proj-abcdefghijklmnopqrstuvwx"}\n' >"${work}/dirty3.json"
 expect "scan: an OpenAI-shaped key is found by shape" 1 "OpenAI-style" "${ops}/scan-tf-state.sh" "${secrets}" "${work}/dirty3.json"
+printf '{"x":"%s"}\n' "$(tr -d '\n' <"${secrets}/x402_buyer_private_key" | sed 's/^0x//')" >"${work}/dirty5.json"
+expect "scan: the buyer key without its 0x prefix is found" 1 "'x402_buyer_private_key'" "${ops}/scan-tf-state.sh" "${secrets}" "${work}/dirty5.json"
+printf '{"x":"%s"}\n' "$(tr -d '\n' <"${secrets}/x402_buyer_private_key" | tr 'a-f' 'A-F' | sed 's/^0X//')" >"${work}/dirty6.json"
+expect "scan: matching is case-insensitive" 1 "'x402_buyer_private_key'" "${ops}/scan-tf-state.sh" "${secrets}" "${work}/dirty6.json"
 printf '{"instances":[{"attributes":{"password":"hunter2hunter2"}}]}\n' >"${work}/dirty4.json"
 expect "scan: a non-empty password attribute is found" 1 "password" "${ops}/scan-tf-state.sh" "${secrets}" "${work}/dirty4.json"
 
