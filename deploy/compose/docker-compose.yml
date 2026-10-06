@@ -69,9 +69,10 @@ services:
 
   # One-shot, idempotent bootstrap of the per-service roles, schemas and object ownership
   # (ADR-0024). Runs as the superuser, the only container besides postgres that holds its
-  # password. Apps wait for it with service_completed_successfully. `make infra-up`/`make up`
-  # run it explicitly (docker compose run --rm db-init) in addition: `up --wait` treats a
-  # one-shot as a failure on some Compose versions.
+  # password. Apps and migrators wait for it with service_completed_successfully, so `make up`
+  # runs it through depends_on. `make infra-up`/`make db-roles`/`make db-migrate` run it
+  # explicitly (docker compose run --rm db-init): `up --wait` treats a one-shot as a failure
+  # on some Compose versions.
   db-init:
     image: pgvector/pgvector:0.8.7-pg17-trixie
     restart: "no"
