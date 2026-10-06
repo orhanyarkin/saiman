@@ -25,7 +25,7 @@ public final class SharedContainers {
 
     /** Same tags as deploy/compose/docker-compose.yml. */
     public static final DockerImageName POSTGRES_IMAGE =
-            DockerImageName.parse("pgvector/pgvector:0.8.6-pg17-trixie").asCompatibleSubstituteFor("postgres");
+            DockerImageName.parse("pgvector/pgvector:0.8.7-pg17-trixie").asCompatibleSubstituteFor("postgres");
 
     public static final DockerImageName KAFKA_IMAGE = DockerImageName.parse("apache/kafka:4.3.1");
 
