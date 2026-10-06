@@ -76,7 +76,7 @@ Everything is tagged `project=saiman`, `saiman:stack=demo-lite`, `saiman:session
 
 | File | Contents |
 | --- | --- |
-| `network.tf` | VPC, two public subnets (no NAT, no ALB), internet gateway, free S3 gateway endpoint; task SG with no ingress and egress 443 and 5432 to RDS only; RDS SG accepting 5432 from the task SG only |
+| `network.tf` | VPC, two public subnets (no NAT, no ALB), internet gateway (no VPC endpoints); task SG with no ingress and egress 443 and 5432 to RDS only; RDS SG accepting 5432 from the task SG only |
 | `rds.tf` | PostgreSQL 17, `db.t4g.micro`, 20 GB gp3, private, encrypted, no backups or final snapshot; parameter group pins `log_statement=none`, `log_min_error_statement=panic` (role-bootstrap passwords never reach RDS logs) and `rds.force_ssl=1` |
 | `iam.tf` | task execution role (reads only SSM `/saiman/demo/*`, writes the log group), task role (S3 GetObject on `artifacts/*` and `demo/*`, ECS Exec), scheduler role; all under `/saiman/demo/` with the bootstrap boundary |
 | `logs.tf` | log group `/saiman-demo-lite`, 1 day retention (the `saiman-demo` prefix is what the bootstrap apply role and boundary allow) |
@@ -89,6 +89,7 @@ Notes:
   with `password_wo_version = 1`: it never lands in plan or state. Pass it as `TF_VAR_db_master_password`.
 - `expires_at` must be UTC (`2026-10-06T18:00:00Z`). The backstop stops compute only; RDS storage and
   the VPC remain until `demo-down` destroys the stack, and AWS restarts a stopped RDS after 7 days.
+- RDS `storage_encrypted` uses the default `aws/rds` key; it is assumed to work with the apply role (no KMS grants) and is the first thing to check on the first `demo-up`.
 - Required variables: `image_tag`, `session_id`, `expires_at`, `x402_seller_payto_address`,
   `auth_digests`, `state_bucket_name` (see `variables.tf`).
 
