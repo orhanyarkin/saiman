@@ -1,0 +1,110 @@
+name: demo-destroy
+
+# Tears the AWS demo-lite stack down (ADR-0028). Reusable: called by demo-down (human) and by demo-reaper
+# (only for an EXPIRED demo: `only_if_expired` re-checks the expiry under the lock, so a fresh demo started
+# while the reaper was queued is never destroyed). Runs as the destroy role: it can delete, stop and modify,
+# it cannot create anything. `terraform destroy` -> SSM parameters -> demo/ objects -> task definitions ->
+# ops/check-demo-down.sh. The expiry parameter is deleted last, so a failed teardown is retried by the reaper.
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      only_if_expired:
+        description: "Destroy only when /saiman/demo/expires-at is in the past (the reaper sets this)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  destroy:
+    name: demo-destroy
+    if: github.repository == 'orhanyarkin/saiman'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: demo-destroy
+    permissions:
+      id-token: write
+      contents: read
+    # Job level on purpose: workflow-level concurrency of a called workflow is ignored.
+    concurrency:
+      group: demo-lite
+      cancel-in-progress: false
+    env:
+      AWS_REGION: eu-central-1
+      TF_IN_AUTOMATION: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure AWS credentials (OIDC, destroy role)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.DESTROY_ROLE_ARN }}
+          aws-region: eu-central-1
+          role-session-name: demo-destroy
+          role-duration-seconds: 3600
+
+      - name: Gate (reaper only destroys an expired demo)
+        id: gate
+        env:
+          ONLY_IF_EXPIRED: ${{ inputs.only_if_expired }}
+        run: |
+          set -euo pipefail
+          if [[ "$ONLY_IF_EXPIRED" != "true" ]]; then
+            echo "proceed=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          out="$(deploy/terraform/aws/ops/demo-expiry.sh --region "$AWS_REGION")"
+          cat <<<"$out"
+          if grep -qx 'expired=true' <<<"$out"; then
+            echo "proceed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "proceed=false" >>"$GITHUB_OUTPUT"
+            echo "The demo is not expired (or gone); nothing to destroy."
+          fi
+
+      - name: Set up Terraform
+        if: steps.gate.outputs.proceed == 'true'
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+
+      - name: Placeholder inputs (the state decides what is destroyed)
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          [[ -n "$STATE_BUCKET" ]] || { echo "::error::repository variable TF_STATE_BUCKET is not set"; exit 1; }
+          deploy/terraform/aws/ops/tf-dummy-env.sh "$STATE_BUCKET" >>"$GITHUB_ENV"
+
+      - name: terraform init (S3 backend)
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: deploy/terraform/aws/ops/tf-init-demo-lite.sh "$STATE_BUCKET"
+
+      - name: terraform destroy
+        if: steps.gate.outputs.proceed == 'true'
+        run: terraform -chdir=deploy/terraform/aws/demo-lite destroy -input=false -auto-approve
+
+      - name: Delete SSM parameters, demo/ objects and task definitions
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: deploy/terraform/aws/ops/demo-cleanup.sh --region "$AWS_REGION" --state-bucket "$STATE_BUCKET"
+
+      - name: Teardown check (nothing but the bootstrap stack may remain)
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          # The destroy role cannot list every service; UNVERIFIED checks are printed, not failed.
+          # Run `make demo-down-check` with your admin SSO profile for the full, strict check.
+          deploy/terraform/aws/ops/check-demo-down.sh --region "$AWS_REGION" --state-bucket "$STATE_BUCKET" --allow-unverified

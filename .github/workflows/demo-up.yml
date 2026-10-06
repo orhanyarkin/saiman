@@ -1,0 +1,232 @@
+name: demo-up
+
+# Starts the AWS demo-lite stack (ADR-0028) for a few hours. Human-triggered only, from main, behind the
+# `demo-apply` environment (required reviewer, main-only deployments). This is the ONLY workflow that runs
+# `terraform apply`; it sets an expiry first, so the reaper / the Scheduler backstop / `demo-down` can end it.
+#
+# Repository variables:   APPLY_ROLE_ARN, TF_STATE_BUCKET, CORPUS_SHA256 (sha256 of the corpus dump, from `make
+#                         corpus-export`), optional CORPUS_OBJECT_KEY (default artifacts/corpus/latest.dump),
+#                         optional GRAFANA_OTLP_ENDPOINT.
+# Environment secrets (`demo-apply`): X402_BUYER_PRIVATE_KEY (throwaway TESTNET key), OPENAI_API_KEY (capped),
+#                         X402_SELLER_PAYTO_ADDRESS (public address), optional GRAFANA_OTLP_AUTH.
+# Generated secrets (DB passwords, tokens) are created per run by scripts/ensure-secret-files.sh.
+on:
+  workflow_dispatch:
+    inputs:
+      ttl_hours:
+        description: "Hours until the demo expires and is torn down automatically"
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "7", "8"]
+        default: "4"
+      image_sha:
+        description: "Commit sha of the published images (default: the sha this workflow runs on, i.e. main HEAD)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+# One demo at a time; a queued run waits, a running apply is never cancelled.
+concurrency:
+  group: demo-lite
+  cancel-in-progress: false
+
+jobs:
+  up:
+    name: demo-up
+    if: github.ref == 'refs/heads/main' && github.repository == 'orhanyarkin/saiman'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: demo-apply
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: eu-central-1
+      TF_IN_AUTOMATION: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve inputs (image tag, session id, expiry)
+        env:
+          INPUT_TTL: ${{ inputs.ttl_hours }}
+          INPUT_SHA: ${{ inputs.image_sha }}
+        run: |
+          set -euo pipefail
+          sha="${INPUT_SHA:-$GITHUB_SHA}"
+          [[ "$sha" =~ ^[0-9a-f]{12,40}$ ]] || { echo "::error::image_sha must be 12-40 lowercase hex characters"; exit 1; }
+          [[ "$INPUT_TTL" =~ ^[1-8]$ ]] || { echo "::error::ttl_hours must be 1..8"; exit 1; }
+          expires_at="$(date -u -d "+${INPUT_TTL} hours" +%Y-%m-%dT%H:%M:%SZ)"
+          {
+            echo "IMAGE_TAG=sha-${sha:0:12}"
+            echo "SESSION_ID=gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            echo "EXPIRES_AT=${expires_at}"
+            echo "SECRETS_DIR=${RUNNER_TEMP}/secrets"
+          } >>"$GITHUB_ENV"
+
+      - name: Verify the GHCR images exist for linux/arm64 and linux/amd64
+        run: |
+          set -euo pipefail
+          for svc in orchestrator seller-api ledger ingest evals; do
+            ref="ghcr.io/orhanyarkin/saiman-${svc}:${IMAGE_TAG}"
+            out="$(docker buildx imagetools inspect "$ref")" || { echo "::error::cannot inspect ${ref} (public GHCR package? image published from main?)"; exit 1; }
+            for platform in linux/amd64 linux/arm64; do
+              if ! grep -q "Platform: *${platform}\$" <<<"$out"; then
+                echo "::error::${ref} is missing ${platform}"
+                exit 1
+              fi
+            done
+            echo "ok ${ref}"
+          done
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install web dependencies
+        run: pnpm --dir web install --frozen-lockfile
+
+      - name: Generate secrets (masked, 0600) and read the human-supplied ones
+        env:
+          X402_BUYER_PRIVATE_KEY: ${{ secrets.X402_BUYER_PRIVATE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAFANA_OTLP_AUTH: ${{ secrets.GRAFANA_OTLP_AUTH }}
+        run: deploy/terraform/aws/ops/prepare-demo-secrets.sh "$SECRETS_DIR"
+
+      - name: Build the deploy assets and their aggregate digest
+        run: |
+          set -euo pipefail
+          deploy/terraform/aws/assets/build-assets.sh "${RUNNER_TEMP}/assets" >"${RUNNER_TEMP}/assets-manifest.txt"
+          # sha256 over the sorted `sha256  path` manifest lines (any aggregate line the builder prints is excluded).
+          digest="$(grep -E '^[0-9a-f]{64}  ' "${RUNNER_TEMP}/assets-manifest.txt" | sha256sum | cut -d' ' -f1)"
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::could not compute the assets digest"; exit 1; }
+          echo "ASSETS_MANIFEST_SHA256=${digest}" >>"$GITHUB_ENV"
+          echo "assets manifest sha256: ${digest}"
+
+      - name: Configure AWS credentials (OIDC, apply role)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.APPLY_ROLE_ARN }}
+          aws-region: eu-central-1
+          role-session-name: demo-up
+          role-duration-seconds: 3600
+
+      - name: Preflight (credentials and settings)
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          [[ -n "$STATE_BUCKET" ]] || { echo "::error::repository variable TF_STATE_BUCKET is not set"; exit 1; }
+          aws sts get-caller-identity --query Account --output text >/dev/null
+          echo "AWS credentials ok"
+
+      - name: Write SSM parameters (SecureString from files) and the expiry
+        run: |
+          deploy/terraform/aws/ops/put-demo-parameters.sh --region "$AWS_REGION" --expires-at "$EXPIRES_AT" "$SECRETS_DIR"
+
+      - name: Upload the assets to the state bucket (demo/assets/<session>/)
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          # `cp --recursive`, not `sync`: the apply role is not allowed to LIST demo/ (only to write it).
+          if ! aws s3 cp --recursive --only-show-errors "${RUNNER_TEMP}/assets" "s3://${STATE_BUCKET}/demo/assets/${SESSION_ID}/"; then
+            echo "::error::asset upload failed. The apply role needs s3:PutObject on <bucket>/demo/* (see deploy/terraform/aws/README.md, 'Running a demo')."
+            exit 1
+          fi
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+
+      - name: terraform init (S3 backend, native lockfile)
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: deploy/terraform/aws/ops/tf-init-demo-lite.sh "$STATE_BUCKET"
+
+      - name: terraform plan, scan for secrets, apply, scan the state
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          PAYTO: ${{ secrets.X402_SELLER_PAYTO_ADDRESS }}
+          CORPUS_SHA256: ${{ vars.CORPUS_SHA256 }}
+          CORPUS_OBJECT_KEY: ${{ vars.CORPUS_OBJECT_KEY }}
+          GRAFANA_OTLP_ENDPOINT: ${{ vars.GRAFANA_OTLP_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          umask 077
+          dir="deploy/terraform/aws/demo-lite"
+          [[ "$CORPUS_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::repository variable CORPUS_SHA256 must be the 64-hex sha256 of the corpus dump (make corpus-export prints it)"; exit 1; }
+          # Digests of the API tokens (what the services hold), computed by the repo's own script.
+          digests="$(scripts/with-auth-digests.sh --print)"
+          pick() { grep "^$1=" <<<"$digests" | cut -d= -f2; }
+          TF_VAR_auth_digests="$(jq -cn --arg r "$(pick SAIMAN_AUTH_READER_TOKEN_SHA256)" --arg o "$(pick SAIMAN_AUTH_OPERATOR_TOKEN_SHA256)" --arg s "$(pick SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256)" \
+            '{reader:$r, operator:$o, service_ledger:$s}')"
+          export TF_VAR_auth_digests
+          export TF_VAR_image_tag="$IMAGE_TAG"
+          export TF_VAR_session_id="$SESSION_ID"
+          export TF_VAR_expires_at="$EXPIRES_AT"
+          export TF_VAR_x402_seller_payto_address="$PAYTO"
+          export TF_VAR_state_bucket_name="$STATE_BUCKET"
+          export TF_VAR_assets_manifest_sha256="$ASSETS_MANIFEST_SHA256"
+          export TF_VAR_corpus_sha256="$CORPUS_SHA256"
+          if [[ -n "$CORPUS_OBJECT_KEY" ]]; then export TF_VAR_corpus_object_key="$CORPUS_OBJECT_KEY"; fi
+          if [[ -n "$GRAFANA_OTLP_ENDPOINT" ]]; then
+            [[ -s "$SECRETS_DIR/grafana_otlp_auth" ]] || { echo "::error::GRAFANA_OTLP_ENDPOINT is set but the GRAFANA_OTLP_AUTH secret is not"; exit 1; }
+            export TF_VAR_grafana_otlp_endpoint="$GRAFANA_OTLP_ENDPOINT"
+          fi
+          # The RDS master password is ephemeral and write-only: it exists only in this process.
+          TF_VAR_db_master_password="$(tr -d '\r\n' <"$SECRETS_DIR/pg_superuser_password")"
+          export TF_VAR_db_master_password
+
+          plan="${RUNNER_TEMP}/tfplan"
+          terraform -chdir="$dir" plan -input=false -out="$plan"
+          terraform -chdir="$dir" show -json "$plan" >"${RUNNER_TEMP}/plan.json"
+          deploy/terraform/aws/ops/scan-tf-state.sh "$SECRETS_DIR" "${RUNNER_TEMP}/plan.json"
+
+          terraform -chdir="$dir" apply -input=false "$plan"
+
+          terraform -chdir="$dir" show -json >"${RUNNER_TEMP}/state.json"
+          deploy/terraform/aws/ops/scan-tf-state.sh "$SECRETS_DIR" "${RUNNER_TEMP}/state.json"
+          rm -f "$plan" "${RUNNER_TEMP}/plan.json" "${RUNNER_TEMP}/state.json"
+
+      - name: Wait for the readiness container (all services UP)
+        run: deploy/terraform/aws/ops/wait-demo-ready.sh --region "$AWS_REGION" --timeout-seconds 1200
+
+      - name: Summary (how to reach the demo)
+        run: |
+          {
+            echo "### demo-lite is up"
+            echo ""
+            echo "- expires at: \`${EXPIRES_AT}\` (automatic teardown by the reaper; Scheduler backstop 30 min later)"
+            echo "- images: \`${IMAGE_TAG}\`, session: \`${SESSION_ID}\`"
+            echo "- reach it from your machine (your SSO profile, AWS CLI v2 + session-manager-plugin): \`make demo-tunnel\` then open http://localhost:8088"
+            echo "- API tokens and capture: \`make demo-capture\`"
+            echo "- tear down early: run the **demo-down** workflow"
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "Port-forward: make demo-tunnel   (aws ssm start-session to the web container, localhost:8088 -> 80)"
+          echo "Expires at ${EXPIRES_AT}"
+
+      - name: Next steps after a failure (nothing is destroyed automatically)
+        if: failure()
+        run: |
+          {
+            echo "### demo-up failed"
+            echo ""
+            echo "Resources may exist. Nothing is destroyed automatically by this workflow. Options:"
+            echo "- inspect logs in CloudWatch group \`/saiman-demo-lite\` (stream prefix = container name);"
+            echo "- fix and re-run **demo-up**, or run **demo-down** now;"
+            echo "- otherwise the reaper destroys the demo after expiry (\`${EXPIRES_AT:-unknown}\`) and the Scheduler stops compute 30 min later."
+            echo "- verify with \`make demo-down-check\` (admin SSO profile) after teardown."
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "demo-up failed; see the job summary for next steps."
