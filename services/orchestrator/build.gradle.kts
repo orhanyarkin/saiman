@@ -16,6 +16,8 @@ dependencies {
     implementation(libs.datasource.micrometer.spring.boot)
     implementation(libs.resilience4j.circuitbreaker) // breaker on the seller client, wired programmatically
     implementation(libs.resilience4j.retry) // jittered retry on the free ticker catalogue call only (never on a paid call)
+    implementation(project(":libs:db-migrate")) // one-shot entry point: Flyway as the owner role (ADR-0027)
+    implementation(project(":libs:db-migrate")) // one-shot entry point: Flyway as the owner role (ADR-0027)
     implementation(project(":libs:eventing")) // Modulith registry defaults (ADR-0016)
     implementation(project(":libs:api-security")) // static role tokens behind the resource-server seam (ADR-0023)
     implementation(project(":libs:evm-rpc")) // safe-block chain reads for HELD resolution (ADR-0018)
