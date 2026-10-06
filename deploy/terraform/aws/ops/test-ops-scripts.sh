@@ -118,6 +118,12 @@ jobs:
 EOF
 expect "run-blocks: terraform.yml path filters must cover the guard inputs" 1 "path filter lacks" "${ops}/check-workflow-run-blocks.sh" "${work}/wf/terraform.yml"
 
+# --- check-mirror-versions ----------------------------------------------------------------------------------------
+expect "mirror versions: compose and containers.tf agree" 0 "ok kafka" "${ops}/check-mirror-versions.sh"
+cp "${here}/../demo-lite/containers.tf" "${work}/containers-mirror.tf"
+sed -i 's|apache/kafka:4.3.1|apache/kafka:4.3.2|' "${work}/containers-mirror.tf"
+expect "mirror versions: a drifted kafka tag fails" 1 "DRIFT kafka" "${ops}/check-mirror-versions.sh" "${here}/../../../compose/docker-compose.yml" "${work}/containers-mirror.tf"
+
 # --- check-ssm-names -----------------------------------------------------------------------------------
 cp "${here}/../demo-lite/containers.tf" "${work}/containers.tf"
 if grep -q 'redis_password' "${work}/containers.tf"; then

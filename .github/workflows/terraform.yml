@@ -159,9 +159,9 @@ jobs:
   infracost:
     name: infracost (demo-lite cost estimate)
     needs: static
-    if: >-
-      github.actor != 'dependabot[bot]'
-      && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    # Push to main only (audit L5): infracost evaluates the Terraform code (and holds the API key); a PR branch
+    # must not get to run that with the key.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'orhanyarkin/saiman'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

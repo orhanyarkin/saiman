@@ -285,6 +285,14 @@ run "task_role_has_no_ssm_and_execution_role_reads_demo_only" {
 
   assert {
     condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.demo_task.policy).Statement :
+      s.Action == ["s3:GetObject"] && sort(tolist(s.Resource)) == sort(["arn:aws:s3:::saiman-test-tfstate/artifacts/corpus/*", "arn:aws:s3:::saiman-test-tfstate/demo/assets/*"])
+    ])
+    error_message = "task role may read only artifacts/corpus/* and demo/assets/* (L6)"
+  }
+
+  assert {
+    condition = anytrue([
       for s in jsondecode(aws_iam_role_policy.demo_task_execution.policy).Statement :
       s.Sid == "ReadDemoParameters" && s.Action == ["ssm:GetParameters"] && s.Resource == "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/demo/*"
     ])

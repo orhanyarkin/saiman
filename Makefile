@@ -325,6 +325,7 @@ tf-check: test-aws-assets ## Offline Terraform checks (fmt, validate, test) for 
 	bash $(TF_AWS)/ops/test-check-demo-down.sh
 	bash $(TF_AWS)/ops/test-ops-scripts.sh
 	$(TF_AWS)/ops/check-ssm-names.sh
+	$(TF_AWS)/ops/check-mirror-versions.sh
 	$(TF_AWS)/ops/check-workflow-run-blocks.sh
 
 demo-tunnel: ## Port-forward localhost:8088 to the running demo's web container (SSM; needs session-manager-plugin and AWS_PROFILE).
