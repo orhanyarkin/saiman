@@ -24,7 +24,7 @@ export X402_SELLER_PAYTO_ADDRESS
 	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check \
 	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask \
 	research-run research-approve research-status web-build e2e e2e-live lighthouse gen-api \
-	shellcheck recon-run recon-report ledger-balance ledger-tamper-demo db-roles db-migrate psql auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest
+	shellcheck recon-run recon-report ledger-balance ledger-tamper-demo db-roles db-migrate psql auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest test-aws-assets
 
 help: ## Show this help.
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -303,6 +303,9 @@ capture-demo: ## Capture the running stack's runs/ledger/spend as build/capture/
 
 capture-demo-selftest: ## Self-test the capture scrubber against fixtures (no stack needed).
 	scripts/capture-demo/test-scrub.sh
+
+test-aws-assets: ## Self-test the demo-lite deploy assets (nginx/otel/readiness; offline).
+	bash deploy/terraform/aws/assets/test-assets.sh
 
 profile-pro: ## Switch agent usage to the Pro-plan profile (lean mode; .claude/profiles/pro.json).
 	scripts/usage-profile.sh pro

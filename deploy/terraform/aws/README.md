@@ -5,6 +5,7 @@ Region `eu-central-1` only. Design: ADR-0028 (demo-lite), ADR-0004 (hybrid deplo
 ```
 bootstrap/   state bucket + GitHub OIDC provider + roles saiman-gha-plan/apply/destroy + saiman-demo-boundary + the three fixed demo roles
 demo-lite/   the demo stack (ECS, RDS, network, scheduler); references the fixed roles by ARN
+assets/      build-assets.sh stages web dist, nginx/otel config and DB scripts for the task's S3 sync (make test-aws-assets)
 ```
 
 Nothing here is applied by an agent or by CI `plan`. Real `apply`/`destroy` run only in GitHub Actions
