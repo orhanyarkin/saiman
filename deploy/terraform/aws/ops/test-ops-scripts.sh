@@ -118,6 +118,11 @@ jobs:
 EOF
 expect "run-blocks: terraform.yml path filters must cover the guard inputs" 1 "path filter lacks" "${ops}/check-workflow-run-blocks.sh" "${work}/wf/terraform.yml"
 
+# --- .gitignore keeps Terraform artifacts out of the repo (audit L7) ----------------------------------------------
+for name in x.tfplan tfplan crash.log .terraformrc terraform.rc deploy/terraform/aws/demo-lite/ci_backend.tf plan.json state.json; do
+  if git -C "${here}" check-ignore -q "${name}"; then ok "gitignored: ${name}"; else bad "not gitignored: ${name}"; fi
+done
+
 # --- check-mirror-versions ----------------------------------------------------------------------------------------
 expect "mirror versions: compose and containers.tf agree" 0 "ok kafka" "${ops}/check-mirror-versions.sh"
 cp "${here}/../demo-lite/containers.tf" "${work}/containers-mirror.tf"

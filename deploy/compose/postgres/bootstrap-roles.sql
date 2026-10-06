@@ -25,6 +25,11 @@
   SET log_duration = off;
 \endif
 
+-- Client-side: a failing statement must not echo its text (it carries a password) into psql's error output
+-- (which the ECS awslogs driver would ship to CloudWatch).
+\set VERBOSITY terse
+\set SHOW_CONTEXT never
+
 \getenv pw_superuser PW_SUPERUSER
 \getenv pw_orchestrator_owner PW_ORCHESTRATOR_OWNER
 \getenv pw_orchestrator_app PW_ORCHESTRATOR_APP

@@ -127,6 +127,8 @@ jobs:
         run: scripts/check-compose-policy.sh
       - name: Self-test compose/x402-env/nginx policy, secret generation and capture scrubber scripts
         run: scripts/test-check-compose-policy.sh
+      - name: Self-test the Postgres role bootstrap (throwaway containers)
+        run: scripts/test-bootstrap-roles.sh
       - name: Self-test the agent usage-profile switch
         run: scripts/test-usage-profile.sh
 

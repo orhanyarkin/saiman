@@ -8,7 +8,6 @@ locals {
 
   # Chain RPC is public and testnet-only (rule 1).
   chain_rpc_url = "https://sepolia.base.org"
-  chain_network = "eip155:84532"
 
   # Names must start with saiman-demo: the bootstrap apply role is scoped to that prefix.
   name_prefix  = "saiman-demo"
