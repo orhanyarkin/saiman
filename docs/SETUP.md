@@ -133,3 +133,26 @@ Bilinçli olarak sana sorulacaklar: `git push`, `helm install/upgrade`, `kubectl
 - Milestone'lar arasında `/clear`; bağlam `docs/PROGRESS.md` ve agent memory'lerinde kalıyor.
 - Haftada bir `/usage` → hangi subagent ne kadar harcıyor.
 - PR'ları kendin oku; her raporun "Spring notes" bölümünden mülakat notu çıkar.
+
+## AWS demo prerequisites (human, one time; ADR-0028)
+
+Needed only to run the demo-lite stack on AWS. See `deploy/terraform/aws/README.md` for the bootstrap and the roles.
+
+- **AWS CLI v2** and the **session-manager-plugin** (for `make demo-tunnel`): install from the official AWS docs.
+  Configure an IAM Identity Center profile (`aws configure sso`, `aws sso login --profile <profile>`, then
+  `export AWS_PROFILE=<profile>`). The profile is yours (admin, MFA); CI uses OIDC roles, never your keys.
+- **GitHub environments**: `demo-apply` (required reviewer = you, deployment branches = `main` only, admin bypass off)
+  and `demo-destroy` (main only, admin bypass off, no reviewer so the reaper can run).
+- **Repository variables**: `PLAN_ROLE_ARN`, `APPLY_ROLE_ARN`, `DESTROY_ROLE_ARN`, `TF_STATE_BUCKET`, `CORPUS_SHA256`,
+  optional `CORPUS_OBJECT_KEY`, optional `GRAFANA_OTLP_ENDPOINT` (`https://<stack>.grafana.net/otlp`).
+- **`demo-apply` environment secrets**: `X402_BUYER_PRIVATE_KEY` (a throwaway Base Sepolia key, never a funded or
+  mainnet key), `OPENAI_API_KEY` (a key with a low monthly cap), `X402_SELLER_PAYTO_ADDRESS`, optional
+  `GRAFANA_OTLP_AUTH` (base64 of `<instance id>:<token>`).
+- **GHCR packages public**: after the first publish from `main`, set each of the five `saiman-*` packages to
+  Public (Package settings > Change visibility), otherwise the task cannot pull them (ADR-0028).
+- **Infracost** (optional): free API key from infracost.io as the repository secret `INFRACOST_API_KEY`; without it the
+  cost job is skipped.
+- **Grafana Cloud** (optional, free tier): create a stack, an OTLP token, then set the endpoint variable and the auth
+  secret above; without them the collector only logs locally.
+- **Corpus dump**: `make corpus-export`, upload the `.dump` and `.meta.json` to `s3://<state bucket>/artifacts/corpus/`
+  with your admin profile, and put the dump's sha256 into `CORPUS_SHA256`.
