@@ -205,7 +205,7 @@ Only figures that exist in this repository are listed; each cites its source. No
 | AWS demo-lite, one 4-hour session | about $0.55-0.80 | [ADR-0028](docs/adr/0028-demo-lite-on-aws.md). **Hand estimate from published rates, not measured, not an Infracost output.** It supersedes the older "about $1-3" in ADR-0004 |
 | AWS idle (only the bootstrap stack remains) | about $0.003 per month (state bucket) | [ADR-0028](docs/adr/0028-demo-lite-on-aws.md) (estimate); the OIDC provider and IAM roles are free |
 | Public replay hosting | $0 (Cloudflare Pages free tier) | [ADR-0004](docs/adr/0004-hybrid-deployment.md) (design target; TBD (human step): deploy) |
-| Infracost estimate | pending (needs `INFRACOST_API_KEY`) | TBD (human step): CI credentials; the CI workflow has no Infracost step yet |
+| Infracost estimate | pending (needs `INFRACOST_API_KEY`) | TBD (human step): the `infracost` job in `terraform.yml` runs on pushes to `main` once the secret exists |
 | `make cost-report` | not implemented yet | listed in CLAUDE.md; the router exports cost metrics and each run row stores its LLM cost, but there is no summary script |
 
 ## Evals
@@ -233,7 +233,7 @@ What the tiers measure: RETRIEVAL asks whether the right disclosure is in the to
 
 The cloud part is on demand and human-triggered: nothing is applied by an agent or by CI `plan` (CLAUDE.md rule 7; the one relaxation is TTL expiry, ADR-0028). Details, roles and offline checks: [deploy/terraform/aws/README.md](deploy/terraform/aws/README.md). The human-only steps, in order:
 
-1. **Bootstrap apply (once):** state bucket, GitHub OIDC provider, three roles (`plan`, `apply`, `destroy`) and the permissions boundary. Then the two GitHub environments (`demo-apply`, `demo-destroy`, `main` only, admin bypass off) and the repository variables.
+1. **Bootstrap apply (once):** state bucket, GitHub OIDC provider, three CI roles (`plan`, `apply`, `destroy`), three fixed demo workload roles and the permissions boundary. Then the two GitHub environments (`demo-apply`, `demo-destroy`, `main` only, admin bypass off) and the repository variables.
 2. **`demo-up`:** brings the stack up with a TTL (the reaper and EventBridge Scheduler stop an expired demo).
 3. **Capture:** `make capture-demo` against the running stack ([ADR-0026](docs/adr/0026-replay-mode-and-daily-cap-fallback.md)); also the video and screenshots.
 4. **`demo-down`**, then **check** that only the bootstrap stack remains (`check-demo-down.sh` fails otherwise).
@@ -242,9 +242,9 @@ The cloud part is on demand and human-triggered: nothing is applied by an agent 
 Status of the evidence this README is supposed to carry (PLAN M6 acceptance):
 
 - Public replay URL: TBD (human step): needs steps 3 and 5. The replay app is built and says on every screen that the data is recorded.
-- `terraform plan` output: TBD (human step): the CI `plan` job needs the OIDC plan-role variable (called `AWS_PLAN_ROLE_ARN` in the task plan; the Terraform README names the repository variable `PLAN_ROLE_ARN`). CI today runs only the offline checks (`fmt`, `validate`, `test`).
+- `terraform plan` output: TBD (human step): the CI `plan` job in `terraform.yml` runs once the repository variable `PLAN_ROLE_ARN` is set (read-only OIDC role, placeholder inputs); until then CI runs only the offline checks (`fmt`, `validate`, `test`, ops self-tests).
 - Infracost estimate: TBD (human step): needs `INFRACOST_API_KEY`.
-- `demo-up` / `demo-down` workflows and `check-demo-down.sh`: described in ADR-0028 and the Terraform README but not on this branch yet; check `.github/workflows/` before relying on them.
+- `demo-up` / `demo-down` / `demo-reaper` workflows and `ops/check-demo-down.sh`: in `.github/workflows/` and `deploy/terraform/aws/ops/`, unproven until the human's first `demo-up`.
 
 ## How I'd scale this
 

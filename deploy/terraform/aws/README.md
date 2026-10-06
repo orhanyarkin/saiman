@@ -28,7 +28,7 @@ The repository stays free of state, `.tfvars` and `backend.hcl` (all gitignored)
    terraform plan
    terraform apply
    ```
-   Check the plan: one bucket (+ config), one OIDC provider, three roles, one managed policy.
+   Check the plan: one bucket (+ config), one OIDC provider, six roles (three CI roles plus the three demo workload roles), one managed policy.
    If the account already has a `token.actions.githubusercontent.com` OIDC provider (only one is
    allowed per account), `terraform import aws_iam_openid_connect_provider.github <arn>` first.
 3. Move the bootstrap state into the bucket it created:
@@ -103,7 +103,7 @@ Everything is tagged `project=saiman`, `saiman:stack=demo-lite`, `saiman:session
 | --- | --- |
 | `network.tf` | VPC, two public subnets (no NAT, no ALB), internet gateway (no VPC endpoints); task SG with no ingress and egress 443 and 5432 to RDS only; RDS SG accepting 5432 from the task SG only |
 | `rds.tf` | PostgreSQL 17, `db.t4g.micro`, 20 GB gp3, private, encrypted, no backups or final snapshot; parameter group pins `log_statement=none`, `log_min_error_statement=panic` (role-bootstrap passwords never reach RDS logs) and `rds.force_ssl=1` |
-| `iam.tf` | task execution role (reads only SSM `/saiman/demo/*`, writes the log group), task role (S3 GetObject on `artifacts/*` and `demo/*`, ECS Exec), scheduler role; all under `/saiman/demo/` with the bootstrap boundary |
+| (IAM) | none here: the task execution role, task role and scheduler role are fixed in `bootstrap/demo_roles.tf` and only referenced by ARN (`locals.tf`); the task role reads only `artifacts/corpus/*` and `demo/assets/*` |
 | `logs.tf` | log group `/saiman-demo-lite`, 1 day retention (the `saiman-demo` prefix is what the bootstrap apply role and boundary allow) |
 | `scheduler.tf` | one-time EventBridge Scheduler schedules at `expires_at` + 30 minutes: ECS `desiredCount=0` and RDS stop (universal targets, no Lambda) |
 
