@@ -14,7 +14,8 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/saiman}
     username: ${SPRING_DATASOURCE_USERNAME:saiman}
-    password: ${SPRING_DATASOURCE_PASSWORD:saiman}
+    # No default: a missing app password must stop the service at startup (the file secret or SPRING_DATASOURCE_PASSWORD supplies it).
+    password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
       schema: seller_api
       # A database outage must not hold a paid response for the default 30 s: recording the settlement

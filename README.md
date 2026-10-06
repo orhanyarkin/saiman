@@ -49,6 +49,8 @@ Jaeger UI: http://localhost:16686. Redis is published on host port **16380** (no
 `export REDIS_HOST_PORT=<port>` before `make up`. `make down` stops everything; `make clean` also
 drops volumes.
 
+The database password has no default: a service started outside compose (for example `./gradlew :services:ledger:bootRun`) needs `SPRING_DATASOURCE_PASSWORD` and `SPRING_DATASOURCE_USERNAME=<svc>_app`, otherwise it stops at startup with a Postgres `password authentication failed` error (`make up` and `make ingest-backfill` supply it as a file secret).
+
 ## Secrets for M2 (RAG)
 
 `ingest` needs the MKK API credential and an OpenAI key; `seller-api` needs the OpenAI key.

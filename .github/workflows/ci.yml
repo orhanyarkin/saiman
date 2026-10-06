@@ -125,6 +125,8 @@ jobs:
         run: scripts/check-nginx-conf.sh
       - name: Check compose policy
         run: scripts/check-compose-policy.sh
+      - name: Check that no service config gives a secret-like property a built-in default
+        run: scripts/check-no-default-credentials.sh
       - name: Self-test compose/x402-env/nginx policy, secret generation and capture scrubber scripts
         run: scripts/test-check-compose-policy.sh
       - name: Self-test the Postgres role bootstrap (throwaway containers)
