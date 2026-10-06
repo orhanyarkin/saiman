@@ -54,7 +54,7 @@ Each milestone ends with something demo-able and a short write-up in `docs/PROGR
 - Hardening (design `docs/design/m6-hardening.md`; ADRs 0023-0026): API authentication (static role tokens, JWT upgrade path), per-service Postgres roles, `CREDIT_NOTE_UNCORROBORATED` on Kafka, replay mode + daily-cap fallback, facilitator settle metrics.
 - Golden set (incl. a freshness question), `evals` harness with deterministic metrics. The cross-provider route comparison (tier1: GPT-5.6 Luna vs Gemini 3.8 Flash vs DeepSeek V4.1 Flash) and an LLM judge wait for the human's go on new provider keys (ADR-0025).
 - Terraform `demo-lite` + bootstrap (state bucket, OIDC roles); `demo-up` / `demo-down` workflows; `make capture-demo`.
-- Human runs `demo-up`, the captured runs + 3-minute video + Grafana screenshots are recorded, then `demo-down` (verify nothing but the state bucket remains).
+- Human runs `demo-up`, the captured runs + 3-minute video + Grafana screenshots are recorded, then `demo-down` (verify nothing but the bootstrap stack remains: state bucket, OIDC provider, IAM roles and boundary, all $0 — enforced by the allowlist in `check-demo-down.sh`).
 - SPA replay mode on Cloudflare Pages; blog post (EN + TR).
 
 **Accept:** public replay URL live and honest about being recorded; `terraform plan` output and Infracost estimate in the README; `make eval` report published in the repo; README has architecture diagram, cost table, eval table, and "how I'd scale this" section.
