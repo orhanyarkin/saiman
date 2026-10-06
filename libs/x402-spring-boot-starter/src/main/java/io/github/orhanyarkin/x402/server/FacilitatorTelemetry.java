@@ -140,7 +140,7 @@ final class FacilitatorTelemetry {
     }
 
     /** Longest facilitator message the WARN will carry, in characters. */
-    static final int MAX_MESSAGE_CHARS = 120;
+    static final int MAX_MESSAGE_CHARS = 300;
 
     private static final int MAX_RAW_MESSAGE_CHARS = 8192;
     private static final Pattern UNSAFE_CHARS = Pattern.compile("[^A-Za-z0-9 _:.,()\\-]");

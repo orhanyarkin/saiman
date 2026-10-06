@@ -471,7 +471,7 @@ class FacilitatorTelemetryIntegrationTests {
         assertThat(at).isPositive();
         assertThat(line).endsWith("\"");
         String field = line.substring(at + prefix.length(), line.length() - 1);
-        assertThat(field).matches("[A-Za-z0-9 _:.,()?\\[\\]-]*").hasSizeLessThanOrEqualTo(120);
+        assertThat(field).matches("[A-Za-z0-9 _:.,()?\\[\\]-]*").hasSizeLessThanOrEqualTo(300);
         if (!field.isEmpty()) {
             assertThat(STOPPED_CONTEXTS).noneMatch(c -> c.contains(field));
             assertThat(FAILED_EVENTS).noneMatch(e -> e.toString().contains(field));
@@ -506,7 +506,7 @@ class FacilitatorTelemetryIntegrationTests {
 
         String field = settleFailureMessageField(newPayload(PaymentFlow.UPFRONT));
 
-        assertThat(field).hasSize(120);
+        assertThat(field).hasSize(300);
     }
 
     @Test
