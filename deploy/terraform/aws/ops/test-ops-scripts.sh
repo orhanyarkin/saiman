@@ -204,6 +204,40 @@ if [[ -d "${tokdir}" && "$(stat -c %a "${tokdir}")" == 700 && "$(stat -c %a "${t
 if grep -qFf "${tokdir}/api_reader_token" "${work}/tok.err"; then bad "demo-tokens printed a token"; else ok "demo-tokens prints only paths"; fi
 rm -rf "${tokdir}"
 
+# --- verify-image-provenance (fake gh and docker) -------------------------------------------------------------
+cat >"${bin}/gh" <<'FAKE'
+#!/usr/bin/env bash
+if [[ "$1 $2" == "run list" ]]; then [[ -e "${FAKE_AWS_DIR}/gh_run_id" ]] && cat "${FAKE_AWS_DIR}/gh_run_id"; exit 0; fi
+if [[ "$1 $2" == "run download" ]]; then
+  while [[ $# -gt 0 ]]; do [[ "$1" == --dir ]] && dest="$2"; shift; done
+  [[ -e "${FAKE_AWS_DIR}/gh_digests.json" ]] || exit 1
+  cp "${FAKE_AWS_DIR}/gh_digests.json" "${dest}/digests.json"; exit 0
+fi
+exit 1
+FAKE
+cat >"${bin}/docker" <<'FAKE'
+#!/usr/bin/env bash
+ref="$4"; svc="${ref#ghcr.io/orhanyarkin/saiman-}"; svc="${svc%%[:@]*}"
+cat "${FAKE_AWS_DIR}/docker_${svc}"
+FAKE
+chmod +x "${bin}/gh" "${bin}/docker"
+reset
+sha="$(printf 'a%.0s' {1..40})"
+d1="sha256:$(printf '1%.0s' {1..64})"
+d2="sha256:$(printf '2%.0s' {1..64})"
+digests_json() { # <digest for every service>
+  jq -n --arg c "${sha}" --arg d "$1" '{commit:$c, digests:{orchestrator:$d,"seller-api":$d,ledger:$d,ingest:$d,evals:$d}}'
+}
+for svc in orchestrator seller-api ledger ingest evals; do printf '%s\n' "${d1}" >"${fx}/docker_${svc}"; done
+expect "provenance: no main CI run for the commit fails" 1 "no successful ci.yml push run" "${ops}/verify-image-provenance.sh" "${sha}" "${work}/digests-out.json"
+echo 4242 >"${fx}/gh_run_id"
+expect "provenance: a run without the artifact fails" 1 "no image-digests artifact" "${ops}/verify-image-provenance.sh" "${sha}" "${work}/digests-out.json"
+digests_json "${d2}" >"${fx}/gh_digests.json"
+expect "provenance: a re-pushed tag (digest mismatch) fails" 1 "the tag was re-pushed" "${ops}/verify-image-provenance.sh" "${sha}" "${work}/digests-out.json"
+digests_json "${d1}" >"${fx}/gh_digests.json"
+expect "provenance: matching digests pass" 0 "image provenance verified" "${ops}/verify-image-provenance.sh" "${sha}" "${work}/digests-out.json"
+if [[ "$(jq -r '.ledger' "${work}/digests-out.json")" == "${d1}" ]]; then ok "recorded digests are written for Terraform"; else bad "digests-out.json wrong"; fi
+
 # --- tf-dummy-env -------------------------------------------------------------------------------------------------------------
 expect "dummy env: valid placeholders, no password" 0 "TF_VAR_image_tag=sha-000000000000" "${ops}/tf-dummy-env.sh" saiman-1-tfstate
 if "${ops}/tf-dummy-env.sh" saiman-1-tfstate | grep -qi 'db_master_password'; then bad "dummy env sets the master password"; else ok "dummy env never sets the master password"; fi
