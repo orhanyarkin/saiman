@@ -3,8 +3,8 @@
 Region `eu-central-1` only. Design: ADR-0028 (demo-lite), ADR-0004 (hybrid deployment).
 
 ```
-bootstrap/   state bucket + GitHub OIDC provider + roles saiman-gha-plan/apply/destroy + saiman-demo-boundary
-modules/     demo-lite (added later)
+bootstrap/   state bucket + GitHub OIDC provider + roles saiman-gha-plan/apply/destroy + saiman-demo-boundary + the three fixed demo roles
+demo-lite/   the demo stack (ECS, RDS, network, scheduler); references the fixed roles by ARN
 ```
 
 Nothing here is applied by an agent or by CI `plan`. Real `apply`/`destroy` run only in GitHub Actions
@@ -40,9 +40,16 @@ The repository stays free of state, `.tfvars` and `backend.hcl` (all gitignored)
    natively (`use_lockfile = true`), there is no DynamoDB table. State keys:
    `bootstrap/terraform.tfstate` (this stack) and `demo-lite/terraform.tfstate` (demo-lite).
    Do not commit `backend.tf` until you are happy with the layout; `backend.hcl` is never committed.
-4. In GitHub: Settings > Environments, create `demo-apply` (required reviewer: you) and
-   `demo-destroy`. Add repository variables with the role ARNs and the bucket name from
-   `terraform output` (`PLAN_ROLE_ARN`, `APPLY_ROLE_ARN`, `DESTROY_ROLE_ARN`, `TF_STATE_BUCKET`).
+4. In GitHub, create two environments and lock them down (Settings > Environments):
+   - `demo-apply`: required reviewer = you; **Deployment branches: Selected branches = `main` only**;
+     "Allow administrators to bypass" **off**.
+   - `demo-destroy`: **Deployment branches: Selected branches = `main` only**; admin bypass **off**.
+   - Branch protection on `main` (PR required, no force-push). The OIDC `sub` claim only names the
+     environment, so these settings are what stop a branch workflow from assuming the roles.
+   Add repository variables with the role ARNs and the bucket name from `terraform output`
+   (`PLAN_ROLE_ARN`, `APPLY_ROLE_ARN`, `DESTROY_ROLE_ARN`, `TF_STATE_BUCKET`).
+   Stronger option (documented follow-up, not done): customise the OIDC `sub` claim template for the
+   repository to include `job_workflow_ref` and trust only `.github/workflows/demo-up.yml@refs/heads/main`.
 5. Never `terraform destroy` bootstrap: the bucket has `prevent_destroy`, and the state it holds
    is versioned (noncurrent versions expire after 30 days).
 
@@ -50,11 +57,27 @@ The repository stays free of state, `.tfvars` and `backend.hcl` (all gitignored)
 
 | Role | Trust (`sub`) | Can |
 | --- | --- | --- |
-| `saiman-gha-plan` | `repo:orhanyarkin/saiman:pull_request`, `repo:orhanyarkin/saiman:ref:refs/heads/main` | read/describe, read demo-lite state, hold the lock. Explicit Deny: `ssm:GetParameter*` on `/saiman/*`, `s3:GetObject` on `artifacts/*` and `demo/*` (PR code runs during plan) |
-| `saiman-gha-apply` | `repo:orhanyarkin/saiman:environment:demo-apply` | create/update/delete `saiman-demo*` resources; `iam:CreateRole` only under `/saiman/demo/` and only with boundary `saiman-demo-boundary` |
-| `saiman-gha-destroy` | `repo:orhanyarkin/saiman:environment:demo-destroy` | delete, stop, scale to zero, deregister task definitions; cannot create anything |
+| `saiman-gha-plan` | `repo:orhanyarkin/saiman:pull_request`, `repo:orhanyarkin/saiman:ref:refs/heads/main` | read/describe, read the demo-lite state. No S3 write at all, so plan workflows must run `terraform plan -lock=false`. Explicit Deny: `ssm:GetParameter*` on `/saiman/*`, `s3:GetObject` on `artifacts/*` and `demo/*` (PR code runs during plan) |
+| `saiman-gha-apply` | `repo:orhanyarkin/saiman:environment:demo-apply` | create/update/delete `saiman-demo*` resources. IAM: `iam:PassRole` of the three fixed demo roles (path `/saiman/demo/`, ecs-tasks and scheduler only) and nothing else: it cannot create, edit or re-trust a role. `s3:DeleteObject` only on the state lock object |
+| `saiman-gha-destroy` | `repo:orhanyarkin/saiman:environment:demo-destroy` | delete, stop and modify existing `saiman-demo*` resources (including `rds:ModifyDBInstance`); no create/register/run/put action and no IAM write. Residual: it can still alter what exists (cost denial of service, not escalation). Teardown relies on `ecs delete-service --force` (so demo-lite's `aws_ecs_service` needs `force_delete = true`); scale-to-zero is the Scheduler role's job |
 
-All three are locked to `eu-central-1` (`aws:RequestedRegion`; IAM, STS and Budgets are global and exempt).
+All three are locked to `eu-central-1` (`aws:RequestedRegion`; IAM, STS and Budgets are global and exempt),
+and all three carry explicit Denies for secret values (`ssm:GetParameter*` on `/saiman/*`) and for reading
+`artifacts/*` and `demo/*`.
+
+The workload roles (`saiman-demo-task-execution`, `saiman-demo-task`, `saiman-demo-scheduler`, path
+`/saiman/demo/`) are fixed in `bootstrap/demo_roles.tf`: service-principal trust plus `aws:SourceAccount`,
+the `saiman-demo-boundary`, inline policies. Only the execution role may read `/saiman/demo/*` (ECS
+`secrets[].valueFrom`); the task role has no SSM permissions and is read-only on `artifacts/`.
+
+Known limits:
+- The boundary bounds what the demo roles can do, not who can use them: a malicious approved apply can
+  still deploy a workload that runs as them and reads `/saiman/demo/*` (inherent; those secrets are testnet
+  keys and a capped OpenAI key only).
+- EC2 write actions (VPC, subnets, security groups) are allowed on `*`, limited by the region lock only.
+  Tag-based scoping (`aws:ResourceTag/project`, `aws:RequestTag/project` on Create via `ec2:CreateAction`)
+  is a documented follow-up: it cannot be verified offline and makes destroy fragile for untagged
+  leftovers. Recommended instead: run the demo in a dedicated AWS account.
 
 ## Offline checks (no credentials)
 
@@ -63,9 +86,10 @@ cd deploy/terraform/aws/bootstrap
 terraform fmt -check -recursive
 terraform init -backend=false
 terraform validate
-terraform test                       # mock_provider assertions on trust, denies, boundary, bucket
+terraform test                       # mock_provider assertions on trust, denies, fixed roles, boundary, bucket
 tests/check-prevent-destroy.sh       # lifecycle is invisible to terraform test
 ```
+The same four commands plus `tests/check-foundation.sh` run in `demo-lite/`.
 `.github/workflows/terraform.yml` runs the same on pull requests and on `main`.
 
 ## demo-lite (foundation)

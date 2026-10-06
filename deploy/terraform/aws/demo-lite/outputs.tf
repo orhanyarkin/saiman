@@ -46,18 +46,18 @@ output "subnet_ids" {
 }
 
 output "task_execution_role_arn" {
-  description = "ECS task execution role."
-  value       = aws_iam_role.task_execution.arn
+  description = "ECS task execution role (fixed, bootstrap)."
+  value       = local.task_execution_role_arn
 }
 
 output "task_role_arn" {
-  description = "ECS task role."
-  value       = aws_iam_role.task.arn
+  description = "ECS task role (fixed, bootstrap; no SSM permissions)."
+  value       = local.task_role_arn
 }
 
 output "scheduler_role_arn" {
-  description = "EventBridge Scheduler role."
-  value       = aws_iam_role.scheduler.arn
+  description = "EventBridge Scheduler role (fixed, bootstrap)."
+  value       = local.scheduler_role_arn
 }
 
 output "ssm_parameter_arn_prefix" {

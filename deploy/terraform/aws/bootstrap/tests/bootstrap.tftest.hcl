@@ -89,35 +89,74 @@ run "plan_role_cannot_read_secrets" {
   }
 }
 
-run "apply_role_creates_roles_only_with_boundary" {
+run "plan_role_has_no_s3_write" {
   assert {
-    condition = anytrue([
-      for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
-      try(s.Effect == "Allow" && contains(s.Action, "iam:CreateRole")
-        && s.Condition.StringEquals["iam:PermissionsBoundary"] == "arn:aws:iam::123456789012:policy/saiman/bootstrap/saiman-demo-boundary"
-      && s.Resource == "arn:aws:iam::123456789012:role/saiman/demo/*", false)
-    ])
-    error_message = "iam:CreateRole must be conditioned on the boundary and limited to /saiman/demo/"
-  }
-
-  assert {
-    condition = length([
-      for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
-      s if s.Effect == "Allow" && try(s.Condition == null, true) && (contains(try(tolist(s.Action), []), "iam:CreateRole") || contains(try(tolist(s.Action), []), "iam:PassRole"))
-    ]) == 0
-    error_message = "CreateRole and PassRole must never be allowed unconditionally"
-  }
-
-  assert {
-    condition = alltrue([
-      for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
-      !contains(try(tolist(s.Action), []), "iam:DeleteRolePermissionsBoundary")
-    ])
-    error_message = "apply role must not be able to remove the boundary"
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.plan.policy).Statement :
+      [for a in try(tolist(s.Action), []) : !can(regex("^s3:(Put|Delete|Create|Replicate|Restore|Abort)", a))] if s.Effect == "Allow"
+    ]))
+    error_message = "plan role must have no S3 write at all (plan workflows use -lock=false)"
   }
 }
 
-run "destroy_role_cannot_create" {
+run "ci_roles_keep_secret_and_region_denies" {
+  assert {
+    condition = alltrue([
+      for pol in [aws_iam_role_policy.plan.policy, aws_iam_role_policy.apply.policy, aws_iam_role_policy.destroy.policy] :
+      anytrue([
+        for s in jsondecode(pol).Statement :
+        try(s.Effect == "Deny" && s.Action == ["ssm:GetParameter*"] && s.Resource == "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/*", false)
+      ])
+      && anytrue([
+        for s in jsondecode(pol).Statement :
+        try(s.Effect == "Deny" && s.Condition.StringNotEquals["aws:RequestedRegion"] == "eu-central-1", false)
+      ])
+    ])
+    error_message = "plan, apply and destroy each need the SSM value Deny and the region lock"
+  }
+}
+
+run "apply_role_cannot_mint_or_retrust_roles" {
+  assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+      [for a in try(tolist(s.Action), []) : !can(regex("^iam:(CreateRole|UpdateAssumeRolePolicy|PutRolePolicy|AttachRolePolicy|DeleteRole|UpdateRole|TagRole|CreatePolicy|CreatePolicyVersion|PutRolePermissionsBoundary|DeleteRolePermissionsBoundary)", a))] if s.Effect == "Allow"
+    ]))
+    error_message = "apply role must have no role/policy write; roles are fixed in bootstrap"
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+      [for a in try(tolist(s.Action), []) : a == "iam:PassRole" || a == "iam:CreateServiceLinkedRole" || !startswith(a, "iam:") || startswith(a, "iam:Get") || startswith(a, "iam:List")] if s.Effect == "Allow"
+    ]))
+    error_message = "the only IAM writes left are PassRole and service-linked roles"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+      try(s.Effect == "Allow" && s.Action == ["iam:PassRole"] && s.Resource == "arn:aws:iam::123456789012:role/saiman/demo/*"
+      && s.Condition.StringEquals["iam:PassedToService"] == ["ecs-tasks.amazonaws.com", "scheduler.amazonaws.com"], false)
+    ])
+    error_message = "PassRole only for /saiman/demo/ and ecs-tasks + scheduler"
+  }
+}
+
+run "state_object_cannot_be_deleted_by_ci" {
+  assert {
+    condition = alltrue(flatten([
+      for pol in [aws_iam_role_policy.apply.policy, aws_iam_role_policy.destroy.policy] : [
+        for s in jsondecode(pol).Statement :
+        [for r in try(tolist(s.Resource), [s.Resource]) : endswith(r, ".tflock") || endswith(r, "/demo/*")]
+        if s.Effect == "Allow" && anytrue([for a in try(tolist(s.Action), []) : startswith(a, "s3:Delete")])
+      ]
+    ]))
+    error_message = "s3:Delete* is only allowed on the lock object and demo/*, never the state key"
+  }
+}
+
+run "destroy_role_has_no_create_actions" {
   assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role_policy.destroy.policy).Statement :
@@ -130,11 +169,86 @@ run "destroy_role_cannot_create" {
   }
 
   assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.destroy.policy).Statement :
+      [for a in try(tolist(s.Action), []) : !startswith(a, "iam:") || startswith(a, "iam:Get") || startswith(a, "iam:List")] if s.Effect == "Allow"
+    ]))
+    error_message = "destroy role has no IAM writes (roles are fixed in bootstrap)"
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.destroy.policy).Statement :
+      [for a in try(tolist(s.Action), []) : a != "ecs:UpdateService"] if s.Effect == "Allow"
+    ]))
+    error_message = "destroy role relies on ecs delete-service --force, not UpdateService"
+  }
+
+  assert {
     condition = anytrue([
       for s in jsondecode(aws_iam_role_policy.destroy.policy).Statement :
-      try(s.Effect == "Allow" && contains(s.Action, "ecs:UpdateService"), false)
+      try(contains(s.Action, "rds:ModifyDBInstance") && s.Effect == "Allow", false)
     ])
-    error_message = "destroy role needs ecs:UpdateService to scale to zero"
+    error_message = "destroy needs rds:ModifyDBInstance (deletion protection)"
+  }
+}
+
+run "demo_roles_trust_service_principals_only" {
+  assert {
+    condition = alltrue([
+      for r in [aws_iam_role.demo_task_execution, aws_iam_role.demo_task] :
+      jsondecode(r.assume_role_policy).Statement == [{
+        Effect    = "Allow"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+        Condition = { StringEquals = { "aws:SourceAccount" = "123456789012" } }
+      }]
+    ])
+    error_message = "ecs roles trust ecs-tasks.amazonaws.com + aws:SourceAccount only"
+  }
+
+  assert {
+    condition = jsondecode(aws_iam_role.demo_scheduler.assume_role_policy).Statement == [{
+      Effect    = "Allow"
+      Principal = { Service = "scheduler.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+      Condition = { StringEquals = { "aws:SourceAccount" = "123456789012" } }
+    }]
+    error_message = "scheduler role trusts scheduler.amazonaws.com + aws:SourceAccount only"
+  }
+
+  assert {
+    condition = alltrue([
+      for r in [aws_iam_role.demo_task_execution, aws_iam_role.demo_task, aws_iam_role.demo_scheduler] :
+      r.path == "/saiman/demo/" && r.permissions_boundary == "arn:aws:iam::123456789012:policy/saiman/bootstrap/saiman-demo-boundary"
+    ])
+    error_message = "demo roles need path /saiman/demo/ and the boundary"
+  }
+}
+
+run "task_role_has_no_ssm_and_execution_role_reads_demo_only" {
+  assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.demo_task.policy).Statement :
+      [for a in s.Action : !startswith(a, "ssm:") && !startswith(a, "kms:") && !strcontains(a, "*")]
+    ]))
+    error_message = "task role: no ssm, no kms, no wildcard actions"
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.demo_task.policy).Statement :
+      [for a in s.Action : a != "s3:PutObject"] if s.Effect == "Allow"
+    ]))
+    error_message = "task role is read-only on artifacts/"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.demo_task_execution.policy).Statement :
+      s.Sid == "ReadDemoParameters" && s.Action == ["ssm:GetParameters"] && s.Resource == "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/demo/*"
+    ])
+    error_message = "execution role reads /saiman/demo/* only"
   }
 }
 
@@ -174,6 +288,30 @@ run "boundary_blocks_escalation" {
   assert {
     condition     = length(aws_iam_policy.demo_boundary.policy) < 6144
     error_message = "managed policy size limit is 6144 characters"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_policy.demo_boundary.policy).Statement :
+      try(s.Sid == "CeilingSecrets" && s.Effect == "Allow" && s.Resource == "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/demo/*", false)
+    ])
+    error_message = "CeilingSecrets must be exactly /saiman/demo/*"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_policy.demo_boundary.policy).Statement :
+      try(s.Effect == "Deny" && s.Action == ["ssm:GetParameter*"] && s.NotResource == "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/demo/*", false)
+    ])
+    error_message = "boundary must deny reading any parameter outside /saiman/demo/"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_policy.demo_boundary.policy).Statement :
+      try(s.Effect == "Deny" && s.Condition.StringNotEquals["aws:RequestedRegion"] == "eu-central-1", false)
+    ])
+    error_message = "boundary must be region-locked"
   }
 }
 

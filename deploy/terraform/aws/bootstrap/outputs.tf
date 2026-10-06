@@ -18,6 +18,21 @@ output "destroy_role_arn" {
   value       = aws_iam_role.destroy.arn
 }
 
+output "demo_task_execution_role_arn" {
+  description = "Fixed ECS task execution role (path /saiman/demo/)."
+  value       = aws_iam_role.demo_task_execution.arn
+}
+
+output "demo_task_role_arn" {
+  description = "Fixed ECS task role (path /saiman/demo/)."
+  value       = aws_iam_role.demo_task.arn
+}
+
+output "demo_scheduler_role_arn" {
+  description = "Fixed EventBridge Scheduler role (path /saiman/demo/)."
+  value       = aws_iam_role.demo_scheduler.arn
+}
+
 output "demo_boundary_arn" {
   description = "Permissions boundary every role created by demo-lite must carry."
   value       = aws_iam_policy.demo_boundary.arn

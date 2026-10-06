@@ -1,14 +1,6 @@
-# Offline tests (mock_provider, no credentials). IAM policies are jsonencode()d, so assertions decode
-# the rendered JSON. Provider default_tags are invisible here; tests/check-foundation.sh covers them.
+# Offline tests (mock_provider, no credentials). Provider default_tags are invisible here; tests/check-foundation.sh covers them.
 
 mock_provider "aws" {
-  # The scheduler validates role_arn as an ARN, so the mocked role needs a well-formed one.
-  mock_resource "aws_iam_role" {
-    defaults = {
-      arn = "arn:aws:iam::123456789012:role/saiman/demo/mock"
-    }
-  }
-
   mock_data "aws_caller_identity" {
     defaults = {
       account_id = "123456789012"
@@ -131,94 +123,23 @@ run "logs_expire_after_one_day" {
   }
 }
 
-run "execution_role_reads_only_demo_parameters" {
+# The roles are fixed in bootstrap (bootstrap/demo_roles.tf, tested there); demo-lite only references them.
+run "roles_are_referenced_not_managed" {
   assert {
     condition = (
-      toset([for s in jsondecode(aws_iam_role_policy.task_execution.policy).Statement : s.Sid])
-      == toset(["ReadDemoParameters", "DecryptViaSsm", "WriteDemoLogs"])
+      output.task_execution_role_arn == "arn:aws:iam::123456789012:role/saiman/demo/saiman-demo-task-execution"
+      && output.task_role_arn == "arn:aws:iam::123456789012:role/saiman/demo/saiman-demo-task"
+      && output.scheduler_role_arn == "arn:aws:iam::123456789012:role/saiman/demo/saiman-demo-scheduler"
     )
-    error_message = "execution role must have exactly the three expected statements"
+    error_message = "role ARNs must point at the fixed /saiman/demo/ roles from bootstrap"
   }
 
-  assert {
-    condition = anytrue([
-      for s in jsondecode(aws_iam_role_policy.task_execution.policy).Statement :
-      s.Sid == "ReadDemoParameters" && s.Action == ["ssm:GetParameters"] && s.Resource == "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/demo/*"
-    ])
-    error_message = "SSM reads must be ssm:GetParameters on /saiman/demo/* only"
-  }
-
-  assert {
-    condition = anytrue([
-      for s in jsondecode(aws_iam_role_policy.task_execution.policy).Statement :
-      s.Sid == "DecryptViaSsm" && s.Action == ["kms:Decrypt"] && s.Condition.StringEquals["kms:ViaService"] == "ssm.eu-central-1.amazonaws.com"
-    ])
-    error_message = "kms:Decrypt only through SSM"
-  }
-
-  assert {
-    condition = anytrue([
-      for s in jsondecode(aws_iam_role_policy.task_execution.policy).Statement :
-      s.Sid == "WriteDemoLogs" && s.Resource == "arn:aws:logs:eu-central-1:123456789012:log-group:/saiman-demo-lite:*"
-    ])
-    error_message = "logs are written to the demo log group only"
-  }
-}
-
-run "task_role_has_no_wildcard_actions" {
-  assert {
-    condition = alltrue(flatten([
-      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
-      [for a in s.Action : !strcontains(a, "*")]
-    ]))
-    error_message = "task role must not use wildcard actions"
-  }
-
-  assert {
-    condition = anytrue([
-      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
-      s.Action == ["s3:GetObject"] && s.Resource == ["arn:aws:s3:::saiman-test-tfstate/artifacts/*", "arn:aws:s3:::saiman-test-tfstate/demo/*"]
-    ])
-    error_message = "S3 is GetObject on artifacts/* and demo/* only"
-  }
-
-  assert {
-    condition = anytrue([
-      for s in jsondecode(aws_iam_role_policy.task.policy).Statement :
-      s.Sid == "EcsExec" && alltrue([for a in s.Action : startswith(a, "ssmmessages:")])
-    ])
-    error_message = "ssmmessages for ECS Exec expected"
-  }
-
-  assert {
-    condition     = length(jsondecode(aws_iam_role_policy.task.policy).Statement) == 2
-    error_message = "task role has nothing besides S3 reads and ECS Exec"
-  }
-}
-
-run "scheduler_role_is_narrow" {
   assert {
     condition = (
-      length(jsondecode(aws_iam_role_policy.scheduler.policy).Statement) == 2
-      && anytrue([for s in jsondecode(aws_iam_role_policy.scheduler.policy).Statement : s.Action == ["ecs:UpdateService"] && s.Resource == "arn:aws:ecs:eu-central-1:123456789012:service/saiman-demo/saiman-demo-lite"])
-      && anytrue([for s in jsondecode(aws_iam_role_policy.scheduler.policy).Statement : s.Action == ["rds:StopDBInstance"] && s.Resource == "arn:aws:rds:eu-central-1:123456789012:db:saiman-demo"])
+      one(aws_scheduler_schedule.stop_service.target).role_arn == output.scheduler_role_arn
+      && one(aws_scheduler_schedule.stop_database.target).role_arn == output.scheduler_role_arn
     )
-    error_message = "scheduler role: ecs:UpdateService on the demo service and rds:StopDBInstance on the demo instance only"
-  }
-
-  assert {
-    condition     = jsondecode(aws_iam_role.scheduler.assume_role_policy).Statement[0].Principal.Service == "scheduler.amazonaws.com"
-    error_message = "scheduler role must trust scheduler.amazonaws.com"
-  }
-}
-
-run "every_role_has_boundary_and_path" {
-  assert {
-    condition = alltrue([
-      for r in [aws_iam_role.task_execution, aws_iam_role.task, aws_iam_role.scheduler] :
-      r.path == "/saiman/demo/" && r.permissions_boundary == "arn:aws:iam::123456789012:policy/saiman/bootstrap/saiman-demo-boundary" && startswith(r.name, "saiman-demo")
-    ])
-    error_message = "every role needs path /saiman/demo/, the saiman-demo-boundary and a saiman-demo* name"
+    error_message = "both backstop schedules run as the fixed scheduler role"
   }
 }
 
