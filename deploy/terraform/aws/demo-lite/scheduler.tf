@@ -18,7 +18,7 @@ resource "aws_scheduler_schedule" "stop_service" {
 
   target {
     arn      = "arn:aws:scheduler:::aws-sdk:ecs:updateService"
-    role_arn = aws_iam_role.scheduler.arn
+    role_arn = local.scheduler_role_arn
 
     input = jsonencode({
       Cluster      = local.cluster_name
@@ -45,7 +45,7 @@ resource "aws_scheduler_schedule" "stop_database" {
 
   target {
     arn      = "arn:aws:scheduler:::aws-sdk:rds:stopDBInstance"
-    role_arn = aws_iam_role.scheduler.arn
+    role_arn = local.scheduler_role_arn
 
     input = jsonencode({
       DbInstanceIdentifier = local.db_name

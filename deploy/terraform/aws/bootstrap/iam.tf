@@ -4,8 +4,10 @@
 #   plan    - read-only, assumable from PRs and main. PR code runs during `terraform plan`, so the role
 #             can never read secrets (SSM) or private artifacts (S3), enforced with explicit Denies.
 #   apply   - assumable only from the `demo-apply` GitHub environment (human approval). Creates and
-#             changes saiman-demo* resources; IAM is limited to /saiman/demo/ and the boundary.
-#   destroy - assumable only from `demo-destroy`. Can delete, stop and scale down; cannot create.
+#             changes saiman-demo* resources. IAM: iam:PassRole of the fixed demo roles
+#             (demo_roles.tf) and nothing else; it cannot create, edit or re-trust any role.
+#   destroy - assumable only from `demo-destroy`. Deletes, stops and modifies existing saiman-demo*
+#             resources; it has no create/register/run/put action (it can still change what exists).
 
 resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://${local.oidc_host}"
@@ -80,11 +82,19 @@ locals {
     }
   }
 
+  # Read/write the state and lock objects; delete only the lock object (never the state itself).
   stmt_state_rw = {
     Sid      = "ReadWriteDemoLiteState"
     Effect   = "Allow"
-    Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    Action   = ["s3:GetObject", "s3:PutObject"]
     Resource = local.demo_state_glob
+  }
+
+  stmt_lock_delete = {
+    Sid      = "DeleteDemoLiteLock"
+    Effect   = "Allow"
+    Action   = ["s3:DeleteObject"]
+    Resource = local.demo_lock_arn
   }
 }
 
@@ -128,13 +138,6 @@ resource "aws_iam_role_policy" "plan" {
         Action   = ["s3:GetObject"]
         Resource = local.demo_state_arn
       },
-      {
-        # Native S3 locking writes a .tflock object next to the state.
-        Sid      = "LockDemoLiteState"
-        Effect   = "Allow"
-        Action   = ["s3:PutObject", "s3:DeleteObject"]
-        Resource = local.demo_lock_arn
-      },
       local.stmt_deny_ssm_values,
       local.stmt_deny_private_objects,
       local.region_lock,
@@ -177,6 +180,7 @@ resource "aws_iam_role_policy" "apply" {
       local.stmt_iam_read,
       local.stmt_state_list,
       local.stmt_state_rw,
+      local.stmt_lock_delete,
       {
         Sid    = "EcsDemoResources"
         Effect = "Allow"
@@ -273,7 +277,7 @@ resource "aws_iam_role_policy" "apply" {
       {
         Sid      = "BudgetsDemo"
         Effect   = "Allow"
-        Action   = ["budgets:ModifyBudget", "budgets:CreateBudgetAction", "budgets:DeleteBudget", "budgets:TagResource", "budgets:UntagResource"]
+        Action   = ["budgets:ModifyBudget", "budgets:DeleteBudget", "budgets:TagResource", "budgets:UntagResource"]
         Resource = "arn:aws:budgets::${local.account_id}:budget/saiman-demo*"
       },
       {
@@ -283,29 +287,8 @@ resource "aws_iam_role_policy" "apply" {
         Resource = "*"
       },
       {
-        # Only with the boundary attached; the boundary itself is not editable by this role.
-        Sid      = "CreateRoleOnlyWithBoundary"
-        Effect   = "Allow"
-        Action   = ["iam:CreateRole", "iam:PutRolePermissionsBoundary"]
-        Resource = local.iam_demo_role_arn
-        Condition = {
-          StringEquals = { "iam:PermissionsBoundary" = local.boundary_arn }
-        }
-      },
-      {
-        Sid    = "ManageDemoRoles"
-        Effect = "Allow"
-        Action = [
-          "iam:DeleteRole", "iam:UpdateRole", "iam:UpdateAssumeRolePolicy",
-          "iam:PutRolePolicy", "iam:DeleteRolePolicy",
-          "iam:AttachRolePolicy", "iam:DetachRolePolicy",
-          "iam:TagRole", "iam:UntagRole",
-        ]
-        Resource = local.iam_demo_role_arn
-      },
-      {
-        # PassRole cannot be conditioned on the boundary; it is enforced at CreateRole, and only
-        # roles under /saiman/demo/ (all created with the boundary) can be passed.
+        # The only IAM write. The roles are fixed in bootstrap (demo_roles.tf), carry the boundary and
+        # trust service principals only; this role cannot create, edit or re-trust any role.
         Sid      = "PassDemoRoles"
         Effect   = "Allow"
         Action   = ["iam:PassRole"]
@@ -365,12 +348,14 @@ resource "aws_iam_role_policy" "destroy" {
       local.stmt_iam_read,
       local.stmt_state_list,
       local.stmt_state_rw,
+      local.stmt_lock_delete,
       {
-        # UpdateService scales to zero; no Create*/Register*/RunTask, so nothing new can start.
+        # No UpdateService: the reaper uses `ecs delete-service --force`, and the Scheduler role covers
+        # scale-to-zero. No Create*/Register*/RunTask, so nothing new can start.
         Sid    = "EcsDelete"
         Effect = "Allow"
         Action = [
-          "ecs:UpdateService", "ecs:DeleteService", "ecs:DeleteCluster", "ecs:StopTask",
+          "ecs:DeleteService", "ecs:DeleteCluster", "ecs:StopTask",
           "ecs:DeregisterTaskDefinition", "ecs:DeleteTaskDefinitions", "ecs:UntagResource",
         ]
         Resource = [
@@ -384,7 +369,7 @@ resource "aws_iam_role_policy" "destroy" {
         Sid    = "RdsDeleteStop"
         Effect = "Allow"
         Action = [
-          "rds:StopDBInstance", "rds:DeleteDBInstance",
+          "rds:StopDBInstance", "rds:ModifyDBInstance", "rds:DeleteDBInstance",
           "rds:DeleteDBSubnetGroup", "rds:DeleteDBParameterGroup", "rds:RemoveTagsFromResource",
         ]
         Resource = [
@@ -410,7 +395,9 @@ resource "aws_iam_role_policy" "destroy" {
         Action = ["logs:DeleteLogGroup"]
         Resource = [
           "arn:aws:logs:${var.region}:${local.account_id}:log-group:/ecs/saiman-demo*",
+          "arn:aws:logs:${var.region}:${local.account_id}:log-group:/ecs/saiman-demo*:*",
           "arn:aws:logs:${var.region}:${local.account_id}:log-group:/saiman-demo*",
+          "arn:aws:logs:${var.region}:${local.account_id}:log-group:/saiman-demo*:*",
         ]
       },
       {
@@ -430,12 +417,6 @@ resource "aws_iam_role_policy" "destroy" {
         Effect   = "Allow"
         Action   = ["budgets:DeleteBudget"]
         Resource = "arn:aws:budgets::${local.account_id}:budget/saiman-demo*"
-      },
-      {
-        Sid      = "DeleteDemoRoles"
-        Effect   = "Allow"
-        Action   = ["iam:DeleteRole", "iam:DeleteRolePolicy", "iam:DetachRolePolicy"]
-        Resource = local.iam_demo_role_arn
       },
       {
         Sid      = "ListDemoExports"
@@ -460,8 +441,9 @@ resource "aws_iam_role_policy" "destroy" {
 }
 
 # --- permissions boundary ------------------------------------------------------------------------
-# Attached to every role demo-lite creates (task, execution, scheduler). It is an allow-list ceiling
-# plus explicit denies so a compromised workload (or a compromised apply run) cannot escalate.
+# Attached to the three fixed demo roles (demo_roles.tf). It bounds what those roles can DO (an allow-list
+# ceiling plus explicit denies), not who can assume them: a malicious approved apply can still deploy a
+# workload that reads /saiman/demo/* secrets (inherent; testnet keys and a capped OpenAI key only).
 
 resource "aws_iam_policy" "demo_boundary" {
   name        = local.boundary_name
@@ -507,8 +489,14 @@ resource "aws_iam_policy" "demo_boundary" {
       {
         Sid      = "CeilingObjects"
         Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject"]
-        Resource = ["${local.bucket_arn}/artifacts/*", "${local.bucket_arn}/demo/*"]
+        Action   = ["s3:GetObject"]
+        Resource = local.demo_s3_read_arns
+      },
+      {
+        Sid      = "CeilingDemoWrites"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${local.bucket_arn}/demo/*"
       },
       {
         Sid      = "CeilingList"
@@ -557,6 +545,13 @@ resource "aws_iam_policy" "demo_boundary" {
           "iam:CreatePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:DeletePolicy", "iam:DeletePolicyVersion",
         ]
         Resource = local.boundary_arn
+      },
+      {
+        # Defence in depth: whatever a demo role is granted, secrets outside /saiman/demo/ stay unreadable.
+        Sid         = "DenySecretsOutsideDemo"
+        Effect      = "Deny"
+        Action      = ["ssm:GetParameter*"]
+        NotResource = local.ssm_demo_arn
       },
       {
         Sid      = "DenyOrganizationsAndBilling"
