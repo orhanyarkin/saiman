@@ -57,6 +57,74 @@ for fixture in "${FIXTURES_DIR}"/pass-*.yml; do
   expect_exit "check-compose-policy: ${name}" 0 env COMPOSE_FILE="${fixture}" scripts/check-compose-policy.sh
 done
 
+# --- scripts/check-compose-policy.sh: fixtures generated from pass-m6b-migrators.yml by a jq mutation ---
+# Each row: name, a jq filter applied to the (valid) base, then one or more substrings the output
+# must contain. Keeps the base in one file instead of one copy per case (ADR-0027).
+MUTATION_BASE="${FIXTURES_DIR}/pass-m6b-migrators.yml"
+mutation_dir="${work_dir}/mutations"
+mkdir -p "${mutation_dir}"
+mutation_fail() {
+  local name="$1" filter="$2"
+  shift 2
+  local fixture="${mutation_dir}/fail-${name}.yml"
+  if ! sed '/^#/d' "${MUTATION_BASE}" | jq "${filter}" >"${fixture}"; then
+    echo "FAIL: mutation ${name}: the jq filter does not apply to the base fixture" >&2
+    failures=$((failures + 1))
+    return 0
+  fi
+  expect_exit "check-compose-policy (mutation): ${name}" 1 env COMPOSE_FILE="${fixture}" scripts/check-compose-policy.sh
+  local expected
+  for expected in "$@"; do
+    if ! grep -qF -- "${expected}" "${err_file}"; then
+      echo "FAIL: mutation ${name}: output lacks the expected violation \"${expected}\"" >&2
+      sed 's/^/  /' "${err_file}" >&2
+      failures=$((failures + 1))
+    fi
+  done
+}
+
+M='.services["ledger-migrate"]'
+mutation_fail migrate-no-profile "del(${M}.profiles)" 'ledger-migrate: profiles must be exactly [apps]'
+mutation_fail migrate-other-profile "${M}.profiles = [\"migrate\"]" 'ledger-migrate: profiles must be exactly [apps]'
+mutation_fail migrate-no-profile-no-run-mode \
+  "del(${M}.profiles) | del(${M}.environment.SAIMAN_RUN_MODE) | ${M}.restart = \"always\" | ${M}.command = [\"sleep\", \"1\"] | ${M}.environment.SPRING_FLYWAY_URL = \"jdbc:postgresql://evil/x\"" \
+  'ledger-migrate: profiles must be exactly [apps]' 'ledger-migrate: SAIMAN_RUN_MODE must be "migrate"' 'ledger-migrate: restart must be "no"' \
+  'ledger-migrate: command/entrypoint overrides are not allowed' 'ledger-migrate: environment SPRING_FLYWAY_URL is not allowed'
+mutation_fail migrate-unprofiled-extra-key "del(${M}.profiles) | ${M}.user = \"0\"" 'ledger-migrate: key user is not allowed on a migrate one-shot'
+mutation_fail migrate-extra-hosts "${M}.extra_hosts = [\"evil:10.0.0.1\"]" 'ledger-migrate: key extra_hosts is not allowed on a migrate one-shot'
+mutation_fail migrate-configs "${M}.configs = [\"x\"]" 'ledger-migrate: key configs is not allowed on a migrate one-shot'
+mutation_fail migrate-volume "${M}.volumes = [\"scratch:/tmp\"]" 'ledger-migrate: key volumes is not allowed on a migrate one-shot'
+mutation_fail migrate-double-underscore-flyway-url "${M}.environment.SPRING_FLYWAY__URL = \"jdbc:postgresql://evil/x\"" \
+  'ledger-migrate: environment SPRING_FLYWAY_URL is not allowed' 'is not UPPER_SNAKE_CASE'
+mutation_fail migrate-shadowed-key "${M}.environment.SPRING_FLYWAY__USER = \"saiman\"" 'collapse to the same name after normalisation'
+mutation_fail app-no-profile 'del(.services.ledger.profiles)' 'ledger: has no profile and is not an always-on infrastructure service'
+mutation_fail unknown-service-no-profile '.services.rogue = {image: "busybox:1"}' 'rogue: has no profile and is not an always-on infrastructure service'
+mutation_fail app-extra-profile '.services.ledger.profiles = ["apps", "debug"] | .services.ledger.environment.SPRING_FLYWAY_ENABLED = "true"' \
+  'ledger: SPRING_FLYWAY_ENABLED must be "false"'
+mutation_fail app-extra-profile-no-migrator-dependency '.services.ledger.profiles = ["apps", "debug"] | del(.services.ledger.depends_on)' \
+  'ledger: must depend on ledger-migrate with condition service_completed_successfully'
+mutation_fail app-volumes-from-migrator '.services.ledger.volumes_from = ["ledger-migrate"]' 'ledger: volumes_from is not allowed'
+mutation_fail volumes-from-any '.services.evals.volumes_from = ["postgres"]' 'evals: volumes_from is not allowed'
+mutation_fail app-named-volume-bind-secrets \
+  '.volumes = {secvol: {driver: "local", driver_opts: {type: "none", o: "bind", device: "../../secrets"}}} | .services.ledger.volumes = ["secvol:/mnt/s:ro"]' \
+  'ledger: named volume secvol is bound to a host path'
+mutation_fail app-privileged '.services.ledger.privileged = true' 'ledger: privileged is not allowed'
+mutation_fail app-cap-add '.services.ledger.cap_add = ["NET_RAW"]' 'ledger: cap_add is not allowed'
+mutation_fail app-devices '.services.ledger.devices = ["/dev/sda:/dev/sda"]' 'ledger: devices is not allowed'
+mutation_fail app-security-opt '.services.ledger.security_opt = ["seccomp=unconfined"]' 'ledger: security_opt is not allowed'
+mutation_fail app-pid-host '.services.ledger.pid = "host"' 'ledger: pid is not allowed'
+mutation_fail app-ipc-host '.services.ledger.ipc = "host"' 'ledger: ipc is not allowed'
+mutation_fail app-network-mode-host '.services.ledger.network_mode = "host"' 'ledger: network_mode is not allowed'
+mutation_fail app-userns-mode '.services.ledger.userns_mode = "host"' 'ledger: userns_mode is not allowed'
+mutation_fail migrate-privileged "${M}.privileged = true" 'ledger-migrate: privileged is not allowed'
+mutation_fail app-inject-double-underscore-config-import '.services.ledger.environment.SPRING__CONFIG_IMPORT = "file:/x"' 'ledger: environment defines SPRING_CONFIG_IMPORT'
+mutation_fail app-inject-double-underscore-config-import-2 '.services.ledger.environment.SPRING_CONFIG__IMPORT = "file:/x"' 'ledger: environment defines SPRING_CONFIG_IMPORT'
+mutation_fail app-inject-indexed-autoconfigure-exclude '.services.ledger.environment.SPRING_AUTOCONFIGURE_EXCLUDE_0 = "x"' 'ledger: environment SPRING_AUTOCONFIGURE_EXCLUDE is not allowed'
+mutation_fail app-secrets-dir '.services.ledger.environment.SAIMAN_SECRETS_DIR = "/tmp/x"' 'ledger: environment defines SAIMAN_SECRETS_DIR'
+mutation_fail app-bpl-debug '.services.ledger.environment.BPL_DEBUG_ENABLED = "true"' 'ledger: environment defines BPL_DEBUG_ENABLED'
+mutation_fail app-bpl-jmx '.services.ledger.environment.BPL_JMX_ENABLED = "true"' 'ledger: environment defines BPL_JMX_ENABLED'
+mutation_fail migrate-secrets-dir "${M}.environment.SAIMAN_SECRETS_DIR = \"/tmp/x\"" 'ledger-migrate: environment defines SAIMAN_SECRETS_DIR'
+
 # --- scripts/check-compose-policy.sh: the real compose file must PASS ---
 expect_exit "check-compose-policy: deploy/compose/docker-compose.yml" 0 scripts/check-compose-policy.sh
 
