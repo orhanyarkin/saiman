@@ -19,7 +19,9 @@ variables {
     operator       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     service_ledger = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
   }
-  db_master_password = "unit-test-only"
+  db_master_password     = "unit-test-only"
+  assets_manifest_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  corpus_sha256          = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 }
 
 run "rds_is_private_cheap_and_disposable" {

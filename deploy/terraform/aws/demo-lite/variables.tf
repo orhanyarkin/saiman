@@ -81,8 +81,8 @@ variable "corpus_object_key" {
   default     = "artifacts/corpus/latest.dump"
 
   validation {
-    condition     = can(regex("^artifacts/[^*?]+$", var.corpus_object_key))
-    error_message = "corpus_object_key must be a concrete key under artifacts/."
+    condition     = can(regex("^artifacts/[A-Za-z0-9._/-]+\\.dump$", var.corpus_object_key)) && !can(regex("\\.\\.", var.corpus_object_key))
+    error_message = "corpus_object_key must be a key like artifacts/corpus/latest.dump (letters, digits, . _ / -; ending in .dump; no ..)."
   }
 }
 
@@ -109,7 +109,32 @@ variable "task_memory" {
 }
 
 variable "grafana_otlp_endpoint" {
-  description = "Grafana Cloud OTLP endpoint; null disables the collector export."
+  description = "Grafana Cloud OTLP endpoint (https://<stack>.grafana.net/otlp); null disables the collector export."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.grafana_otlp_endpoint == null || can(regex("^https://[a-z0-9.-]+\\.grafana\\.net/otlp$", var.grafana_otlp_endpoint))
+    error_message = "grafana_otlp_endpoint must be null or match https://<host>.grafana.net/otlp."
+  }
+}
+
+variable "assets_manifest_sha256" {
+  description = "Aggregate sha256 of the runtime asset bundle: the `manifest-sha256` line printed by assets/build-assets.sh. The assets container fails the task on mismatch."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{64}$", var.assets_manifest_sha256))
+    error_message = "assets_manifest_sha256 must be 64 lowercase hex characters."
+  }
+}
+
+variable "corpus_sha256" {
+  description = "sha256 of the corpus dump at corpus_object_key; checked on the fetched file before anything is restored."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{64}$", var.corpus_sha256))
+    error_message = "corpus_sha256 must be 64 lowercase hex characters."
+  }
 }

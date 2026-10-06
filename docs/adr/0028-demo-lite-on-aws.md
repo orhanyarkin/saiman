@@ -7,7 +7,7 @@ The demo runs on AWS for a few hours, is captured as JSON for the static replay,
 
 ## Decision
 - **One Fargate ARM task** (2 vCPU / 8 GB) with every container on localhost, including Kafka and Redis, plus a private RDS `db.t4g.micro`. Service Connect (separate tasks) is the rejected option and becomes the `enterprise` story.
-- **No load balancer.** The human reaches the stack through an SSM port-forward to the `web` container; nothing is exposed on the internet. The public demo is the recorded replay.
+- **No load balancer.** The human reaches the stack through an SSM port-forward (by convention to the `web` container; a port-forward reaches every loopback port, so this is not a control); nothing is exposed on the internet. The public demo is the recorded replay.
 - **Secrets** are SSM SecureString parameters injected as ECS environment variables; Terraform never reads them. The only secret Terraform sees is the RDS master password, as an ephemeral write-only argument.
 - **Images**: public GHCR packages, `sha-<12>` tags, amd64 and arm64 pushed by native runners from `main` and joined by a manifest.
 - **Corpus**: restored from a private dump in the state bucket (public KAP data, private storage), not rebuilt from MKK (5 requests/min).
@@ -16,6 +16,7 @@ The demo runs on AWS for a few hours, is captured as JSON for the static replay,
 - **Teardown check**: `check-demo-down.sh` fails if anything but the bootstrap stack remains.
 
 ## Consequences
+- The single-task design also shares loopback: Redis is password-protected (`redis_password`), but ingest `/internal/**` stays unauthenticated by design until `libs/api-security` covers ingest (documented follow-up), so any container of the task can reach it. Runtime assets and the corpus dump are verified against digests passed to Terraform (`assets_manifest_sha256`, `corpus_sha256`).
 + About $0.55-0.80 per 4-hour session; about $0.003/month idle.
 − Only the human sees the live stack. RDS master is not a superuser, so the role bootstrap needs a non-superuser path, proven first by the human's `demo-up`.
 − GitHub cron can be delayed; the Scheduler backstop covers compute, RDS storage remains until destroy.

@@ -144,14 +144,16 @@ tests/check-foundation.sh      # default tags, single ingress rule, write-only p
 | `kafka`, `redis` | essential | loopback only, health checks |
 | `orchestrator`, `seller-api`, `ledger`, `ingest` | essential | app password only, `SPRING_FLYWAY_ENABLED=false`, 768 MiB hard limit |
 | `otel-collector` | non-essential | `assets/otel/config.yaml`; `grafana.yaml` overlay only when `grafana_otlp_endpoint` is set |
-| `web` | essential | nginx on port 80, the SSM port-forward target |
+| `web` | essential | nginx on port 80, the conventional SSM port-forward target (not a control: a forward reaches every loopback port) |
 | `readiness` | one-shot | runs `/assets/scripts/readiness.sh` (the assets prefix must contain `scripts/readiness.sh`), exits 0 when all four services are UP |
 
 SSM parameters the `demo-up` workflow must create under `/saiman/demo/` (SecureString):
 `pg_master_password`, `pg_<schema>_{owner,app}_password` for `orchestrator`, `ledger`, `seller_api`, `ingest`,
-`x402_buyer_private_key`, `openai_api_key`, `seller_service_token_ledger`, and `grafana_otlp_auth`
+`redis_password` (Redis `--requirepass`; also `SPRING_DATA_REDIS_PASSWORD` on the four apps), `x402_buyer_private_key`, `openai_api_key`, `seller_service_token_ledger`, and `grafana_otlp_auth`
 (only when `grafana_otlp_endpoint` is set). Spring cannot read file secrets on ECS, so the secrets are env vars
 with relaxed-binding names (`X402_CLIENT_PRIVATE_KEY`, `SAIMAN_ROUTER_OPENAI_API_KEY`,
 `SAIMAN_LEDGER_SELLER_SERVICE_TOKEN`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_FLYWAY_PASSWORD`).
+
+Integrity inputs: `assets_manifest_sha256` (the `manifest-sha256` line of `assets/build-assets.sh`) and `corpus_sha256` are required; the `assets` container verifies both before copying or restoring anything. Notes: `sslmode=require` encrypts but does not verify the RDS certificate (`verify-full` is a follow-up); `corpus-restore` is a second holder of `ingest_owner`; kafka and the collector are pinned by `@sha256:` index digest.
 
 Extra offline check: `tests/check-task.sh` (no secret reads, no IAM, buyer key only on the orchestrator).
