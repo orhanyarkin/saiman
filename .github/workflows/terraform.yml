@@ -158,6 +158,7 @@ jobs:
       contents: read
     env:
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+      INFRACOST_ENABLE_CLOUD: "false"
     steps:
       - name: Check whether infracost is configured
         id: enabled

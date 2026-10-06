@@ -9,7 +9,14 @@ mock_provider "aws" {
 }
 
 variables {
-  image_tag                 = "sha-0123456789ab"
+  image_tag = "sha-0123456789ab"
+  image_digests = {
+    "orchestrator" = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    "seller-api"   = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    "ledger"       = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    "ingest"       = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    "evals"        = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  }
   session_id                = "test-session"
   expires_at                = "2026-10-06T18:00:00Z"
   x402_seller_payto_address = "0x1111111111111111111111111111111111111111"
@@ -182,6 +189,22 @@ run "region_is_fixed" {
     condition     = output.ssm_parameter_arn_prefix == "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/demo/*" && aws_subnet.public[0].availability_zone == "eu-central-1a"
     error_message = "everything is pinned to eu-central-1"
   }
+}
+
+run "rejects_image_digest_that_is_a_tag" {
+  command = plan
+
+  variables {
+    image_digests = {
+      "orchestrator" = "sha-0123456789ab"
+      "seller-api"   = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      "ledger"       = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      "ingest"       = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      "evals"        = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  }
+
+  expect_failures = [var.image_digests]
 }
 
 run "rejects_bad_image_tag" {

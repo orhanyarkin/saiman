@@ -111,7 +111,7 @@ locals {
   }
 
   migrate_specs = { for name, a in local.apps : "${name}-migrate" => merge(local.oneshot, {
-    image  = "ghcr.io/orhanyarkin/saiman-${name}:${var.image_tag}"
+    image  = "ghcr.io/orhanyarkin/saiman-${name}@${var.image_digests[name]}"
     memory = 512
     env = {
       SAIMAN_RUN_MODE       = "migrate"
@@ -126,7 +126,7 @@ locals {
   }) }
 
   app_specs = { for name, a in local.apps : name => {
-    image         = "ghcr.io/orhanyarkin/saiman-${name}:${var.image_tag}"
+    image         = "ghcr.io/orhanyarkin/saiman-${name}@${var.image_digests[name]}"
     essential     = true
     memory        = 768 # the Paketo memory calculator sizes the JVM from this limit
     restartPolicy = { enabled = true, restartAttemptPeriod = 60 }

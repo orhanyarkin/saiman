@@ -20,6 +20,7 @@ TF_VAR_expires_at=2099-01-01T00:00:00Z
 TF_VAR_x402_seller_payto_address=0x0000000000000000000000000000000000000001
 TF_VAR_auth_digests={"reader":"${zeros64}","operator":"${zeros64}","service_ledger":"${zeros64}"}
 TF_VAR_state_bucket_name=$1
+TF_VAR_image_digests={"orchestrator":"sha256:${zeros64}","seller-api":"sha256:${zeros64}","ledger":"sha256:${zeros64}","ingest":"sha256:${zeros64}","evals":"sha256:${zeros64}"}
 TF_VAR_assets_manifest_sha256=${zeros64}
 TF_VAR_corpus_sha256=${zeros64}
 EOF

@@ -92,6 +92,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Resolve inputs (image tag, session id, expiry)
         env:
@@ -102,9 +103,12 @@ jobs:
           sha="${INPUT_SHA:-$GITHUB_SHA}"
           [[ "$sha" =~ ^[0-9a-f]{12,40}$ ]] || { echo "::error::image_sha must be 12-40 lowercase hex characters"; exit 1; }
           [[ "$INPUT_TTL" =~ ^[1-8]$ ]] || { echo "::error::ttl_hours must be 1..8"; exit 1; }
+          # Only code that reached main may run with the demo secrets (audit L1).
+          full="$(git rev-parse --verify --quiet "${sha}^{commit}")" || { echo "::error::image_sha ${sha} is not a commit of this repository"; exit 1; }
+          git merge-base --is-ancestor "$full" origin/main || { echo "::error::image_sha ${sha} is not an ancestor of origin/main"; exit 1; }
           expires_at="$(date -u -d "+${INPUT_TTL} hours" +%Y-%m-%dT%H:%M:%SZ)"
           {
-            echo "IMAGE_TAG=sha-${sha:0:12}"
+            echo "IMAGE_TAG=sha-${full:0:12}"
             echo "SESSION_ID=gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
             echo "EXPIRES_AT=${expires_at}"
             echo "SECRETS_DIR=${RUNNER_TEMP}/secrets"
@@ -113,17 +117,23 @@ jobs:
       - name: Verify the GHCR images exist for linux/arm64 and linux/amd64
         run: |
           set -euo pipefail
+          digests='{}'
           for svc in orchestrator seller-api ledger ingest evals; do
             ref="ghcr.io/orhanyarkin/saiman-${svc}:${IMAGE_TAG}"
             out="$(docker buildx imagetools inspect "$ref")" || { echo "::error::cannot inspect ${ref} (public GHCR package? image published from main?)"; exit 1; }
+            # The tag is mutable; Terraform gets the index digest and the task pulls by digest.
+            digest="$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}')"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::could not resolve a digest for ${ref}"; exit 1; }
+            digests="$(jq -c --arg k "$svc" --arg d "$digest" '. + {($k): $d}' <<<"$digests")"
             for platform in linux/amd64 linux/arm64; do
               if ! grep -q "Platform: *${platform}\$" <<<"$out"; then
                 echo "::error::${ref} is missing ${platform}"
                 exit 1
               fi
             done
-            echo "ok ${ref}"
+            echo "ok ${ref} ${digest}"
           done
+          echo "IMAGE_DIGESTS=${digests}" >>"$GITHUB_ENV"
 
       - name: Download the web dist built by the unprivileged web job and verify it
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -225,6 +235,7 @@ jobs:
             '{reader:$r, operator:$o, service_ledger:$s}')"
           export TF_VAR_auth_digests
           export TF_VAR_image_tag="$IMAGE_TAG"
+          export TF_VAR_image_digests="$IMAGE_DIGESTS"
           export TF_VAR_session_id="$SESSION_ID"
           export TF_VAR_expires_at="$EXPIRES_AT"
           export TF_VAR_x402_seller_payto_address="$PAYTO"

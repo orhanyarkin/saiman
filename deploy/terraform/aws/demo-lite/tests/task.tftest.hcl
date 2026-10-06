@@ -11,7 +11,14 @@ mock_provider "aws" {
 }
 
 variables {
-  image_tag                 = "sha-0123456789ab"
+  image_tag = "sha-0123456789ab"
+  image_digests = {
+    "orchestrator" = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    "seller-api"   = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    "ledger"       = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    "ingest"       = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    "evals"        = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  }
   session_id                = "test-session"
   expires_at                = "2026-10-06T18:00:00Z"
   x402_seller_payto_address = "0x1111111111111111111111111111111111111111"
@@ -406,9 +413,9 @@ run "ordering_and_images" {
   assert {
     condition = alltrue([
       for c in jsondecode(aws_ecs_task_definition.main.container_definitions) :
-      startswith(c.image, "ghcr.io/orhanyarkin/saiman-") ? endswith(c.image, ":sha-0123456789ab") : startswith(c.image, "public.ecr.aws/") ? can(regex(":[0-9][^:@]*$", c.image)) : can(regex("^[a-z0-9./-]+:[0-9][0-9.]*@sha256:[0-9a-f]{64}$", c.image))
+      startswith(c.image, "ghcr.io/orhanyarkin/saiman-") ? can(regex("^ghcr.io/orhanyarkin/saiman-[a-z-]+@sha256:[0-9a-f]{64}$", c.image)) : startswith(c.image, "public.ecr.aws/") ? can(regex(":[0-9][^:@]*$", c.image)) : can(regex("^[a-z0-9./-]+:[0-9][0-9.]*@sha256:[0-9a-f]{64}$", c.image))
     ])
-    error_message = "service images use the sha- tag, mirror images a version tag, Docker Hub images tag@sha256 digests"
+    error_message = "service images are pinned by @sha256 digest, mirror images a version tag, Docker Hub images tag@sha256 digests"
   }
 
   assert {
