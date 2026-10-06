@@ -6,6 +6,7 @@ plugins {
 
 dependencies {
     implementation(project(":libs:shared"))
+    implementation(project(":libs:db-migrate")) // `SAIMAN_RUN_MODE=migrate` one-shot (ADR-0027)
     implementation(project(":libs:eventing")) // InboxGuard + Modulith registry defaults (ADR-0016)
     implementation(project(":libs:evm-rpc")) // Base Sepolia reads for reconciliation (ADR-0018)
     implementation(project(":libs:api-security")) // bearer-token authentication of /api/** (ADR-0023)
