@@ -36,7 +36,7 @@ spring:
     create-schemas: true
     placeholders:
       # Runtime DB role that V3__grants.sql grants DML to (ADR-0024); compose uses the same name. Flyway itself runs
-      # as seller_api_owner (SPRING_FLYWAY_USER in compose).
+      # as seller_api_owner in the seller-api-migrate one-shot (ADR-0027).
       app_role: seller_api_app
   # Transactional outbox (ADR-0016): libs/eventing sets the registry defaults; V1 owns the table.
   modulith:
