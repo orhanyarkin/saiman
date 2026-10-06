@@ -41,8 +41,9 @@ done
 export AWS_PAGER=""
 now_epoch="$(date -u -d "${now:-now}" +%s)"
 
-found="$(aws --region "${region}" --output json ssm describe-parameters \
-  --parameter-filters "Key=Name,Option=Equals,Values=/saiman/demo/expires-at" | jq -r '[.Parameters[]?.Name] | length')"
+described="$(aws --region "${region}" --output json ssm describe-parameters \
+  --parameter-filters "Key=Name,Option=Equals,Values=/saiman/demo/expires-at")"
+found="$(jq -r '[.Parameters[]?.Name] | length' <<<"${described}")"
 if [[ "${found}" -eq 0 ]]; then
   printf 'exists=false\nexpires_at=\nexpired=false\n'
   exit 0
@@ -59,5 +60,14 @@ if [[ "${expires_at}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z
   fi
 else
   expires_at=""
+fi
+# Age cap (L2): the longest demo is 8 h (+30 min grace). A parameter last modified longer ago than that is
+# expired whatever its tag says (a tag set to 2099 by someone with write access cannot keep a demo alive).
+modified="$(jq -r '.Parameters[0].LastModifiedDate // empty' <<<"${described}")"
+if [[ -n "${modified}" ]]; then
+  if [[ "${modified}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then mod_epoch="${modified%.*}"; else mod_epoch="$(date -u -d "${modified}" +%s 2>/dev/null || echo "")"; fi
+  if [[ -n "${mod_epoch}" && "${now_epoch}" -gt $((mod_epoch + 30600)) ]]; then
+    expired=true
+  fi
 fi
 printf 'exists=true\nexpires_at=%s\nexpired=%s\n' "${expires_at}" "${expired}"
