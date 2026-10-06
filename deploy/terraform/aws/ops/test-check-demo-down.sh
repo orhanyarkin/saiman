@@ -122,7 +122,7 @@ expect_leftover() { # <description> <fixture key> <json> <expected substring>
 }
 expect_leftover "tagged resource" resourcegroupstaggingapi_get-resources '{"ResourceTagMappingList":[{"ResourceARN":"arn:aws:ecs:eu-central-1:1:cluster/x"}]}' "LEFTOVER    tagged resources"
 expect_leftover "ecs cluster" ecs_list-clusters '{"clusterArns":["arn:aws:ecs:eu-central-1:1:cluster/saiman-demo"]}' "ecs cluster: arn:aws:ecs:eu-central-1:1:cluster/saiman-demo"
-expect_leftover "ecs task definition" ecs_list-task-definitions '{"taskDefinitionArns":["arn:aws:ecs:eu-central-1:1:task-definition/saiman-demo-lite:3"]}' "ecs task definitions (ACTIVE)"
+expect_leftover "ecs task definition" ecs_list-task-definitions '{"taskDefinitionArns":["arn:aws:ecs:eu-central-1:1:task-definition/saiman-demo-lite:3"]}' "ecs task definitions (ACTIVE, any family)"
 expect_leftover "rds instance" rds_describe-db-instances '{"DBInstances":[{"DBInstanceIdentifier":"saiman-demo"},{"DBInstanceIdentifier":"other"}]}' "rds instances: saiman-demo"
 expect_leftover "rds snapshot (automated)" rds_describe-db-snapshots '{"DBSnapshots":[{"DBInstanceIdentifier":"saiman-demo","DBSnapshotIdentifier":"rds:saiman-demo-2026-10-06"}]}' "rds snapshots: rds:saiman-demo-2026-10-06"
 expect_leftover "rds subnet group" rds_describe-db-subnet-groups '{"DBSubnetGroups":[{"DBSubnetGroupName":"saiman-demo-x"}]}' "rds subnet groups: saiman-demo-x"
@@ -144,6 +144,15 @@ expect_leftover "secrets manager secret" secretsmanager_list-secrets '{"SecretLi
 expect_leftover "load balancer" elbv2_describe-load-balancers '{"LoadBalancers":[{"LoadBalancerArn":"arn:aws:elasticloadbalancing:x"}]}' "load balancers (elbv2)"
 expect_leftover "ecr repository" ecr_describe-repositories '{"repositories":[{"repositoryName":"saiman"}]}' "ecr repositories: saiman"
 expect_leftover "cloud map namespace" servicediscovery_list-namespaces '{"Namespaces":[{"Id":"ns-1"}]}' "cloud map namespaces: ns-1"
+
+expect_leftover "ACTIVE task definition of a foreign family" ecs_list-task-definitions '{"taskDefinitionArns":["arn:aws:ecs:eu-central-1:1:task-definition/other-app:7"]}' "other-app:7"
+expect_leftover "ECS log group" logs_describe-log-groups '{"logGroups":[{"logGroupName":"/ecs/saiman-demo-x"}]}' "/ecs/saiman-demo-x"
+reset
+echo 'this is not json' >"${fx}/rds_describe-db-instances.json"
+run_case "an unparseable response is exit 2, never CLEAN" 2 "unparseable response" "${common[@]}"
+reset
+echo 'this is not json' >"${fx}/iam_list-roles.json"
+run_case "an unparseable IAM response is never clean" 1 "unparseable response" "${common[@]}"
 
 # --- UNVERIFIED handling: strict vs allow-unverified ----------------------------------------------------
 reset

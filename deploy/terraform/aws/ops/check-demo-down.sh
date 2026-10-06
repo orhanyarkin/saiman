@@ -119,11 +119,16 @@ fetch() {
 # report <label> <jq filter that prints one id per leftover>
 report() {
   local label="$1" filter="$2" line found=0
+  # A jq failure (unparseable response) must never read as CLEAN.
+  if ! jq -r "${filter}" "${out}" >"${work}/lines.txt" 2>/dev/null; then
+    errors+=("${label} (unparseable response)")
+    return 0
+  fi
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
     leftovers+=("${label}: ${line}")
     found=1
-  done < <(jq -r "${filter}" "${out}")
+  done <"${work}/lines.txt"
   if [[ "${found}" -eq 0 ]]; then
     clean+=("${label}")
   fi
@@ -149,7 +154,7 @@ check "tagged resources (saiman:stack=demo-lite)" '.ResourceTagMappingList[]?.Re
 # --- ECS ------------------------------------------------------------------------------------------
 if fetch "ecs clusters" ecs list-clusters; then
   cluster_arns="${work}/clusters.txt"
-  jq -r '.clusterArns[]? | select(test("/saiman-demo"))' "${out}" >"${cluster_arns}"
+  jq -r '.clusterArns[]? | select(test("/saiman-demo"))' "${out}" >"${cluster_arns}" || errors+=("ecs clusters (unparseable response)")
   if [[ -s "${cluster_arns}" ]]; then
     while IFS= read -r arn; do
       leftovers+=("ecs cluster: ${arn}")
@@ -164,8 +169,9 @@ if fetch "ecs clusters" ecs list-clusters; then
   fi
 fi
 # INACTIVE task definitions are fine (they are history and cost nothing); ACTIVE ones are leftovers.
-check "ecs task definitions (ACTIVE)" '.taskDefinitionArns[]?' \
-  ecs list-task-definitions --family-prefix "${NAME_PREFIX}" --status ACTIVE
+# Every family, not only saiman-demo*: an ACTIVE task definition of any name is not part of the bootstrap stack.
+check "ecs task definitions (ACTIVE, any family)" '.taskDefinitionArns[]?' \
+  ecs list-task-definitions --status ACTIVE
 
 # --- RDS ------------------------------------------------------------------------------------------
 check "rds instances" "$(prefix_filter '.DBInstances[]?.DBInstanceIdentifier')" rds describe-db-instances
@@ -190,6 +196,7 @@ ssm_filter='.Parameters[]?.Name'
 if [[ "${ignore_expiry}" -eq 1 ]]; then
   ssm_filter='.Parameters[]?.Name | select(. != "/saiman/demo/expires-at")'
 fi
+check "log groups (/ecs/saiman-demo*)" '.logGroups[]?.logGroupName' logs describe-log-groups --log-group-name-prefix /ecs/saiman-demo
 check "ssm parameters (/saiman/demo/)" "${ssm_filter}" \
   ssm describe-parameters --parameter-filters "Key=Name,Option=BeginsWith,Values=/saiman/demo/"
 check "scheduler schedules" "$(prefix_filter '.Schedules[]?.Name')" scheduler list-schedules
@@ -210,8 +217,13 @@ if fetch "iam roles" iam list-roles; then
     [[ -n "${line}" ]] || continue
     leftovers+=("iam role not in the bootstrap allowlist: ${line}")
     roles_found=1
-  done < <(jq -r '.Roles[]? | select((.Path | startswith("/saiman/")) or (.RoleName | startswith("saiman"))) | "\(.Path)|\(.RoleName)"' "${out}" |
-    grep -vxFf "${allowed_roles}" || true)
+  done < <(
+    if jq -r '.Roles[]? | select((.Path | startswith("/saiman/")) or (.RoleName | startswith("saiman"))) | "\(.Path)|\(.RoleName)"' "${out}" >"${work}/roles.txt" 2>/dev/null; then
+      grep -vxFf "${allowed_roles}" "${work}/roles.txt" || true
+    else
+      echo "unparseable response"
+    fi
+  )
   [[ "${roles_found}" -eq 1 ]] || clean+=("iam roles (only the bootstrap allowlist)")
 fi
 if fetch "iam policies" iam list-policies --scope Local --path-prefix /saiman/; then
@@ -222,7 +234,13 @@ if fetch "iam policies" iam list-policies --scope Local --path-prefix /saiman/; 
     [[ -n "${line}" ]] || continue
     leftovers+=("iam policy not in the bootstrap allowlist: ${line}")
     policies_found=1
-  done < <(jq -r '.Policies[]? | "\(.Path)|\(.PolicyName)"' "${out}" | grep -vxFf "${allowed_policies}" || true)
+  done < <(
+    if jq -r '.Policies[]? | "\(.Path)|\(.PolicyName)"' "${out}" >"${work}/policies.txt" 2>/dev/null; then
+      grep -vxFf "${allowed_policies}" "${work}/policies.txt" || true
+    else
+      echo "unparseable response"
+    fi
+  )
   [[ "${policies_found}" -eq 1 ]] || clean+=("iam policies (only the bootstrap allowlist)")
 fi
 

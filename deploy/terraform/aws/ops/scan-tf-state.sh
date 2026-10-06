@@ -26,9 +26,11 @@ checked=0
 for f in "${dir}"/*; do
   [[ -f "${f}" && -s "${f}" ]] || continue
   tr -d '\r' <"${f}" | awk 'length($0) >= 16' >"${pattern_file}"
+  # A 0x-prefixed key is also searched without the prefix (state may hold either spelling).
+  sed -nE "s/^0[xX]([0-9a-fA-F]{64})$/\1/p" "${pattern_file}" >>"${pattern_file}.x" && cat "${pattern_file}.x" >>"${pattern_file}" && rm -f "${pattern_file}.x"
   [[ -s "${pattern_file}" ]] || continue
   checked=$((checked + 1))
-  if grep -qFf "${pattern_file}" "${json}"; then
+  if grep -qiFf "${pattern_file}" "${json}"; then
     echo "scan-tf-state: FAIL: the Terraform output contains the value of secret '$(basename "${f}")'" >&2
     rc=1
   fi
