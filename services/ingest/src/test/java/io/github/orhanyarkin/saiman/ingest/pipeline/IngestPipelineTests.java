@@ -221,6 +221,9 @@ class IngestPipelineTests extends IngestIntegrationTests {
         await().atMost(Duration.ofSeconds(20))
                 .untilAsserted(() -> assertThat(status(1_101_500)).isEqualTo("INDEXED"));
         assertThat(count("dead_letter")).isZero();
+        // The background run keeps scanning the remaining tickers after the document is indexed. Wait for it to end
+        // (it holds the advisory lock for the whole run), or it leaks lock, rows and MKK requests into the next test.
+        await().atMost(Duration.ofSeconds(30)).until(() -> !job.isRunning());
     }
 
     @Test
