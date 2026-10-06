@@ -210,11 +210,15 @@ jobs:
         run: |
           set -euo pipefail
           sha="sha-${GITHUB_SHA::12}"
+          digests='{}'
           for svc in orchestrator seller-api ledger ingest evals; do
             repo="ghcr.io/orhanyarkin/saiman-${svc}"
             docker buildx imagetools create -t "${repo}:${sha}" "${repo}:${sha}-amd64" "${repo}:${sha}-arm64"
             out="$(docker buildx imagetools inspect "${repo}:${sha}")"
             printf '%s\n' "$out"
+            # Provenance for demo-up (audit M1): the index digest this run created.
+            digest="$(docker buildx imagetools inspect "${repo}:${sha}" --format '{{.Manifest.Digest}}')"
+            digests="$(jq -c --arg k "$svc" --arg d "$digest" '. + {($k): $d}' <<<"$digests")"
             for platform in linux/amd64 linux/arm64; do
               if ! grep -q "Platform: *${platform}\$" <<<"$out"; then
                 echo "::error::${repo}:${sha} is missing ${platform}"
@@ -222,3 +226,11 @@ jobs:
               fi
             done
           done
+          # digests.json: what demo-up must find again on GHCR (service -> index digest, plus the commit).
+          jq -n --arg commit "$GITHUB_SHA" --argjson digests "$digests" '{commit: $commit, digests: $digests}' >"${RUNNER_TEMP}/digests.json"
+      - name: Upload image digests (provenance for demo-up)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-digests
+          path: ${{ runner.temp }}/digests.json
+          retention-days: 30

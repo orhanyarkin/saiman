@@ -84,6 +84,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      actions: read # find the main CI run and download its image-digests artifact
     env:
       AWS_REGION: eu-central-1
       TF_IN_AUTOMATION: "1"
@@ -108,30 +109,30 @@ jobs:
           git merge-base --is-ancestor "$full" origin/main || { echo "::error::image_sha ${sha} is not an ancestor of origin/main"; exit 1; }
           expires_at="$(date -u -d "+${INPUT_TTL} hours" +%Y-%m-%dT%H:%M:%SZ)"
           {
+            echo "FULL_SHA=${full}"
             echo "IMAGE_TAG=sha-${full:0:12}"
             echo "SESSION_ID=gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
             echo "EXPIRES_AT=${expires_at}"
             echo "SECRETS_DIR=${RUNNER_TEMP}/secrets"
           } >>"$GITHUB_ENV"
 
-      - name: Verify the GHCR images exist for linux/arm64 and linux/amd64
+      - name: Verify image provenance (main CI digests) and both platforms
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          digests='{}'
+          # The tag is mutable: the digests must equal what the main push run of ci.yml recorded (audit M1).
+          deploy/terraform/aws/ops/verify-image-provenance.sh "$FULL_SHA" "${RUNNER_TEMP}/image-digests.json"
+          digests="$(cat "${RUNNER_TEMP}/image-digests.json")"
           for svc in orchestrator seller-api ledger ingest evals; do
-            ref="ghcr.io/orhanyarkin/saiman-${svc}:${IMAGE_TAG}"
-            out="$(docker buildx imagetools inspect "$ref")" || { echo "::error::cannot inspect ${ref} (public GHCR package? image published from main?)"; exit 1; }
-            # The tag is mutable; Terraform gets the index digest and the task pulls by digest.
-            digest="$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}')"
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::could not resolve a digest for ${ref}"; exit 1; }
-            digests="$(jq -c --arg k "$svc" --arg d "$digest" '. + {($k): $d}' <<<"$digests")"
+            ref="ghcr.io/orhanyarkin/saiman-${svc}@$(jq -r --arg s "$svc" '.[$s]' <<<"$digests")"
+            out="$(docker buildx imagetools inspect "$ref")" || { echo "::error::cannot inspect ${ref}"; exit 1; }
             for platform in linux/amd64 linux/arm64; do
               if ! grep -q "Platform: *${platform}\$" <<<"$out"; then
                 echo "::error::${ref} is missing ${platform}"
                 exit 1
               fi
             done
-            echo "ok ${ref} ${digest}"
           done
           echo "IMAGE_DIGESTS=${digests}" >>"$GITHUB_ENV"
 
