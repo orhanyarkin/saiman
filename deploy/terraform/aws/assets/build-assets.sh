@@ -14,6 +14,7 @@
 #   otel/config.yaml            collector config (OTLP on loopback, debug exporter)
 #   otel/grafana.yaml           optional Grafana Cloud overlay; the task passes it only when GRAFANA_* is set
 #   postgres/bootstrap-roles.sh|sql, postgres/corpus-restore.sh   copied from deploy/compose/postgres
+#   scripts/readiness.sh                                           copied from this directory (busybox readiness container)
 #
 # Deterministic: sorted traversal, modes 0644/0755, mtime 0, no timestamps in content. The manifest
 # (sha256 per file, sorted) is printed on stdout and is the same for the same inputs. No secrets are read.
@@ -68,7 +69,7 @@ if [[ -z "${web_dist}" ]]; then
 fi
 [[ -f "${web_dist}/index.html" ]] || die "${web_dist}/index.html not found: not a built web dist"
 
-mkdir -p "${out}/web/dist" "${out}/nginx" "${out}/otel" "${out}/postgres"
+mkdir -p "${out}/web/dist" "${out}/nginx" "${out}/otel" "${out}/postgres" "${out}/scripts"
 out="$(cd "${out}" && pwd)"
 
 # --- web/dist: copy file by file in sorted order, normalised modes ----------------------------------
@@ -101,6 +102,7 @@ install -m 0644 "${here}/templates/otel-grafana.yaml" "${out}/otel/grafana.yaml"
 install -m 0755 "${repo}/deploy/compose/postgres/bootstrap-roles.sh" "${out}/postgres/bootstrap-roles.sh"
 install -m 0644 "${repo}/deploy/compose/postgres/bootstrap-roles.sql" "${out}/postgres/bootstrap-roles.sql"
 install -m 0755 "${repo}/deploy/compose/postgres/corpus-restore.sh" "${out}/postgres/corpus-restore.sh"
+install -m 0755 "${here}/readiness.sh" "${out}/scripts/readiness.sh"
 
 # --- normalise and print the manifest ------------------------------------------------------------
 find "${out}" -exec touch -h -d @0 {} +
