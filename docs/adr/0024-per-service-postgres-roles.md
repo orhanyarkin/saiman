@@ -15,7 +15,7 @@ Every service connects as the `saiman` superuser. A bug or injection in any serv
 
 ## Consequences
 + SQL injection through a service reaches only that schema with DML; insert-only tables (ledger postings, journal entries, credit notes, findings) can't be rewritten, and the orchestrator's counters are monotonic and can't be deleted.
-− **Residual closed by ADR-0027:** the `<svc>_owner` password used to be mounted in each running service; migrations now run in a per-service one-shot and the service holds only `<svc>_app`.
+− **Residual closed by ADR-0027:** the `<svc>_owner` password used to be mounted in each running service (Flyway ran at startup). With the compose wiring landed (`<svc>-migrate` one-shots, enforced by `scripts/check-compose-policy.sh`), the owner secret is mounted only in the one-shot and the running service holds only `<svc>_app`.
 − The superuser password is a generated secret (`secrets/pg_superuser_password`) held by postgres and `db-init`; `db-init` rotates a pre-M6 `saiman/saiman` password once.
 − More secrets and a bootstrap step; mistakes show up as permission errors (tests run as the app role to catch them).
 − Same DB instance: a superuser/host compromise is out of scope.

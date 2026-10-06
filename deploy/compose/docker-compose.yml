@@ -20,8 +20,8 @@ x-app-common: &app-common
   # read with `spring.config.import=optional:configtree:/run/secrets/` — not before.
   environment: &app-common-env
     # Each service sets SPRING_DATASOURCE_USERNAME=<svc>_app (runtime, DML only) and
-    # SPRING_FLYWAY_USER=<svc>_owner (migrations only); the passwords arrive as file secrets
-    # (spring.datasource.password / spring.flyway.password, ADR-0024). The `saiman` superuser
+    # SPRING_FLYWAY_ENABLED=false; migrations run as <svc>_owner in <svc>-migrate (ADR-0027).
+    # The app password arrives as a file secret (spring.datasource.password, ADR-0024). The `saiman` superuser
     # belongs to db-init and psql only; scripts/check-compose-policy.sh enforces this.
     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/saiman
     SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -183,6 +183,93 @@ services:
     # network, avoiding a port clash with the collector's own host-mapped 4317/4318.
     # No healthcheck: distroless image, no shell (see otel-collector above).
 
+  # Per-service Flyway one-shots (ADR-0027). Each runs the service's own image with
+  # SAIMAN_RUN_MODE=migrate as `<schema>_owner` and exits; the service waits for it with
+  # service_completed_successfully, so a failed migration keeps the service (and `make up`)
+  # from starting. The owner password is mounted only here (configtree under /run/secrets,
+  # file mode 0644 inside the 0700 secrets/ dir); the server holds `<schema>_app` only.
+  # Deliberately not <<: *app-common: no restart-on-failure, no OTel/Kafka/Redis, no ports.
+  # scripts/check-compose-policy.sh pins the whole shape. `make db-migrate` runs them by hand.
+  orchestrator-migrate:
+    image: ghcr.io/orhanyarkin/saiman-orchestrator:dev
+    profiles: ["apps"]
+    pull_policy: never
+    restart: "no"
+    mem_limit: 512m
+    environment:
+      SAIMAN_RUN_MODE: migrate
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/saiman
+      SPRING_FLYWAY_USER: orchestrator_owner
+      BPL_JVM_THREAD_COUNT: "20"
+    secrets:
+      - source: pg_orchestrator_owner_password
+        target: spring.flyway.password
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  seller-api-migrate:
+    image: ghcr.io/orhanyarkin/saiman-seller-api:dev
+    profiles: ["apps"]
+    pull_policy: never
+    restart: "no"
+    mem_limit: 512m
+    environment:
+      SAIMAN_RUN_MODE: migrate
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/saiman
+      SPRING_FLYWAY_USER: seller_api_owner
+      BPL_JVM_THREAD_COUNT: "20"
+    secrets:
+      - source: pg_seller_api_owner_password
+        target: spring.flyway.password
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  ledger-migrate:
+    image: ghcr.io/orhanyarkin/saiman-ledger:dev
+    profiles: ["apps"]
+    pull_policy: never
+    restart: "no"
+    mem_limit: 512m
+    environment:
+      SAIMAN_RUN_MODE: migrate
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/saiman
+      SPRING_FLYWAY_USER: ledger_owner
+      BPL_JVM_THREAD_COUNT: "20"
+    secrets:
+      - source: pg_ledger_owner_password
+        target: spring.flyway.password
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  ingest-migrate:
+    image: ghcr.io/orhanyarkin/saiman-ingest:dev
+    profiles: ["apps"]
+    pull_policy: never
+    restart: "no"
+    mem_limit: 512m
+    environment:
+      SAIMAN_RUN_MODE: migrate
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/saiman
+      SPRING_FLYWAY_USER: ingest_owner
+      BPL_JVM_THREAD_COUNT: "20"
+    secrets:
+      - source: pg_ingest_owner_password
+        target: spring.flyway.password
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
   orchestrator:
     <<: *app-common
     image: ghcr.io/orhanyarkin/saiman-orchestrator:dev
@@ -196,14 +283,13 @@ services:
       - source: x402_buyer_private_key
         target: x402.client.private-key
       - openai_api_key
-      - source: pg_orchestrator_owner_password
-        target: spring.flyway.password
       - source: pg_orchestrator_app_password
         target: spring.datasource.password
     environment:
       <<: *app-common-env
       SPRING_DATASOURCE_USERNAME: orchestrator_app
-      SPRING_FLYWAY_USER: orchestrator_owner
+      # Migrations run in orchestrator-migrate (ADR-0027); the server holds no owner credential.
+      SPRING_FLYWAY_ENABLED: "false"
       # SHA-256 digests (not secrets) of the human role tokens, computed from secrets/api_*_token by
       # scripts/with-auth-digests.sh (`make up`). The raw tokens are never mounted (ADR-0023).
       SAIMAN_AUTH_READER_TOKEN_SHA256: ${SAIMAN_AUTH_READER_TOKEN_SHA256:-}
@@ -232,6 +318,8 @@ services:
       SAIMAN_CHAIN_ALLOWED_HOSTS: sepolia.base.org
     depends_on:
       <<: *app-common-depends-on
+      orchestrator-migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -250,14 +338,13 @@ services:
       - "127.0.0.1:8081:8081"
     secrets:
       - openai_api_key
-      - source: pg_seller_api_owner_password
-        target: spring.flyway.password
       - source: pg_seller_api_app_password
         target: spring.datasource.password
     environment:
       <<: *app-common-env
       SPRING_DATASOURCE_USERNAME: seller_api_app
-      SPRING_FLYWAY_USER: seller_api_owner
+      # Migrations run in seller-api-migrate (ADR-0027); the server holds no owner credential.
+      SPRING_FLYWAY_ENABLED: "false"
       # Digests of the per-caller service tokens that may use /internal/** (ADR-0023).
       SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256: ${SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256:-}
       SAIMAN_AUTH_SERVICE_TOKENS_EVALS_SHA256: ${SAIMAN_AUTH_SERVICE_TOKENS_EVALS_SHA256:-}
@@ -279,6 +366,8 @@ services:
       SELLER_INTERNAL_ALLOWED_HOSTS: seller-api,seller-api:8081
     depends_on:
       <<: *app-common-depends-on
+      seller-api-migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       # M4: seller-api records settlements in its own schema (seller_api) and publishes payment events to Kafka.
@@ -296,8 +385,6 @@ services:
       # Bearer-token authenticated since M6 (ADR-0023); still bound to loopback.
       - "127.0.0.1:8082:8082"
     secrets:
-      - source: pg_ledger_owner_password
-        target: spring.flyway.password
       - source: pg_ledger_app_password
         target: spring.datasource.password
       # The ledger's own service token for seller-api's /internal/credit-notes (ADR-0021, ADR-0023).
@@ -306,7 +393,8 @@ services:
     environment:
       <<: *app-common-env
       SPRING_DATASOURCE_USERNAME: ledger_app
-      SPRING_FLYWAY_USER: ledger_owner
+      # Migrations run in ledger-migrate (ADR-0027); the server holds no owner credential.
+      SPRING_FLYWAY_ENABLED: "false"
       SAIMAN_AUTH_READER_TOKEN_SHA256: ${SAIMAN_AUTH_READER_TOKEN_SHA256:-}
       SAIMAN_AUTH_OPERATOR_TOKEN_SHA256: ${SAIMAN_AUTH_OPERATOR_TOKEN_SHA256:-}
       # M4 (ADR-0018): chain reads go only to the public Base Sepolia RPC (not a secret; testnet
@@ -324,6 +412,8 @@ services:
     # compose does not pre-create them. The ledger consumes payments.* and publishes ledger.*.
     depends_on:
       <<: *app-common-depends-on
+      ledger-migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       kafka:
@@ -342,16 +432,17 @@ services:
     secrets:
       - mkk_credentials
       - openai_api_key
-      - source: pg_ingest_owner_password
-        target: spring.flyway.password
       - source: pg_ingest_app_password
         target: spring.datasource.password
     environment:
       <<: *app-common-env
       SPRING_DATASOURCE_USERNAME: ingest_app
-      SPRING_FLYWAY_USER: ingest_owner
+      # Migrations run in ingest-migrate (ADR-0027); the server holds no owner credential.
+      SPRING_FLYWAY_ENABLED: "false"
     depends_on:
       <<: *app-common-depends-on
+      ingest-migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

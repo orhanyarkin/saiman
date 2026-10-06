@@ -1,0 +1,300 @@
+# Fixture for scripts/test-check-compose-policy.sh: must FAIL.
+# JDK_JAVA_OPTIONS could redirect or reconfigure Flyway or the JVM.
+# expect: ledger-migrate: environment JDK_JAVA_OPTIONS is not allowed
+{
+  "name": "cptest-m6b",
+  "services": {
+    "postgres": {
+      "image": "busybox:1",
+      "environment": {
+        "POSTGRES_PASSWORD_FILE": "/run/secrets/pg_superuser_password"
+      },
+      "secrets": [
+        "pg_superuser_password"
+      ]
+    },
+    "db-init": {
+      "image": "busybox:1",
+      "secrets": [
+        "pg_superuser_password",
+        "pg_orchestrator_owner_password",
+        "pg_orchestrator_app_password",
+        "pg_seller_api_owner_password",
+        "pg_seller_api_app_password",
+        "pg_ledger_owner_password",
+        "pg_ledger_app_password",
+        "pg_ingest_owner_password",
+        "pg_ingest_app_password"
+      ],
+      "volumes": [
+        "../../deploy/compose/postgres:/bootstrap:ro"
+      ]
+    },
+    "orchestrator": {
+      "image": "ghcr.io/orhanyarkin/saiman-orchestrator:dev",
+      "profiles": [
+        "apps"
+      ],
+      "pull_policy": "never",
+      "secrets": [
+        {
+          "source": "pg_orchestrator_app_password",
+          "target": "spring.datasource.password"
+        }
+      ],
+      "environment": {
+        "SPRING_DATASOURCE_USERNAME": "orchestrator_app",
+        "SPRING_FLYWAY_ENABLED": "false",
+        "SPRING_DATASOURCE_URL": "jdbc:postgresql://postgres:5432/saiman",
+        "SAIMAN_AUTH_READER_TOKEN_SHA256": "${SAIMAN_AUTH_READER_TOKEN_SHA256:-}",
+        "SAIMAN_AUTH_OPERATOR_TOKEN_SHA256": "${SAIMAN_AUTH_OPERATOR_TOKEN_SHA256:-}"
+      },
+      "depends_on": {
+        "orchestrator-migrate": {
+          "condition": "service_completed_successfully"
+        }
+      }
+    },
+    "orchestrator-migrate": {
+      "image": "ghcr.io/orhanyarkin/saiman-orchestrator:dev",
+      "profiles": [
+        "apps"
+      ],
+      "pull_policy": "never",
+      "restart": "no",
+      "environment": {
+        "SAIMAN_RUN_MODE": "migrate",
+        "SPRING_DATASOURCE_URL": "jdbc:postgresql://postgres:5432/saiman",
+        "SPRING_FLYWAY_USER": "orchestrator_owner",
+        "BPL_JVM_THREAD_COUNT": "20"
+      },
+      "secrets": [
+        {
+          "source": "pg_orchestrator_owner_password",
+          "target": "spring.flyway.password"
+        }
+      ],
+      "depends_on": {
+        "db-init": {
+          "condition": "service_completed_successfully"
+        },
+        "postgres": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "seller-api": {
+      "image": "ghcr.io/orhanyarkin/saiman-seller-api:dev",
+      "profiles": [
+        "apps"
+      ],
+      "pull_policy": "never",
+      "secrets": [
+        {
+          "source": "pg_seller_api_app_password",
+          "target": "spring.datasource.password"
+        }
+      ],
+      "environment": {
+        "SPRING_DATASOURCE_USERNAME": "seller_api_app",
+        "SPRING_FLYWAY_ENABLED": "false",
+        "SPRING_DATASOURCE_URL": "jdbc:postgresql://postgres:5432/saiman",
+        "SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256": "${SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256:-}",
+        "SAIMAN_AUTH_SERVICE_TOKENS_EVALS_SHA256": "${SAIMAN_AUTH_SERVICE_TOKENS_EVALS_SHA256:-}"
+      },
+      "depends_on": {
+        "seller-api-migrate": {
+          "condition": "service_completed_successfully"
+        }
+      }
+    },
+    "seller-api-migrate": {
+      "image": "ghcr.io/orhanyarkin/saiman-seller-api:dev",
+      "profiles": [
+        "apps"
+      ],
+      "pull_policy": "never",
+      "restart": "no",
+      "environment": {
+        "SAIMAN_RUN_MODE": "migrate",
+        "SPRING_DATASOURCE_URL": "jdbc:postgresql://postgres:5432/saiman",
+        "SPRING_FLYWAY_USER": "seller_api_owner",
+        "BPL_JVM_THREAD_COUNT": "20"
+      },
+      "secrets": [
+        {
+          "source": "pg_seller_api_owner_password",
+          "target": "spring.flyway.password"
+        }
+      ],
+      "depends_on": {
+        "db-init": {
+          "condition": "service_completed_successfully"
+        },
+        "postgres": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "ledger": {
+      "image": "ghcr.io/orhanyarkin/saiman-ledger:dev",
+      "profiles": [
+        "apps"
+      ],
+      "pull_policy": "never",
+      "secrets": [
+        {
+          "source": "pg_ledger_app_password",
+          "target": "spring.datasource.password"
+        },
+        {
+          "source": "seller_service_token_ledger",
+          "target": "saiman.ledger.seller.service-token"
+        }
+      ],
+      "environment": {
+        "SPRING_DATASOURCE_USERNAME": "ledger_app",
+        "SPRING_FLYWAY_ENABLED": "false",
+        "SPRING_DATASOURCE_URL": "jdbc:postgresql://postgres:5432/saiman",
+        "SAIMAN_AUTH_READER_TOKEN_SHA256": "${SAIMAN_AUTH_READER_TOKEN_SHA256:-}",
+        "SAIMAN_AUTH_OPERATOR_TOKEN_SHA256": "${SAIMAN_AUTH_OPERATOR_TOKEN_SHA256:-}"
+      },
+      "depends_on": {
+        "ledger-migrate": {
+          "condition": "service_completed_successfully"
+        }
+      }
+    },
+    "ledger-migrate": {
+      "image": "ghcr.io/orhanyarkin/saiman-ledger:dev",
+      "profiles": [
+        "apps"
+      ],
+      "pull_policy": "never",
+      "restart": "no",
+      "environment": {
+        "SAIMAN_RUN_MODE": "migrate",
+        "SPRING_DATASOURCE_URL": "jdbc:postgresql://postgres:5432/saiman",
+        "SPRING_FLYWAY_USER": "ledger_owner",
+        "BPL_JVM_THREAD_COUNT": "20",
+        "JDK_JAVA_OPTIONS": "x"
+      },
+      "secrets": [
+        {
+          "source": "pg_ledger_owner_password",
+          "target": "spring.flyway.password"
+        }
+      ],
+      "depends_on": {
+        "db-init": {
+          "condition": "service_completed_successfully"
+        },
+        "postgres": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "ingest": {
+      "image": "ghcr.io/orhanyarkin/saiman-ingest:dev",
+      "profiles": [
+        "apps"
+      ],
+      "pull_policy": "never",
+      "secrets": [
+        {
+          "source": "pg_ingest_app_password",
+          "target": "spring.datasource.password"
+        }
+      ],
+      "environment": {
+        "SPRING_DATASOURCE_USERNAME": "ingest_app",
+        "SPRING_FLYWAY_ENABLED": "false",
+        "SPRING_DATASOURCE_URL": "jdbc:postgresql://postgres:5432/saiman"
+      },
+      "depends_on": {
+        "ingest-migrate": {
+          "condition": "service_completed_successfully"
+        }
+      }
+    },
+    "ingest-migrate": {
+      "image": "ghcr.io/orhanyarkin/saiman-ingest:dev",
+      "profiles": [
+        "apps"
+      ],
+      "pull_policy": "never",
+      "restart": "no",
+      "environment": {
+        "SAIMAN_RUN_MODE": "migrate",
+        "SPRING_DATASOURCE_URL": "jdbc:postgresql://postgres:5432/saiman",
+        "SPRING_FLYWAY_USER": "ingest_owner",
+        "BPL_JVM_THREAD_COUNT": "20"
+      },
+      "secrets": [
+        {
+          "source": "pg_ingest_owner_password",
+          "target": "spring.flyway.password"
+        }
+      ],
+      "depends_on": {
+        "db-init": {
+          "condition": "service_completed_successfully"
+        },
+        "postgres": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "evals": {
+      "image": "busybox:1",
+      "profiles": [
+        "evals"
+      ],
+      "pull_policy": "never",
+      "secrets": [
+        {
+          "source": "seller_service_token_evals",
+          "target": "saiman.evals.seller.service-token"
+        }
+      ],
+      "volumes": [
+        "../../build/evals:/out"
+      ]
+    }
+  },
+  "secrets": {
+    "pg_superuser_password": {
+      "file": "../../secrets/pg_superuser_password"
+    },
+    "pg_orchestrator_owner_password": {
+      "file": "../../secrets/pg_orchestrator_owner_password"
+    },
+    "pg_orchestrator_app_password": {
+      "file": "../../secrets/pg_orchestrator_app_password"
+    },
+    "pg_seller_api_owner_password": {
+      "file": "../../secrets/pg_seller_api_owner_password"
+    },
+    "pg_seller_api_app_password": {
+      "file": "../../secrets/pg_seller_api_app_password"
+    },
+    "pg_ledger_owner_password": {
+      "file": "../../secrets/pg_ledger_owner_password"
+    },
+    "pg_ledger_app_password": {
+      "file": "../../secrets/pg_ledger_app_password"
+    },
+    "pg_ingest_owner_password": {
+      "file": "../../secrets/pg_ingest_owner_password"
+    },
+    "pg_ingest_app_password": {
+      "file": "../../secrets/pg_ingest_app_password"
+    },
+    "seller_service_token_ledger": {
+      "file": "../../secrets/seller_service_token_ledger"
+    },
+    "seller_service_token_evals": {
+      "file": "../../secrets/seller_service_token_evals"
+    }
+  }
+}

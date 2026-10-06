@@ -24,7 +24,7 @@ export X402_SELLER_PAYTO_ADDRESS
 	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check \
 	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask \
 	research-run research-approve research-status web-build e2e e2e-live lighthouse gen-api \
-	shellcheck recon-run recon-report ledger-balance ledger-tamper-demo db-roles psql auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest
+	shellcheck recon-run recon-report ledger-balance ledger-tamper-demo db-roles db-migrate psql auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest
 
 help: ## Show this help.
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -55,6 +55,20 @@ db-roles: ## (Re)run the idempotent per-service Postgres role bootstrap (db-init
 	scripts/ensure-secret-files.sh
 	$(COMPOSE) up -d --wait postgres
 	$(COMPOSE) run --rm db-init
+
+# Per-service Flyway one-shots (ADR-0027). `make up` runs them through depends_on
+# (service_completed_successfully); this target runs them by hand against a running postgres,
+# e.g. to migrate before starting a service from the IDE. Needs the images (`make images`).
+MIGRATE_SERVICES := orchestrator seller-api ledger ingest
+
+db-migrate: ## Run the four <svc>-migrate one-shots (Flyway as <schema>_owner, ADR-0027); needs built images (make images).
+	scripts/ensure-secret-files.sh
+	$(COMPOSE) up -d --wait postgres
+	$(COMPOSE) run --rm db-init
+	@set -e; for svc in $(MIGRATE_SERVICES); do \
+	  echo "db-migrate: $$svc-migrate"; \
+	  $(COMPOSE) run --rm --no-deps $$svc-migrate; \
+	done
 
 .PHONY: corpus-export test-bootstrap-roles
 CORPUS_DIR ?= build/corpus
@@ -87,6 +101,8 @@ up: ## Verify payTo, create secret files (generates DB passwords and API tokens)
 	@[ "$$(stat -c %a secrets)" = "700" ] || { echo "up: secrets/ must be mode 700 (it is what protects the 0644 secret files inside); run: chmod 700 secrets" >&2; exit 1; }
 	$(MAKE) images
 	$(MAKE) web-build
+	@# No --wait: Compose fails it on exit-0 one-shots. The <svc>-migrate one-shots run through depends_on
+	@# (service_completed_successfully), so `up -d` itself exits non-zero if a migration fails (ADR-0027).
 	scripts/with-auth-digests.sh $(COMPOSE) --profile apps up -d
 	@if [ -s secrets/x402_buyer_private_key ]; then \
 	  scripts/wait-for-health.sh 8080 8081 8082 8083; \

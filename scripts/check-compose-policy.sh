@@ -8,6 +8,11 @@
 # anywhere — including the orchestrator, before its M3 secrets: mount lands — may set an
 # environment entry, a config or a bind-mounted volume that looks like a private key).
 #
+# ADR-0027 (migrations as a per-service one-shot): the <schema>_owner password is mounted only
+# into <svc>-migrate; apps run with SPRING_FLYWAY_ENABLED=false and wait for their migrator; the
+# migrator shape (env allowlist, no ports, restart no, same image, no command) and the
+# config-injection env keys are pinned in the big jq program below.
+#
 # Resolves the config with `--no-interpolate --no-env-resolution` so it never reads a
 # local .env (app services carry no env_file; see docker-compose.yml), and with
 # `--profile '*'` so every service is scanned regardless of profile, not only "apps".
@@ -123,10 +128,15 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
   (.services |= map_values(if .environment then .environment |= with_entries(.key |= norm) else . end)) as $root
   | def allowed: {
         "postgres": ["pg_superuser_password"],
-        "ingest": ["mkk_credentials", "openai_api_key", "pg_ingest_owner_password", "pg_ingest_app_password"],
-        "seller-api": ["openai_api_key", "pg_seller_api_owner_password", "pg_seller_api_app_password"],
-        "orchestrator": ["x402_buyer_private_key", "openai_api_key", "pg_orchestrator_owner_password", "pg_orchestrator_app_password"],
-        "ledger": ["pg_ledger_owner_password", "pg_ledger_app_password", "seller_service_token_ledger"],
+        "ingest": ["mkk_credentials", "openai_api_key", "pg_ingest_app_password"],
+        "seller-api": ["openai_api_key", "pg_seller_api_app_password"],
+        "orchestrator": ["x402_buyer_private_key", "openai_api_key", "pg_orchestrator_app_password"],
+        "ledger": ["pg_ledger_app_password", "seller_service_token_ledger"],
+        # ADR-0027: the owner credential is mounted only into the short-lived migrate one-shots.
+        "ingest-migrate": ["pg_ingest_owner_password"],
+        "seller-api-migrate": ["pg_seller_api_owner_password"],
+        "orchestrator-migrate": ["pg_orchestrator_owner_password"],
+        "ledger-migrate": ["pg_ledger_owner_password"],
         "evals": ["seller_service_token_evals"],
         "db-init": ["pg_superuser_password", "pg_orchestrator_owner_password", "pg_orchestrator_app_password", "pg_ledger_owner_password", "pg_ledger_app_password", "pg_seller_api_owner_password", "pg_seller_api_app_password", "pg_ingest_owner_password", "pg_ingest_app_password"]
       };
@@ -135,6 +145,11 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
     def pg_target($src): if ($src | test("^pg_.*_owner_password$")) then "spring.flyway.password" elif ($src | test("^pg_.*_app_password$")) then "spring.datasource.password" else null end;
     # Own database users per app service (ADR-0024).
     def db_schema: {"orchestrator": "orchestrator", "seller-api": "seller_api", "ledger": "ledger", "ingest": "ingest"};
+    # <svc>-migrate one-shots (ADR-0027) share the schema of the app they migrate.
+    def base: sub("-migrate$"; "");
+    def is_migrate: endswith("-migrate");
+    def migrate_env_allowed: ["SAIMAN_RUN_MODE", "SPRING_DATASOURCE_URL", "SPRING_FLYWAY_USER", "BPL_JVM_THREAD_COUNT"];
+    def config_injection: test("^(SPRING_FLYWAY_URL|SPRING_APPLICATION_JSON|JAVA_TOOL_OPTIONS|JDK_JAVA_OPTIONS|_JAVA_OPTIONS|JAVA_OPTS|SPRING_AUTOCONFIGURE_EXCLUDE)$|^SPRING_(CONFIG|MAIN)_");
     def bind_sources: {"otel-collector": ["/otel-collector.yaml"], "web": ["/web/dist", "/nginx.conf"], "db-init": ["/postgres"], "evals": ["/build/evals"]};
     def inscope($p): ((($p // []) | index("apps")) != null) or ((($p // []) | index("evals")) != null);
     def forbidden_env: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_BASE_URL", "OPENAI_LOG", "SPRING_APPLICATION_JSON", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "SPRING_CONFIG_IMPORT", "SPRING_CONFIG_LOCATION", "SPRING_CONFIG_ADDITIONAL_LOCATION"];
@@ -173,16 +188,53 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
           | select((.value // "") != "jdbc:postgresql://postgres:5432/saiman")
           | "\($svc): SPRING_DATASOURCE_URL must be exactly jdbc:postgresql://postgres:5432/saiman (no URL parameters, no credentials)" ),
         ( ($s.environment // {}) | to_entries[] | select(.key | test("^SPRING_(DATASOURCE|FLYWAY)_(USERNAME|USER)$"))
-          | . as $e | (db_schema[$svc]) as $schema
+          | . as $e | (db_schema[$svc | base]) as $schema
           | select($schema == null
               or ($e.key == "SPRING_DATASOURCE_USERNAME" and ($e.value // "") != ($schema + "_app"))
               or ($e.key == "SPRING_FLYWAY_USER" and ($e.value // "") != ($schema + "_owner")))
           | "\($svc): \($e.key)=\($e.value // "") is not allowed (runtime user is <schema>_app, migration user <schema>_owner, never the saiman superuser, ADR-0024)" ),
+        # --- app services (ADR-0024, ADR-0027): runtime role only, Flyway off, own migrator first ---
         ( select(db_schema[$svc] != null and ($s.profiles // []) == ["apps"])
           | ( select((($s.environment // {}).SPRING_DATASOURCE_USERNAME // "") != (db_schema[$svc] + "_app"))
               | "\($svc): SPRING_DATASOURCE_USERNAME must be \(db_schema[$svc])_app (ADR-0024)" ),
-            ( select((($s.environment // {}).SPRING_FLYWAY_USER // "") != (db_schema[$svc] + "_owner"))
-              | "\($svc): SPRING_FLYWAY_USER must be \(db_schema[$svc])_owner (ADR-0024)" ) )
+            ( select((($s.environment // {}).SPRING_FLYWAY_ENABLED // "") != "false")
+              | "\($svc): SPRING_FLYWAY_ENABLED must be \"false\" (migrations run in \($svc)-migrate, ADR-0027)" ),
+            ( ($s.environment // {}) | keys[] | select(test("^SPRING_FLYWAY_") and . != "SPRING_FLYWAY_ENABLED")
+              | "\($svc): environment \(.) is not allowed on an app service (Flyway is off in the server and the owner role stays in \($svc)-migrate, ADR-0027)" ),
+            ( select((($s.depends_on // {})[$svc + "-migrate"].condition // "") != "service_completed_successfully")
+              | "\($svc): must depend on \($svc)-migrate with condition service_completed_successfully (ADR-0027)" ) ),
+        # --- migrate one-shots (ADR-0027) ---
+        ( select(($svc | is_migrate) and db_schema[$svc | base] != null)
+          | ($svc | base) as $app | db_schema[$app] as $schema | ($root.services[$app] // {}) as $a
+          | ( select((($s.environment // {}).SAIMAN_RUN_MODE // "") != "migrate")
+              | "\($svc): SAIMAN_RUN_MODE must be \"migrate\" (ADR-0027)" ),
+            ( select((($s.environment // {}).SPRING_FLYWAY_USER // "") != ($schema + "_owner"))
+              | "\($svc): SPRING_FLYWAY_USER must be \($schema)_owner (ADR-0024)" ),
+            ( ($s.environment // {}) | keys[] | select((. as $k | migrate_env_allowed | index($k)) == null)
+              | "\($svc): environment \(.) is not allowed on a migrate one-shot (allowed: \(migrate_env_allowed | join(", ")); ADR-0027)" ),
+            ( select((($s.environment // {}).SPRING_DATASOURCE_URL // "") != (($a.environment // {}).SPRING_DATASOURCE_URL // "-"))
+              | "\($svc): SPRING_DATASOURCE_URL must equal that of \($app) (ADR-0027)" ),
+            ( select(($s.ports // []) | length > 0)
+              | "\($svc): must not publish ports (a one-shot has no server, ADR-0027)" ),
+            ( select(($s.restart // "") != "no")
+              | "\($svc): restart must be \"no\" (a failed migration must stay failed, ADR-0027)" ),
+            ( select(($s.profiles // []) != ["apps"])
+              | "\($svc): profiles must be exactly [apps] (ADR-0027)" ),
+            ( select(($s.image // "") != ($a.image // "-"))
+              | "\($svc): image must be the same as \($app) (one image, two entry points, ADR-0027)" ),
+            ( select(($s.depends_on // {})["db-init"].condition != "service_completed_successfully")
+              | "\($svc): must depend on db-init with condition service_completed_successfully (ADR-0027)" ),
+            ( ($s.depends_on // {}) | keys[] | select(. != "db-init" and . != "postgres")
+              | "\($svc): depends_on \(.) is not allowed (only db-init and postgres, ADR-0027)" ),
+            ( select(([($s.secrets // [])[]? | .source] | index("pg_" + $schema + "_owner_password")) == null)
+              | "\($svc): must mount pg_\($schema)_owner_password (ADR-0027)" ) ),
+        ( select(($svc | is_migrate) and db_schema[$svc | base] == null)
+          | "\($svc): unknown migrate one-shot (only \(db_schema | keys | map(. + "-migrate") | join(", ")), ADR-0027)" ),
+        ( ($s.environment // {}) | keys[] | select(config_injection)
+          | "\($svc): environment \(.) is not allowed on app and migrate services (it could redirect Flyway or inject any Spring/JVM property, ADR-0027)" ),
+        ( select(($svc | is_migrate | not) or db_schema[$svc | base] == null)
+          | ($s.environment // {}) | keys[] | select(. == "SAIMAN_RUN_MODE")
+          | "\($svc): SAIMAN_RUN_MODE is only allowed on the four <svc>-migrate one-shots (ADR-0027)" )
       else empty end ),
     ( ($s.environment // {}) | to_entries[] | select(.key | test("^SAIMAN_AUTH_"))
       | . as $e
@@ -300,4 +352,4 @@ if [[ ${violations} -ne 0 ]]; then
   exit 1
 fi
 
-echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, secrets: allowlist enforced, no OPENAI_* env, plaintext-hosts pinned to seller-api, chain RPC pinned to sepolia.base.org on ledger/orchestrator only, credit-note corroboration pinned to seller-api, Kafka auto-create off and controller local, dashboard web service constrained)"
+echo "check-compose-policy: PASS (ports bound to 127.0.0.1, app pull_policy: never, no saiman/ images, secrets: allowlist enforced, no OPENAI_* env, plaintext-hosts pinned to seller-api, chain RPC pinned to sepolia.base.org on ledger/orchestrator only, credit-note corroboration pinned to seller-api, Kafka auto-create off and controller local, dashboard web service constrained, Flyway owner secret only on the migrate one-shots)"
