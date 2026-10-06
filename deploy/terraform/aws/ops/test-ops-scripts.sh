@@ -246,6 +246,14 @@ rm -rf "${tokdir}"
 # --- verify-image-provenance (fake gh and docker) -------------------------------------------------------------
 cat >"${bin}/gh" <<'FAKE'
 #!/usr/bin/env bash
+if [[ "$1" == api ]]; then
+  [[ -e "${FAKE_AWS_DIR}/gh_api_deny" ]] && exit 1
+  case "$2" in
+    */deployment-branch-policies) cat "${FAKE_AWS_DIR}/gh_api_branches.json" ;;
+    *) cat "${FAKE_AWS_DIR}/gh_api_env.json" ;;
+  esac
+  exit 0
+fi
 if [[ "$1 $2" == "run list" ]]; then [[ -e "${FAKE_AWS_DIR}/gh_run_id" ]] && cat "${FAKE_AWS_DIR}/gh_run_id"; exit 0; fi
 if [[ "$1 $2" == "run download" ]]; then
   while [[ $# -gt 0 ]]; do [[ "$1" == --dir ]] && dest="$2"; shift; done
@@ -276,6 +284,23 @@ expect "provenance: a re-pushed tag (digest mismatch) fails" 1 "the tag was re-p
 digests_json "${d1}" >"${fx}/gh_digests.json"
 expect "provenance: matching digests pass" 0 "image provenance verified" "${ops}/verify-image-provenance.sh" "${sha}" "${work}/digests-out.json"
 if [[ "$(jq -r '.ledger' "${work}/digests-out.json")" == "${d1}" ]]; then ok "recorded digests are written for Terraform"; else bad "digests-out.json wrong"; fi
+
+# --- check-environment-protection (fake gh api) ------------------------------------------------------------------
+export GITHUB_REPOSITORY=orhanyarkin/saiman
+good_env='{"can_admins_bypass":false,"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true},"protection_rules":[{"type":"required_reviewers"}]}'
+echo "${good_env}" >"${fx}/gh_api_env.json"
+echo '{"branch_policies":[{"name":"main"}]}' >"${fx}/gh_api_branches.json"
+expect "env protection: compliant demo-apply passes" 0 "protection verified" "${ops}/check-environment-protection.sh" demo-apply --require-reviewer
+echo '{"can_admins_bypass":true,"deployment_branch_policy":{"custom_branch_policies":true},"protection_rules":[]}' >"${fx}/gh_api_env.json"
+expect "env protection: admin bypass, no reviewer fails" 1 "administrators can bypass" "${ops}/check-environment-protection.sh" demo-apply --require-reviewer
+echo "${good_env}" >"${fx}/gh_api_env.json"
+echo '{"branch_policies":[{"name":"main"},{"name":"dev"}]}' >"${fx}/gh_api_branches.json"
+expect "env protection: a second deployment branch fails" 1 "not exactly: main" "${ops}/check-environment-protection.sh" demo-destroy
+echo '{"branch_policies":[{"name":"main"}]}' >"${fx}/gh_api_branches.json"
+touch "${fx}/gh_api_deny"
+expect "env protection: unreadable settings only warn without ENV_AUDIT_TOKEN" 0 "NOT verified" "${ops}/check-environment-protection.sh" demo-apply --require-reviewer
+expect "env protection: unreadable settings fail with ENV_AUDIT_TOKEN" 1 "cannot read the settings" env ENV_AUDIT_TOKEN=x "${ops}/check-environment-protection.sh" demo-apply --require-reviewer
+rm -f "${fx}/gh_api_deny"
 
 # --- tf-dummy-env -------------------------------------------------------------------------------------------------------------
 expect "dummy env: valid placeholders, no password" 0 "TF_VAR_image_tag=sha-000000000000" "${ops}/tf-dummy-env.sh" saiman-1-tfstate

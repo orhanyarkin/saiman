@@ -209,6 +209,14 @@ Cost: about $0.55-0.80 per 4-hour session (ADR-0028), roughly $0.14-0.20 per hou
 (state bucket only: `demo-down` leaves no other resource). The `infracost` job in `terraform.yml` reports the
 always-on month and derives the hourly and 4-hour figures (Fargate and RDS hours have no usage knob).
 
+### Environment-protection preflight
+
+`demo-up` and `demo-destroy` start with `ops/check-environment-protection.sh`, which checks through the GitHub API that
+the environment allows only `main`, has no admin bypass (and a reviewer for `demo-apply`). The workflow token cannot
+read environment settings, so without the optional repository secret `ENV_AUDIT_TOKEN` (fine-grained token,
+Administration: read) the check only WARNS when it cannot read them, but fails when it can read a non-compliant
+setting. With `ENV_AUDIT_TOKEN` it is strict (fail closed). Recommended: set it.
+
 ### Who may trigger what, and recommended Claude Code deny rules
 
 `demo-destroy.yml` is `workflow_call` only: `demo-down` (you, `workflow_dispatch`) and `demo-reaper` (cron, expired demos only)
