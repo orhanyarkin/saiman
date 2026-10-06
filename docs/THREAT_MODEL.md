@@ -326,6 +326,18 @@ These are checked mechanically, not just by review:
 - **Capture files.** `make capture-demo` scrubs nonce, signature, key and token patterns and refuses to write on a hit, but published captures still contain free-text questions, model answers (which may quote KAP text), wallet addresses and role labels: review before publishing.
 - **Not done in M6 (revisit):** Kafka and Redis authentication/ACLs, ingest `/internal` auth (cheap now with `libs/api-security`), per-run ownership between READERs (any READER can read any run's stream), per-service LLM keys/sub-caps, `cap_drop` on app containers.
 
+## AWS demo-lite IAM (ADR-0028)
+
+Three CI roles use GitHub OIDC. `plan` (PRs and `main`) is read-only: it has no S3 write (plans run with `-lock=false`) and explicit Denies on SSM secret values and on `artifacts/*` and `demo/*` objects, because PR code executes during `terraform plan`. `apply` and `destroy` are assumable only from the `demo-apply` and `demo-destroy` GitHub environments, both restricted to `main` with admin bypass off; `demo-apply` needs a reviewer. The three workload roles (task, task execution, scheduler) are fixed in the human-applied bootstrap stack under `/saiman/demo/`, trust service principals only (plus `aws:SourceAccount`) and carry `saiman-demo-boundary`. The apply role therefore cannot create, edit or re-trust any role; its only IAM write is `iam:PassRole` of those roles. The destroy role has no create/register/run/put action and no IAM write, and cannot delete the state object (only the lock object).
+
+Residual risks:
+- The boundary bounds what the workload roles can do, not who can use them. A malicious but approved apply can deploy a workload that runs as the execution role and reads `/saiman/demo/*` (testnet keys and a capped OpenAI key only).
+- The single-task design means all containers share one task role, which weakens the ADR-0009 key separation. The task role has no SSM permissions; only the execution role does.
+- EC2 write actions are scoped by region, not by tag. A dedicated AWS account for the demo is recommended.
+- The destroy role can still modify or delete existing demo resources (cost denial of service, not escalation).
+- The OIDC `sub` names only the environment; pinning `job_workflow_ref` (for example `demo-up.yml@refs/heads/main`) is a follow-up.
+- No secret may enter Terraform state: plan-role holders can read it. Secrets reach containers only through ECS `secrets[].valueFrom`.
+
 ## Known gaps (tracked, not yet closed)
 
 | Gap | Why it's open | Revisit |
