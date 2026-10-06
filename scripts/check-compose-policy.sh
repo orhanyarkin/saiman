@@ -124,7 +124,9 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
   . as $orig
   # Env keys are normalised (upper case, "." and "-" -> "_") before every name rule: Spring relaxed
   # binding would otherwise let a dotted or lower-case key slip past an upper-case rule.
-  | def norm: ascii_upcase | gsub("[.-]"; "_");
+  # Runs of "_" collapse and a trailing list index ("_0", "_0_") is stripped, so SPRING__CONFIG_IMPORT or
+  # SPRING_AUTOCONFIGURE_EXCLUDE_0 are matched by the name rules too (ADR-0027).
+  | def norm: ascii_upcase | gsub("[.-]"; "_") | gsub("_+"; "_") | sub("_[0-9]+_?$"; "");
   (.services |= map_values(if .environment then .environment |= with_entries(.key |= norm) else . end)) as $root
   | def allowed: {
         "postgres": ["pg_superuser_password"],
@@ -152,7 +154,12 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
     def config_injection: test("^(SPRING_FLYWAY_URL|SPRING_APPLICATION_JSON|JAVA_TOOL_OPTIONS|JDK_JAVA_OPTIONS|_JAVA_OPTIONS|JAVA_OPTS|SPRING_AUTOCONFIGURE_EXCLUDE)$|^SPRING_(CONFIG|MAIN)_");
     def bind_sources: {"otel-collector": ["/otel-collector.yaml"], "web": ["/web/dist", "/nginx.conf"], "db-init": ["/postgres"], "evals": ["/build/evals"]};
     def inscope($p): ((($p // []) | index("apps")) != null) or ((($p // []) | index("evals")) != null);
-    def forbidden_env: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_BASE_URL", "OPENAI_LOG", "SPRING_APPLICATION_JSON", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "SPRING_CONFIG_IMPORT", "SPRING_CONFIG_LOCATION", "SPRING_CONFIG_ADDITIONAL_LOCATION"];
+    def forbidden_env: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_BASE_URL", "OPENAI_LOG", "SPRING_APPLICATION_JSON", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "SPRING_CONFIG_IMPORT", "SPRING_CONFIG_LOCATION", "SPRING_CONFIG_ADDITIONAL_LOCATION", "SAIMAN_SECRETS_DIR"];
+    # Services that may run without a profile (always-on infrastructure); anything else needs a profile.
+    def infra: ["postgres", "db-init", "kafka", "redis", "otel-collector", "jaeger"];
+    def migrate_keys_allowed: ["depends_on", "environment", "image", "mem_limit", "networks", "profiles", "pull_policy", "restart", "secrets"];
+    def hardening_keys: ["privileged", "cap_add", "devices", "security_opt", "pid", "ipc", "network_mode", "userns_mode"];
+    def scoped($svc; $p): inscope($p) or (db_schema[$svc | base] != null);
     def keyish: test("(?i)(PRIVATE_?KEY|/secrets(/|$)|\\.key$|\\.pem$)|0x[0-9a-fA-F]{64}");
     $root.services | to_entries[] | .key as $svc | .value as $s
   | ( if ($s.env_file // []) | length > 0
@@ -171,8 +178,10 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
       | (target_of[$src] // pg_target($src)) as $want
       | select($want != null and (.target // "") != $want)
       | "\($svc): secret \"\($src)\" must be mounted with target \"\($want)\" (configtree property name, ADR-0023/0024)" ),
-    ( ($orig.services[$svc].environment // {}) | keys[] | select(test("^[A-Z][A-Z0-9_]*$") | not)
-      | "\($svc): environment key \"\(.)\" is not UPPER_SNAKE_CASE (dotted or lower-case keys would bypass the name rules)" ),
+    ( ($orig.services[$svc].environment // {}) | keys[] | select(test("^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$") | not)
+      | "\($svc): environment key \"\(.)\" is not UPPER_SNAKE_CASE (dotted, lower-case or double-underscore keys would bypass the name rules)" ),
+    ( ($orig.services[$svc].environment // {}) | keys | group_by(norm)[] | select(length > 1)
+      | "\($svc): environment keys \(join(", ")) collapse to the same name after normalisation (one would shadow the other in this check)" ),
     ( ($s.environment // {}) | to_entries[] | select(.key | test("PASSWORD"))
       | select(($svc == "postgres" and .key == "POSTGRES_PASSWORD_FILE" and (.value // "") == "/run/secrets/pg_superuser_password") | not)
       | "\($svc): environment \(.key) is not allowed (passwords arrive as file secrets; only postgres may set POSTGRES_PASSWORD_FILE=/run/secrets/pg_superuser_password, ADR-0024)" ),
@@ -181,7 +190,23 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
     ( ($s.volumes // [])[]? | select(.type == "bind") | .source as $src
       | select(((bind_sources[$svc] // []) | map(. as $suffix | $src | endswith($suffix)) | any) | not)
       | "\($svc): bind source \($src) is not on the allowlist for this service (\((bind_sources[$svc] // []) | join(", ") | if . == "" then "none" else . end))" ),
-    ( if inscope($s.profiles) then
+    ( select(($svc | is_migrate) and db_schema[$svc | base] == null)
+          | "\($svc): unknown migrate one-shot (only \(db_schema | keys | map(. + "-migrate") | join(", ")), ADR-0027)" ),
+    ( select(($svc | is_migrate | not) or db_schema[$svc | base] == null)
+          | ($s.environment // {}) | keys[] | select(. == "SAIMAN_RUN_MODE")
+          | "\($svc): SAIMAN_RUN_MODE is only allowed on the four <svc>-migrate one-shots (ADR-0027)" ),
+    ( select(($s.profiles // []) | length == 0)
+      | select((infra | index($svc)) == null)
+      | "\($svc): has no profile and is not an always-on infrastructure service (\(infra | join(", ")); a profile-less service would start with every `up`, ADR-0027)" ),
+    ( select($s.volumes_from != null)
+      | "\($svc): volumes_from is not allowed (it would hand this service the secret mounts of another service, ADR-0027)" ),
+    ( hardening_keys[] | . as $k | select($s[$k] != null and $s[$k] != false and $s[$k] != [] and $s[$k] != {})
+      | "\($svc): \(.) is not allowed (no privileged mode, extra capabilities, devices, shared namespaces or security-option overrides)" ),
+    ( ($s.volumes // [])[]? | select(.type == "volume") | .source as $src
+      | ($root.volumes // {})[$src] as $def
+      | select((($def // {}).driver_opts // {}) | has("device") or has("o") or has("type"))
+      | "\($svc): named volume \($src) is bound to a host path or driver option (driver_opts device \((($def.driver_opts // {}).device // "-")); key material must come through secrets:, not a volume)" ),
+    ( if scoped($svc; $s.profiles) then
         ( select($s.command != null or $s.entrypoint != null)
           | "\($svc): command/entrypoint overrides are not allowed on app services (they could pass --saiman.* flags)" ),
         ( ($s.environment // {}) | to_entries[] | select(.key == "SPRING_DATASOURCE_URL")
@@ -194,7 +219,7 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
               or ($e.key == "SPRING_FLYWAY_USER" and ($e.value // "") != ($schema + "_owner")))
           | "\($svc): \($e.key)=\($e.value // "") is not allowed (runtime user is <schema>_app, migration user <schema>_owner, never the saiman superuser, ADR-0024)" ),
         # --- app services (ADR-0024, ADR-0027): runtime role only, Flyway off, own migrator first ---
-        ( select(db_schema[$svc] != null and ($s.profiles // []) == ["apps"])
+        ( select(db_schema[$svc] != null)
           | ( select((($s.environment // {}).SPRING_DATASOURCE_USERNAME // "") != (db_schema[$svc] + "_app"))
               | "\($svc): SPRING_DATASOURCE_USERNAME must be \(db_schema[$svc])_app (ADR-0024)" ),
             ( select((($s.environment // {}).SPRING_FLYWAY_ENABLED // "") != "false")
@@ -214,6 +239,10 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
               | "\($svc): environment \(.) is not allowed on a migrate one-shot (allowed: \(migrate_env_allowed | join(", ")); ADR-0027)" ),
             ( select((($s.environment // {}).SPRING_DATASOURCE_URL // "") != (($a.environment // {}).SPRING_DATASOURCE_URL // "-"))
               | "\($svc): SPRING_DATASOURCE_URL must equal that of \($app) (ADR-0027)" ),
+            ( $s | keys[] | select(. as $k | (migrate_keys_allowed | index($k)) == null)
+              | "\($svc): key \(.) is not allowed on a migrate one-shot (allowed: \(migrate_keys_allowed | join(", ")); ADR-0027)" ),
+            ( select(($s.pull_policy // "") != "never")
+              | "\($svc): pull_policy is \"\($s.pull_policy // "<unset>")\" (must be \"never\", ADR-0027)" ),
             ( select(($s.ports // []) | length > 0)
               | "\($svc): must not publish ports (a one-shot has no server, ADR-0027)" ),
             ( select(($s.restart // "") != "no")
@@ -228,13 +257,8 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
               | "\($svc): depends_on \(.) is not allowed (only db-init and postgres, ADR-0027)" ),
             ( select(([($s.secrets // [])[]? | .source] | index("pg_" + $schema + "_owner_password")) == null)
               | "\($svc): must mount pg_\($schema)_owner_password (ADR-0027)" ) ),
-        ( select(($svc | is_migrate) and db_schema[$svc | base] == null)
-          | "\($svc): unknown migrate one-shot (only \(db_schema | keys | map(. + "-migrate") | join(", ")), ADR-0027)" ),
         ( ($s.environment // {}) | keys[] | select(config_injection)
-          | "\($svc): environment \(.) is not allowed on app and migrate services (it could redirect Flyway or inject any Spring/JVM property, ADR-0027)" ),
-        ( select(($svc | is_migrate | not) or db_schema[$svc | base] == null)
-          | ($s.environment // {}) | keys[] | select(. == "SAIMAN_RUN_MODE")
-          | "\($svc): SAIMAN_RUN_MODE is only allowed on the four <svc>-migrate one-shots (ADR-0027)" )
+          | "\($svc): environment \(.) is not allowed on app and migrate services (it could redirect Flyway or inject any Spring/JVM property, ADR-0027)" )
       else empty end ),
     ( ($s.environment // {}) | to_entries[] | select(.key | test("^SAIMAN_AUTH_"))
       | . as $e
@@ -252,7 +276,7 @@ bad_key_material=$(jq -r --arg secrets_dir "${secrets_dir}" '
     ( select($svc == "evals")
       | select((($s.volumes // []) | length) != 1)
       | "evals: must have exactly one volume (../../build/evals:/out)" ),
-    ( ($s.environment // {}) | keys[] | select(. as $k | (forbidden_env | index($k)) != null or ($k | test("^(SPRING_AI_OPENAI_|SAIMAN_INGEST_MKK_|SPRINGDOC_)")))
+    ( ($s.environment // {}) | keys[] | select(. as $k | (forbidden_env | index($k)) != null or ($k | test("^(SPRING_AI_OPENAI_|SAIMAN_INGEST_MKK_|SPRINGDOC_|BPL_(DEBUG|JMX)_)")))
       | "\($svc): environment defines \(.) (the OpenAI key must arrive only as a secret file; OPENAI_BASE_URL / SPRING_AI_OPENAI_* would redirect the key, OPENAI_LOG=debug dumps prompts, SPRING_APPLICATION_JSON / SPRING_CONFIG_* / *JAVA_OPTIONS can inject any property or load arbitrary config; SAIMAN_INGEST_MKK_* would redirect the MKK Basic credential; SPRINGDOC_* could turn the OpenAPI endpoint back on, ADR-0022)" ),
     ( ($s.environment // {}) | to_entries[] | select(.key == "X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS")
       | select($svc != "orchestrator" or (.value // "") != "seller-api")
