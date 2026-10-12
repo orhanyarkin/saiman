@@ -175,7 +175,7 @@ services:
     # (ADR-0007 R8 applies to the collector too). `make infra-up` waits for it as "running".
 
   jaeger:
-    image: jaegertracing/jaeger:2.21.0
+    image: jaegertracing/jaeger:2.22.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:16686:16686"
