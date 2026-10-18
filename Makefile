@@ -70,7 +70,7 @@ db-migrate: ## Run the four <svc>-migrate one-shots (Flyway as <schema>_owner, A
 	  $(COMPOSE) run --rm --no-deps $$svc-migrate; \
 	done
 
-.PHONY: corpus-export test-bootstrap-roles
+.PHONY: corpus-export test-bootstrap-roles tf-mutation-check
 CORPUS_DIR ?= build/corpus
 
 corpus-export: ## Export the ingest corpus (data-only dump + JSON metadata) from the local postgres to CORPUS_DIR (default build/corpus/) (ADR-0028).
@@ -311,6 +311,9 @@ test-aws-assets: ## Self-test the demo-lite deploy assets (nginx/otel/readiness;
 TF_AWS := deploy/terraform/aws
 REGION ?= eu-central-1
 STATE_BUCKET ?=
+
+tf-mutation-check: ## Break each rule of the ECS RegisterTaskDefinition test on purpose and require the test to notice (offline, ~1 min, repo untouched).
+	python3 $(TF_AWS)/demo-lite/tests/mutation-check.py
 
 tf-check: test-aws-assets ## Offline Terraform checks (fmt, validate, test) for bootstrap + demo-lite and every ops/check script; no credentials.
 	terraform fmt -check -recursive $(TF_AWS)
