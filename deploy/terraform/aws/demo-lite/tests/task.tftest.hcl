@@ -36,116 +36,9 @@ variables {
   corpus_sha256          = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 }
 
-run "task_shape" {
-  assert {
-    condition = (
-      startswith(aws_ecs_task_definition.main.family, "saiman-demo") && startswith(aws_ecs_task_definition.init.family, "saiman-demo")
-      && aws_ecs_task_definition.main.family != aws_ecs_task_definition.init.family
-      && aws_ecs_service.main.name == local.service_name && aws_ecs_cluster.main.name == "saiman-demo"
-    )
-    error_message = "both families must start with saiman-demo and differ; service and cluster names are fixed"
-  }
-
-  assert {
-    condition = alltrue([
-      for td in [aws_ecs_task_definition.main, aws_ecs_task_definition.init] :
-      td.runtime_platform[0].cpu_architecture == "ARM64" && td.runtime_platform[0].operating_system_family == "LINUX" && td.network_mode == "awsvpc" && contains(td.requires_compatibilities, "FARGATE")
-    ])
-    error_message = "both tasks must be Fargate ARM64 Linux awsvpc"
-  }
-
-  assert {
-    condition = alltrue([
-      for td in [aws_ecs_task_definition.main, aws_ecs_task_definition.init] :
-      td.execution_role_arn == "arn:aws:iam::123456789012:role/saiman/demo/saiman-demo-task-execution" && td.task_role_arn == "arn:aws:iam::123456789012:role/saiman/demo/saiman-demo-task"
-    ])
-    error_message = "roles must be the fixed bootstrap role ARNs"
-  }
-
-  assert {
-    condition     = aws_ecs_service.main.enable_execute_command == true && aws_ecs_service.main.force_delete == true && aws_ecs_service.main.wait_for_steady_state == false && aws_ecs_service.main.desired_count == 0
-    error_message = "the service needs ECS Exec, force_delete, no steady-state wait and starts at zero tasks (demo-up scales it after the init task)"
-  }
-
-  assert {
-    condition     = aws_ecs_service.main.task_definition == aws_ecs_task_definition.main.arn
-    error_message = "the service runs the stack task definition, never the init one"
-  }
-
-  assert {
-    condition     = aws_ecs_service.main.network_configuration[0].assign_public_ip == true && length(aws_ecs_service.main.network_configuration[0].subnets) == 2
-    error_message = "the task needs a public IP in the two public subnets"
-  }
-
-  assert {
-    condition = (
-      sum([for c in local.decoded_tasks.main : c.memory]) <= aws_ecs_task_definition.main.memory
-      && sum([for c in local.decoded_tasks.init : c.memory]) <= aws_ecs_task_definition.init.memory
-    )
-    error_message = "container memory limits must fit each task's memory"
-  }
-
-  assert {
-    condition     = alltrue([for c in local.all_decoded_containers : c.logConfiguration.logDriver == "awslogs" && c.logConfiguration.options["awslogs-group"] == "/saiman-demo-lite" && c.logConfiguration.options["awslogs-stream-prefix"] == c.name])
-    error_message = "every container logs to the demo log group with its own stream prefix"
-  }
-
-  assert {
-    condition     = output.init_task_definition_arn == aws_ecs_task_definition.init.arn
-    error_message = "demo-up reads the init task definition from this output"
-  }
-}
-
-run "ecs_rules_the_mock_provider_does_not_apply" {
-  # ECS rejects a task definition with more than 10 containers ("Too many containers") when it is registered; a mock
-  # provider never does. Counted statically on exactly what ECS would receive, per task definition.
-  assert {
-    condition     = length(jsondecode(aws_ecs_task_definition.main.container_definitions)) <= 10
-    error_message = "the stack task definition has more than 10 containers (ECS limit)"
-  }
-
-  assert {
-    condition     = length(jsondecode(aws_ecs_task_definition.init.container_definitions)) <= 10
-    error_message = "the init task definition has more than 10 containers (ECS limit)"
-  }
-
-  assert {
-    condition     = local.max_containers_per_task == 10
-    error_message = "the guard constant must stay the real ECS limit"
-  }
-
-  # Every task definition needs at least one essential container.
-  assert {
-    condition     = length([for c in local.decoded_tasks.main : c if c.essential]) >= 1 && length([for c in local.decoded_tasks.init : c if c.essential]) >= 1
-    error_message = "each task definition needs an essential container (the init task ends with its `done` container)"
-  }
-
-  # dependsOn cannot cross task definitions: every target must be a container of the same one.
-  assert {
-    condition = alltrue([
-      for cs in values(local.decoded_tasks) :
-      alltrue([for c in cs : alltrue([for d in c.dependsOn : contains([for x in cs : x.name], d.containerName)])])
-    ])
-    error_message = "a dependsOn target must be in the same task definition"
-  }
-
-  # SUCCESS/COMPLETE cannot be set on an essential container.
-  assert {
-    condition = alltrue([
-      for cs in values(local.decoded_tasks) :
-      alltrue([for c in cs : alltrue([for d in c.dependsOn : d.condition == "HEALTHY" || !try([for x in cs : x.essential if x.name == d.containerName][0], false)])])
-    ])
-    error_message = "a SUCCESS dependency must not point at an essential container"
-  }
-
-  # The init task ends only when every one-shot succeeded.
-  assert {
-    condition     = jsonencode(sort([for d in [for c in local.decoded_tasks.init : c if c.name == "done"][0].dependsOn : d.containerName])) == jsonencode(sort([for c in local.decoded_tasks.init : c.name if c.name != "done"]))
-    error_message = "`done` must wait for every other init container"
-  }
-}
-
 run "ecs_register_task_definition_rules" {
+  # NOTE: this run is first on purpose. `terraform test` skips the remaining runs after a run that ERRORS (as opposed to
+  # an assertion that fails), so a mutation that makes a later run error must not hide these rule messages.
   # The rules of the ECS RegisterTaskDefinition API that a mock provider never applies, checked on exactly what ECS would
   # receive, for BOTH task definitions. Numbers are from the API reference (HealthCheck, ContainerDefinition,
   # ContainerDependency, ContainerRestartPolicy). A violation otherwise costs a whole demo-up (minutes of AWS time):
@@ -168,6 +61,13 @@ run "ecs_register_task_definition_rules" {
       )
     ])
     error_message = "task cpu/memory must be a valid Fargate combination (256-4096 cpu units)"
+  }
+
+  # Quota "Task definition size: 64 KiB" (not adjustable). The container definitions are the bulk of it; keep a margin
+  # for the rest of the registered document (family, roles, volumes).
+  assert {
+    condition     = length(aws_ecs_task_definition.main.container_definitions) < 56000 && length(aws_ecs_task_definition.init.container_definitions) < 56000
+    error_message = "a task definition may be at most 64 KiB; its container definitions must stay under 56000 bytes"
   }
 
   # --- container names ---
@@ -281,6 +181,115 @@ run "ecs_register_task_definition_rules" {
   assert {
     condition     = alltrue([for c in local.all_decoded_containers : length(split("@", c.image)[0]) <= 255])
     error_message = "an image reference (without its digest) is at most 255 characters"
+  }
+}
+
+run "task_shape" {
+  assert {
+    condition = (
+      startswith(aws_ecs_task_definition.main.family, "saiman-demo") && startswith(aws_ecs_task_definition.init.family, "saiman-demo")
+      && aws_ecs_task_definition.main.family != aws_ecs_task_definition.init.family
+      && aws_ecs_service.main.name == local.service_name && aws_ecs_cluster.main.name == "saiman-demo"
+    )
+    error_message = "both families must start with saiman-demo and differ; service and cluster names are fixed"
+  }
+
+  assert {
+    condition = alltrue([
+      for td in [aws_ecs_task_definition.main, aws_ecs_task_definition.init] :
+      td.runtime_platform[0].cpu_architecture == "ARM64" && td.runtime_platform[0].operating_system_family == "LINUX" && td.network_mode == "awsvpc" && contains(td.requires_compatibilities, "FARGATE")
+    ])
+    error_message = "both tasks must be Fargate ARM64 Linux awsvpc"
+  }
+
+  assert {
+    condition = alltrue([
+      for td in [aws_ecs_task_definition.main, aws_ecs_task_definition.init] :
+      td.execution_role_arn == "arn:aws:iam::123456789012:role/saiman/demo/saiman-demo-task-execution" && td.task_role_arn == "arn:aws:iam::123456789012:role/saiman/demo/saiman-demo-task"
+    ])
+    error_message = "roles must be the fixed bootstrap role ARNs"
+  }
+
+  assert {
+    condition     = aws_ecs_service.main.enable_execute_command == true && aws_ecs_service.main.force_delete == true && aws_ecs_service.main.wait_for_steady_state == false && aws_ecs_service.main.desired_count == 0
+    error_message = "the service needs ECS Exec, force_delete, no steady-state wait and starts at zero tasks (demo-up scales it after the init task)"
+  }
+
+  assert {
+    condition     = aws_ecs_service.main.task_definition == aws_ecs_task_definition.main.arn
+    error_message = "the service runs the stack task definition, never the init one"
+  }
+
+  assert {
+    condition     = aws_ecs_service.main.network_configuration[0].assign_public_ip == true && length(aws_ecs_service.main.network_configuration[0].subnets) == 2
+    error_message = "the task needs a public IP in the two public subnets"
+  }
+
+  assert {
+    condition = (
+      sum([for c in local.decoded_tasks.main : c.memory]) <= aws_ecs_task_definition.main.memory
+      && sum([for c in local.decoded_tasks.init : c.memory]) <= aws_ecs_task_definition.init.memory
+    )
+    error_message = "container memory limits must fit each task's memory"
+  }
+
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : c.logConfiguration.logDriver == "awslogs" && c.logConfiguration.options["awslogs-group"] == "/saiman-demo-lite" && c.logConfiguration.options["awslogs-stream-prefix"] == c.name])
+    error_message = "every container logs to the demo log group with its own stream prefix"
+  }
+
+  assert {
+    condition     = output.init_task_definition_arn == aws_ecs_task_definition.init.arn
+    error_message = "demo-up reads the init task definition from this output"
+  }
+}
+
+run "ecs_rules_the_mock_provider_does_not_apply" {
+  # ECS rejects a task definition with more than 10 containers ("Too many containers") when it is registered; a mock
+  # provider never does. Counted statically on exactly what ECS would receive, per task definition.
+  assert {
+    condition     = length(jsondecode(aws_ecs_task_definition.main.container_definitions)) <= 10
+    error_message = "the stack task definition has more than 10 containers (ECS limit)"
+  }
+
+  assert {
+    condition     = length(jsondecode(aws_ecs_task_definition.init.container_definitions)) <= 10
+    error_message = "the init task definition has more than 10 containers (ECS limit)"
+  }
+
+  assert {
+    condition     = local.max_containers_per_task == 10
+    error_message = "the guard constant must stay the real ECS limit"
+  }
+
+  # Every task definition needs at least one essential container.
+  assert {
+    condition     = length([for c in local.decoded_tasks.main : c if c.essential]) >= 1 && length([for c in local.decoded_tasks.init : c if c.essential]) >= 1
+    error_message = "each task definition needs an essential container (the init task ends with its `done` container)"
+  }
+
+  # dependsOn cannot cross task definitions: every target must be a container of the same one.
+  assert {
+    condition = alltrue([
+      for cs in values(local.decoded_tasks) :
+      alltrue([for c in cs : alltrue([for d in c.dependsOn : contains([for x in cs : x.name], d.containerName)])])
+    ])
+    error_message = "a dependsOn target must be in the same task definition"
+  }
+
+  # SUCCESS/COMPLETE cannot be set on an essential container.
+  assert {
+    condition = alltrue([
+      for cs in values(local.decoded_tasks) :
+      alltrue([for c in cs : alltrue([for d in c.dependsOn : d.condition == "HEALTHY" || !try([for x in cs : x.essential if x.name == d.containerName][0], false)])])
+    ])
+    error_message = "a SUCCESS dependency must not point at an essential container"
+  }
+
+  # The init task ends only when every one-shot succeeded.
+  assert {
+    condition     = jsonencode(sort([for d in [for c in local.decoded_tasks.init : c if c.name == "done"][0].dependsOn : d.containerName])) == jsonencode(sort([for c in local.decoded_tasks.init : c.name if c.name != "done"]))
+    error_message = "`done` must wait for every other init container"
   }
 }
 
