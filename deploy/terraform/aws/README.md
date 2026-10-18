@@ -211,6 +211,15 @@ returned it**, without empty lists such as `dependsOn` (demo-up #5 failed at `c.
 that string, never the resource attribute (`tests/check-task.sh` fails on any `aws_ecs_task_definition.*.container_definitions`
 read in `*.tf` and the tests). The tests also run every rule over a second copy of each task with all null and empty values
 dropped (`main_as_returned`, `init_as_returned`), so a rule that assumes an optional key fails offline.
+
+**Parity with docker-compose.** The environment and secret names of each app (`orchestrator`, `seller-api`, `ledger`, `ingest`) are
+compared with `deploy/compose/docker-compose.yml` (read with `yamldecode` by `tests/compose`), in Spring's relaxed spelling
+(`SPRING_DATASOURCE_PASSWORD` equals the compose secret target `spring.datasource.password`). Every other difference, in both
+directions, fails `terraform test` (`ecs_names_match_compose`) unless `tests/compose-parity-allowlist.json` lists it with its reason
+(the OpenAI key spelling, the Redis password and host/port, the health components, the evals token and the MKK credential that
+the demo does not use), and a stale entry fails too. Names are not enough for what Spring does with them, so
+`redis_credentials_reach_the_apps` pins the rule behind demo-up #8: Redis requires a password, and the apps get it as
+`SPRING_DATA_REDIS_PASSWORD` next to host and port, never next to a URL.
 `containers.tf` mirrors `deploy/compose/docker-compose.yml`, all stack containers on localhost:
 
 | Container | Task / kind | Notes |
@@ -223,11 +232,11 @@ dropped (`main_as_returned`, `init_as_returned`), so a rule that assumes an opti
 | `orchestrator`, `seller-api`, `ledger`, `ingest` | stack, essential | app password only, `SPRING_FLYWAY_ENABLED=false`, 768 MiB hard limit |
 | `otel-collector` | stack, non-essential | `assets/otel/config.yaml`; `grafana.yaml` overlay only when `grafana_otlp_endpoint` is set |
 | `web` | stack, essential | nginx on port 80, the conventional SSM port-forward target (not a control: a forward reaches every loopback port) |
-| `readiness` | stack, one-shot | runs `/assets/scripts/readiness.sh` (the assets prefix must contain `scripts/readiness.sh`), exits 0 when all four services are UP |
+| `readiness` | stack, one-shot | runs `/assets/scripts/readiness.sh` (the assets prefix must contain `scripts/readiness.sh`), exits 0 when all four services are UP; while it waits (every 2 min) and when it gives up it prints, per service, the HTTP status, the overall status and the `name=STATUS` of every health component that is not UP (read with `nc`: busybox `wget` discards the body of a 503), never the body itself |
 
 SSM parameters the `demo-up` workflow must create under `/saiman/demo/` (SecureString):
 `pg_master_password`, `pg_<schema>_{owner,app}_password` for `orchestrator`, `ledger`, `seller_api`, `ingest`,
-`redis_password` (Redis `--requirepass`; also `SPRING_DATA_REDIS_PASSWORD` on the four apps), `x402_buyer_private_key`, `openai_api_key`, `seller_service_token_ledger`, and `grafana_otlp_auth`
+`redis_password` (Redis `--requirepass`; also `SPRING_DATA_REDIS_PASSWORD` on the four apps, which reach Redis with `SPRING_DATA_REDIS_HOST` / `SPRING_DATA_REDIS_PORT`, never `SPRING_DATA_REDIS_URL`: Spring Boot ignores the password property when a URL is set), `x402_buyer_private_key`, `openai_api_key`, `seller_service_token_ledger`, and `grafana_otlp_auth`
 (only when `grafana_otlp_endpoint` is set). Spring cannot read file secrets on ECS, so the secrets are env vars
 with relaxed-binding names (`X402_CLIENT_PRIVATE_KEY`, `SAIMAN_ROUTER_OPENAI_API_KEY`,
 `SAIMAN_LEDGER_SELLER_SERVICE_TOKEN`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_FLYWAY_PASSWORD`).

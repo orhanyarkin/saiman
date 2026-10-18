@@ -7,6 +7,18 @@ M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-10-18 — Fix: the apps ignored the Redis password on ECS (demo-up #8), a compose/ECS parity test and readiness that says why
+
+**What changed**
+- demo-up #8: Terraform, the init task and the service were fine, then all four apps died with `NOAUTH HELLO must be called with the client already authenticated` and readiness gave up after 1200 s. Not a missing password: `SPRING_DATA_REDIS_PASSWORD` was given (the existing `exact_secret_map` test even pinned it) but so was `SPRING_DATA_REDIS_URL`, and Spring Boot 4.1.1 takes the credentials from the URL when one is set and ignores `spring.data.redis.password` (`PropertiesDataRedisConnectionDetails.getPassword()`, read in the sources jar). Compose has no Redis password at all (the premise "compose passes it" does not hold); the ECS password is a deliberate hardening. The apps now get `SPRING_DATA_REDIS_HOST=127.0.0.1` and `SPRING_DATA_REDIS_PORT=6379` instead of the URL. The execution role reads `/saiman/demo/redis_password` (IAM simulator: allowed with the boundary; Redis itself already started with it).
+- Parity test: `tests/compose` reads `deploy/compose/docker-compose.yml` (yamldecode handles its anchors and merge keys) and `run "ecs_names_match_compose"` compares the environment and secret names of each app with the ECS container definitions in Spring's relaxed spelling, in both directions; deliberate differences live in `tests/compose-parity-allowlist.json` with reasons (OpenAI key spelling, Redis password and host/port instead of the URL, `MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS`, the evals service token and the MKK credential the demo does not use); stale entries fail. First run found no other missing Kafka, DB, OpenAI or x402 name, only those differences. Names are not behaviour, so `redis_credentials_reach_the_apps` pins the URL-versus-password rule itself.
+- readiness: when services are not UP, `readiness.sh` prints every 2 minutes and at the timeout the HTTP status, the overall status and `name=STATUS` of each component that is not UP, e.g. `orchestrator (port 8080): HTTP 503, status DOWN, components not UP: redis=DOWN`. The services answer `/actuator/health` without components (`show-components: never`) and a DOWN service answers 503, whose body busybox `wget` throws away, so the ECS apps get `show-components=always` (never details) and the script reads the reply with `nc` (checked in the pinned busybox 1.38.0 image). Only the status code and tokens matching `[A-Za-z0-9_-]+` / `[A-Z_]+` are printed, never the body; the test serves a body with details and error text and asserts none of it appears.
+- 14 new mutations (`make tf-mutation-check`), all caught: the URL back next to the password, no password, wrong host or port, Redis on another port or without `--requirepass`, names missing on either side, stale allowlist entries, components not shown, details switched on. `ops/tf_mutation.py` can now copy `deploy/compose` next to the module so the tests that read it stay mutable.
+
+**How verified**: `terraform test` demo-lite (40) and bootstrap, `make tf-check`, `make tf-mutation-check`, `assets/test-assets.sh` (host tools and the pinned busybox image), pinned shellcheck, the IAM simulator. Nothing was applied and no bootstrap change is needed.
+
+**Next**: the next `demo-up` is the real test; with the parity test and the readiness output the next failure should name its component.
+
 ### 2026-10-18 — Fix: the task role could not list the assets prefix (demo-up #6), and a test for the whole class
 
 **What changed**
