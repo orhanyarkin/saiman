@@ -428,6 +428,18 @@ check_duration demo-up.yml apply
 check_duration demo-destroy.yml destroy
 check_duration demo-reaper.yml destroy
 
+# --- check-iam-coverage: a demo-lite resource type without an IAM action entry (and a stale entry) must fail -------------------
+cov="${work}/cov"
+mkdir -p "${cov}/demo-lite" "${cov}/bootstrap/tests"
+cp "${here}"/../demo-lite/*.tf "${cov}/demo-lite/"
+cp "${here}/../bootstrap/tests/check-iam-coverage.sh" "${here}/../bootstrap/tests/required-actions.json" "${cov}/bootstrap/tests/"
+expect "iam coverage: today's demo-lite is fully covered" 0 "OK" bash "${cov}/bootstrap/tests/check-iam-coverage.sh"
+printf 'resource "aws_sqs_queue" "q" {}\n' >"${cov}/demo-lite/zz.tf"
+expect "iam coverage: a new resource type without an entry fails and is named" 1 "aws_sqs_queue" bash "${cov}/bootstrap/tests/check-iam-coverage.sh"
+rm -f "${cov}/demo-lite/zz.tf"
+jq '.resources["aws_gone"] = {"apply": [], "destroy": []}' "${cov}/bootstrap/tests/required-actions.json" >"${cov}/bootstrap/tests/r.tmp" && mv "${cov}/bootstrap/tests/r.tmp" "${cov}/bootstrap/tests/required-actions.json"
+expect "iam coverage: a stale entry fails and is named" 1 "aws_gone" bash "${cov}/bootstrap/tests/check-iam-coverage.sh"
+
 if [[ "${fails}" -gt 0 ]]; then
   echo "test-ops-scripts: ${fails} failure(s)" >&2
   exit 1

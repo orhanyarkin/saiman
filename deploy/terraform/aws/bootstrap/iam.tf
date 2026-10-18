@@ -50,6 +50,16 @@ locals {
     Resource = "*"
   }
 
+  # ecs:DeregisterTaskDefinition has NO resource types in the Service Authorization Reference: it only works with
+  # Resource "*" (a scoped statement never grants it; demo-down failed on "on resource: *"). Terraform deregisters a task
+  # definition when it replaces or destroys it, so apply and destroy both need it. Cannot be narrowed to saiman-demo*.
+  stmt_ecs_deregister = {
+    Sid      = "EcsDeregisterTaskDefinition"
+    Effect   = "Allow"
+    Action   = ["ecs:DeregisterTaskDefinition"]
+    Resource = "*"
+  }
+
   stmt_iam_read = {
     Sid      = "ReadDemoRoles"
     Effect   = "Allow"
@@ -179,6 +189,7 @@ resource "aws_iam_role_policy" "apply" {
     Version = "2012-10-17"
     Statement = [
       local.stmt_read,
+      local.stmt_ecs_deregister,
       local.stmt_iam_read,
       local.stmt_state_list,
       local.stmt_state_rw,
@@ -187,9 +198,9 @@ resource "aws_iam_role_policy" "apply" {
         Sid    = "EcsDemoResources"
         Effect = "Allow"
         Action = [
-          "ecs:CreateCluster", "ecs:UpdateCluster", "ecs:DeleteCluster",
+          "ecs:CreateCluster", "ecs:UpdateCluster", "ecs:UpdateClusterSettings", "ecs:DeleteCluster",
           "ecs:CreateService", "ecs:UpdateService", "ecs:DeleteService",
-          "ecs:DeregisterTaskDefinition", "ecs:DeleteTaskDefinitions",
+          "ecs:DeleteTaskDefinitions",
           "ecs:TagResource", "ecs:UntagResource", "ecs:StopTask"
         ]
         Resource = [
@@ -250,6 +261,7 @@ resource "aws_iam_role_policy" "apply" {
           "ec2:AuthorizeSecurityGroupIngress", "ec2:AuthorizeSecurityGroupEgress",
           "ec2:RevokeSecurityGroupIngress", "ec2:RevokeSecurityGroupEgress",
           "ec2:UpdateSecurityGroupRuleDescriptionsIngress", "ec2:UpdateSecurityGroupRuleDescriptionsEgress",
+          "ec2:ModifySecurityGroupRules", "ec2:ReplaceRoute",
           "ec2:CreateTags", "ec2:DeleteTags",
         ]
         Resource = "*"
@@ -273,7 +285,6 @@ resource "aws_iam_role_policy" "apply" {
         Effect = "Allow"
         Action = [
           "scheduler:CreateSchedule", "scheduler:UpdateSchedule", "scheduler:DeleteSchedule",
-          "scheduler:TagResource", "scheduler:UntagResource",
         ]
         Resource = "arn:aws:scheduler:${var.region}:${local.account_id}:schedule/default/saiman-demo*"
       },
@@ -292,18 +303,6 @@ resource "aws_iam_role_policy" "apply" {
         Effect   = "Allow"
         Action   = ["s3:PutObject"]
         Resource = "${local.bucket_arn}/demo/*"
-      },
-      {
-        Sid      = "BudgetsDemo"
-        Effect   = "Allow"
-        Action   = ["budgets:ModifyBudget", "budgets:DeleteBudget", "budgets:TagResource", "budgets:UntagResource"]
-        Resource = "arn:aws:budgets::${local.account_id}:budget/saiman-demo*"
-      },
-      {
-        Sid      = "BudgetsCreate"
-        Effect   = "Allow"
-        Action   = ["budgets:CreateBudget"]
-        Resource = "*"
       },
       {
         # The only IAM write. The roles are fixed in bootstrap (demo_roles.tf), carry the boundary and
@@ -378,6 +377,7 @@ resource "aws_iam_role_policy" "destroy" {
     Version = "2012-10-17"
     Statement = [
       local.stmt_read,
+      local.stmt_ecs_deregister,
       local.stmt_iam_read,
       local.stmt_state_list,
       local.stmt_state_rw,
@@ -389,7 +389,7 @@ resource "aws_iam_role_policy" "destroy" {
         Effect = "Allow"
         Action = [
           "ecs:DeleteService", "ecs:DeleteCluster", "ecs:StopTask",
-          "ecs:DeregisterTaskDefinition", "ecs:DeleteTaskDefinitions", "ecs:UntagResource",
+          "ecs:DeleteTaskDefinitions", "ecs:UntagResource",
         ]
         Resource = [
           "arn:aws:ecs:${var.region}:${local.account_id}:cluster/saiman-demo*",
@@ -444,12 +444,6 @@ resource "aws_iam_role_policy" "destroy" {
         Effect   = "Allow"
         Action   = ["ssm:DeleteParameter", "ssm:DeleteParameters"]
         Resource = local.ssm_demo_arn
-      },
-      {
-        Sid      = "BudgetsDelete"
-        Effect   = "Allow"
-        Action   = ["budgets:DeleteBudget"]
-        Resource = "arn:aws:budgets::${local.account_id}:budget/saiman-demo*"
       },
       {
         Sid      = "ListDemoExports"
