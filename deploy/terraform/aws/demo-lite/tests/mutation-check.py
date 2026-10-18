@@ -3,17 +3,13 @@
 
 For each rule of the ECS RegisterTaskDefinition test it breaks the module in exactly the way the rule is meant to catch,
 runs `terraform test -filter=tests/task.tftest.hcl` in a temporary copy and requires BOTH a failing run AND the rule's own
-error message in the output. A rule that stays green under its mutation is dead weight. The repository is never modified.
+error message in the output (engine: ops/tf_mutation.py). The repository is never modified.
 
 Usage: python3 deploy/terraform/aws/demo-lite/tests/mutation-check.py [rule-id ...]   (default: all; ~10 s each)
 Exit 0 every mutation was caught, 1 a mutation survived or the baseline is red, 2 setup problem.
 """
 import os
-import re
-import shutil
-import subprocess
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.path.dirname(HERE)
@@ -55,58 +51,11 @@ MUTATIONS = [
 ]
 
 
-def norm(text):
-    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
-    return re.sub(r"[\s│╷╵]+", " ", text)
-
-
-def run_tests(workdir):
-    proc = subprocess.run(["terraform", "test", "-no-color", "-filter=tests/task.tftest.hcl"], cwd=workdir, capture_output=True, text=True, timeout=600)
-    return proc.returncode, norm(proc.stdout + proc.stderr)
-
-
 def main():
-    wanted = set(sys.argv[1:])
-    unknown = wanted - {m[0] for m in MUTATIONS}
-    if unknown:
-        print("unknown rule id(s): " + ", ".join(sorted(unknown)), file=sys.stderr)
-        return 2
-    work = tempfile.mkdtemp(prefix="saiman-mutation.")
-    try:
-        mod = os.path.join(work, "demo-lite")
-        shutil.copytree(MODULE, mod, ignore=shutil.ignore_patterns(".terraform", "terraform.tfstate*", "*.tfplan"))
-        if os.path.isdir(os.path.join(MODULE, ".terraform")):
-            os.symlink(os.path.join(MODULE, ".terraform"), os.path.join(mod, ".terraform"))
-        else:
-            subprocess.run(["terraform", "init", "-backend=false", "-input=false"], cwd=mod, check=True, capture_output=True)
-        code, _ = run_tests(mod)
-        if code != 0:
-            print("baseline is red: fix the tests before mutating", file=sys.stderr)
-            return 1
-        survived = 0
-        for rule, fname, old, new, expect in MUTATIONS:
-            if wanted and rule not in wanted:
-                continue
-            path = os.path.join(mod, fname)
-            original = open(path, encoding="utf-8").read()
-            if original.count(old) < 1:
-                print(f"SETUP {rule}: the mutation anchor is not in {fname} (update mutation-check.py)", file=sys.stderr)
-                return 2
-            open(path, "w", encoding="utf-8").write(original.replace(old, new))
-            try:
-                code, out = run_tests(mod)
-            finally:
-                open(path, "w", encoding="utf-8").write(original)
-            if code != 0 and any(norm(alt) in out for alt in expect.split("|||")):
-                print(f"caught   {rule}")
-            else:
-                survived += 1
-                why = "stayed green" if code == 0 else f"failed, but without the message '{expect}'"
-                print(f"SURVIVED {rule}: {why}", file=sys.stderr)
-        print("mutation-check: all mutations caught" if survived == 0 else f"mutation-check: {survived} mutation(s) survived")
-        return 0 if survived == 0 else 1
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+    sys.path.insert(0, os.path.join(HERE, "..", "..", "ops"))
+    import tf_mutation
+
+    return tf_mutation.run(MODULE, "tests/task.tftest.hcl", MUTATIONS, sys.argv[1:])
 
 
 if __name__ == "__main__":
