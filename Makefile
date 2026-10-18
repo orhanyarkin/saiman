@@ -312,10 +312,11 @@ TF_AWS := deploy/terraform/aws
 REGION ?= eu-central-1
 STATE_BUCKET ?=
 
-tf-mutation-check: ## Break each rule of the ECS, IAM and teardown-check tests on purpose and require the tests to notice (offline, ~4 min, repo untouched).
+tf-mutation-check: ## Break each rule of the ECS, IAM, teardown-check, readiness and tunnel tests on purpose and require the tests to notice (offline, ~4 min, repo untouched).
 	python3 $(TF_AWS)/demo-lite/tests/mutation-check.py
 	python3 $(TF_AWS)/bootstrap/tests/mutation-check.py
 	python3 -B $(TF_AWS)/ops/mutation-check-demo-down.py
+	python3 -B $(TF_AWS)/ops/mutation-check-tunnel-readiness.py
 
 tf-check: test-aws-assets ## Offline Terraform checks (fmt, validate, test) for bootstrap + demo-lite and every ops/check script; no credentials.
 	terraform fmt -check -recursive $(TF_AWS)
@@ -335,12 +336,16 @@ tf-check: test-aws-assets ## Offline Terraform checks (fmt, validate, test) for 
 	$(TF_AWS)/ops/check-mirror-versions.sh
 	$(TF_AWS)/ops/check-workflow-run-blocks.sh
 
-demo-tunnel: ## Port-forward localhost:8088 to the running demo's web container (SSM; needs session-manager-plugin and AWS_PROFILE).
-	$(TF_AWS)/ops/demo-tunnel.sh --region $(REGION)
+# The local compose stack publishes its dashboard on 127.0.0.1:8088 too: with both up, localhost:8088 is the LOCAL stack. The tunnel
+# refuses a busy port; pick another with TUNNEL_PORT (and give demo-capture the same value).
+TUNNEL_PORT ?= 8088
 
-demo-capture: ## With `make demo-tunnel` running: fetch the demo's tokens from SSM and capture its runs (ADR-0026).
+demo-tunnel: ## Port-forward localhost:$(TUNNEL_PORT) (default 8088) to the running demo's web container (SSM; needs session-manager-plugin and AWS_PROFILE). Local compose uses 8088 too: TUNNEL_PORT=18088.
+	$(TF_AWS)/ops/demo-tunnel.sh --region $(REGION) --local-port $(TUNNEL_PORT)
+
+demo-capture: ## With `make demo-tunnel` running (same TUNNEL_PORT): fetch the demo's tokens from SSM and capture its runs (ADR-0026).
 	@set -e; dir="$$($(TF_AWS)/ops/demo-tokens.sh --region $(REGION))"; trap 'rm -rf "$$dir"' EXIT; \
-	ORCH_URL=http://localhost:8088 LEDGER_URL=http://localhost:8088 SECRETS_DIR="$$dir" \
+	ORCH_URL=http://localhost:$(TUNNEL_PORT) LEDGER_URL=http://localhost:$(TUNNEL_PORT) SECRETS_DIR="$$dir" \
 	CAPTURE_ENVIRONMENT="AWS eu-central-1 (ECS Fargate ARM)" $(MAKE) capture-demo
 
 demo-down-check: ## Strict teardown check with your admin profile. Usage: make demo-down-check STATE_BUCKET=<bucket> [REGION=eu-central-1]

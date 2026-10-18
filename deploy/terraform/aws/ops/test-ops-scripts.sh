@@ -277,6 +277,47 @@ expect "tunnel: local 8088 -> 80" 0 '"localPortNumber":["8088"]' "${ops}/demo-tu
 echo '{"taskArns":[]}' >"${fx}/ecs_list-tasks.json"
 expect "tunnel: no task is a clear error" 1 "no running task" "${ops}/demo-tunnel.sh" --dry-run
 
+# A busy local port (the local compose stack publishes 127.0.0.1:8088 too) must stop the tunnel with a clear message, not let
+# localhost:<port> silently be somebody else (demo-up #9). Fakes for docker and the plugin live in their own bin dir.
+tbin="${work}/tunnel-bin"
+mkdir -p "${tbin}"
+printf '#!/bin/sh\nexit 0\n' >"${tbin}/session-manager-plugin"
+chmod +x "${tbin}/session-manager-plugin"
+echo '{"taskArns":["arn:aws:ecs:eu-central-1:1:task/saiman-demo/abc123"]}' >"${fx}/ecs_list-tasks.json"
+echo '{"tasks":[{"containers":[{"name":"web","lastStatus":"RUNNING","runtimeId":"abc123-0123456789"}]}]}' >"${fx}/ecs_describe-tasks.json"
+tport="$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+: >"${fx}/calls.log"
+expect "tunnel: a free local port starts the session" 0 "forwarding http://localhost:${tport}" env PATH="${tbin}:${PATH}" "${ops}/demo-tunnel.sh" --local-port "${tport}"
+if grep -q 'ssm start-session' "${fx}/calls.log"; then ok "tunnel: a free port reaches start-session"; else bad "tunnel: no start-session call on a free port"; fi
+python3 -I -c '
+import socket, sys, time
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1])))
+s.listen()
+time.sleep(60)
+' "${tport}" &
+listener=$!
+sleep 1
+printf '#!/bin/sh\n[ "$1" = ps ] && echo "saiman-web-1 (nginx:1.31.0-alpine) 127.0.0.1:%s->80/tcp, 8088/tcp"\n' "${tport}" >"${tbin}/docker"
+chmod +x "${tbin}/docker"
+: >"${fx}/calls.log"
+expect "tunnel: a busy local port stops the tunnel and names the docker container holding it" 1 "held by: docker container saiman-web-1 (nginx:1.31.0-alpine)" env PATH="${tbin}:${PATH}" "${ops}/demo-tunnel.sh" --local-port "${tport}"
+grep -qF "local port ${tport} is already in use" "${work}/out.txt" && ok "tunnel: the message names the port" || bad "tunnel: the busy-port message does not name the port"
+grep -qF 'make demo-tunnel TUNNEL_PORT=' "${work}/out.txt" && ok "tunnel: the message suggests TUNNEL_PORT" || bad "tunnel: no TUNNEL_PORT suggestion"
+if grep -qE 'ssm start-session|ecs list-tasks' "${fx}/calls.log"; then bad "tunnel: a busy port still reached AWS"; else ok "tunnel: a busy port is refused before any AWS call"; fi
+rm -f "${tbin}/docker"
+expect "tunnel: a busy port is refused even when nothing can say who holds it" 1 "already in use" env PATH="${tbin}:${PATH}" "${ops}/demo-tunnel.sh" --local-port "${tport}"
+expect "tunnel: --dry-run does not care about the local port" 0 "start-session" env PATH="${tbin}:${PATH}" "${ops}/demo-tunnel.sh" --dry-run --local-port "${tport}"
+kill "${listener}" 2>/dev/null || true
+wait "${listener}" 2>/dev/null || true
+expect "tunnel: the same port works again once it is free" 0 "forwarding" env PATH="${tbin}:${PATH}" "${ops}/demo-tunnel.sh" --local-port "${tport}"
+echo '{"taskArns":[]}' >"${fx}/ecs_list-tasks.json"
+# The make targets take the port from TUNNEL_PORT (never run `make -n` on a demo target: it executes recipes that call $(MAKE)).
+mk="${here}/../../../../Makefile"
+if grep -q '^TUNNEL_PORT ?= 8088$' "${mk}" && grep -q 'demo-tunnel.sh --region $(REGION) --local-port $(TUNNEL_PORT)$' "${mk}"; then ok "make demo-tunnel passes TUNNEL_PORT (default 8088)"; else bad "Makefile: demo-tunnel does not pass --local-port \$(TUNNEL_PORT)"; fi
+if grep -q 'ORCH_URL=http://localhost:$(TUNNEL_PORT) LEDGER_URL=http://localhost:$(TUNNEL_PORT)' "${mk}" && ! sed -n '/^demo-capture:/,/^$/p' "${mk}" | grep -q 'localhost:8088'; then ok "make demo-capture follows TUNNEL_PORT"; else bad "Makefile: demo-capture still hard-codes localhost:8088"; fi
+
 # --- demo-tokens ------------------------------------------------------------------------------------------------------------
 reset
 tokdir="$("${ops}/demo-tokens.sh" 2>"${work}/tok.err")" || bad "demo-tokens failed"
