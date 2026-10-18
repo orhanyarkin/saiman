@@ -526,10 +526,11 @@ resource "aws_iam_policy" "demo_boundary" {
         Resource = "${local.bucket_arn}/demo/*"
       },
       {
-        Sid      = "CeilingList"
-        Effect   = "Allow"
-        Action   = ["s3:ListBucket"]
-        Resource = local.bucket_arn
+        Sid       = "CeilingList"
+        Effect    = "Allow"
+        Action    = ["s3:ListBucket"]
+        Resource  = local.bucket_arn
+        Condition = { StringLike = { "s3:prefix" = local.demo_s3_list_prefixes } }
       },
       {
         Sid      = "DecryptSsmSecureStrings"

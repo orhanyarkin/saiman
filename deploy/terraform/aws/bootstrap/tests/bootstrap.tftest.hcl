@@ -666,3 +666,91 @@ run "demo_lite_resources_have_their_api_actions" {
     ]))}"
   }
 }
+
+run "task_role_lists_only_the_demo_assets" {
+  # `aws s3 sync s3://<bucket>/demo/assets/<session>/` lists with ListObjectsV2 and a prefix (demo-up #6 failed on the missing
+  # s3:ListBucket). The grant is the bucket ARN with an s3:prefix condition; the state objects (bootstrap/, demo-lite/) and the
+  # corpus prefix match no pattern, and a list without a prefix has no s3:prefix value, so none of them can be listed.
+  assert {
+    condition = (
+      length([for s in jsondecode(aws_iam_role_policy.demo_task.policy).Statement : s if s.Effect == "Allow" && contains(try(tolist(s.Action), []), "s3:ListBucket")]) == 1
+      && anytrue([
+        for s in jsondecode(aws_iam_role_policy.demo_task.policy).Statement :
+        s.Effect == "Allow" && s.Action == ["s3:ListBucket"] && s.Resource == "arn:aws:s3:::saiman-test-tfstate"
+        && try(s.Condition.StringLike["s3:prefix"] == ["demo/assets/*"] && length(keys(s.Condition)) == 1, false)
+      ])
+    )
+    error_message = "the task role must have exactly one s3:ListBucket grant: the bucket ARN, condition StringLike s3:prefix = [demo/assets/*]"
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for p in [
+        jsondecode(aws_iam_role_policy.demo_task.policy),
+        jsondecode(aws_iam_role_policy.demo_task_execution.policy),
+        jsondecode(aws_iam_policy.demo_boundary.policy),
+        ] : [
+        for s in p.Statement :
+        try(s.Effect == "Allow" && contains(tolist(s.Action), "s3:ListBucket"), false) ? (
+          can(s.Condition.StringLike["s3:prefix"]) && alltrue([for v in s.Condition.StringLike["s3:prefix"] : startswith(v, "demo/assets/")])
+        ) : true
+      ]
+    ]))
+    error_message = "every s3:ListBucket grant (task role, execution role, boundary) needs an s3:prefix condition whose patterns all start with demo/assets/ (no bare *, bootstrap*, demo-lite*, artifacts/)"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_policy.demo_boundary.policy).Statement :
+      s.Sid == "CeilingList" && s.Action == ["s3:ListBucket"] && s.Resource == "arn:aws:s3:::saiman-test-tfstate" && try(s.Condition.StringLike["s3:prefix"] == ["demo/assets/*"], false)
+    ])
+    error_message = "the boundary ceiling must allow listing only under demo/assets/ as well"
+  }
+}
+
+run "workload_has_the_actions_its_containers_use" {
+  # tests/required-actions.json "workload": what the AWS CLI commands in the container definitions (tests/check-workload-actions.sh
+  # keeps that list complete) and the ECS agent call. Each action must be granted by the role the containers run as AND by the
+  # permissions boundary, otherwise the effective permission is empty and the first demo-up finds out.
+  assert {
+    condition = length(flatten([
+      for name, w in run.facts.workload : [
+        for a in w.actions : "${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(w.role == "task" ? aws_iam_role_policy.demo_task.policy : aws_iam_role_policy.demo_task_execution.policy).Statement :
+          s.Effect == "Allow" && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+        ])
+      ]
+    ])) == 0
+    error_message = "a demo role lacks what its containers use: ${join("; ", flatten([
+      for name, w in run.facts.workload : [
+        for a in w.actions : "${w.role} role, ${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(w.role == "task" ? aws_iam_role_policy.demo_task.policy : aws_iam_role_policy.demo_task_execution.policy).Statement :
+          s.Effect == "Allow" && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+        ])
+      ]
+    ]))}"
+  }
+
+  assert {
+    condition = length(flatten([
+      for name, w in run.facts.workload : [
+        for a in w.actions : "${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(aws_iam_policy.demo_boundary.policy).Statement :
+          s.Effect == "Allow" && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+        ])
+      ]
+    ])) == 0
+    error_message = "the permissions boundary does not allow what the containers use: ${join("; ", flatten([
+      for name, w in run.facts.workload : [
+        for a in w.actions : "${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(aws_iam_policy.demo_boundary.policy).Statement :
+          s.Effect == "Allow" && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+        ])
+      ]
+    ]))}"
+  }
+}
