@@ -142,15 +142,23 @@ locals {
     memory        = 768 # the Paketo memory calculator sizes the JVM from this limit
     restartPolicy = { enabled = true, restartAttemptPeriod = 60 }
     env = merge({
-      SPRING_DATASOURCE_URL                   = local.jdbc_url
-      SPRING_DATASOURCE_USERNAME              = "${a.schema}_app"
-      SPRING_FLYWAY_ENABLED                   = "false" # migrations run in <svc>-migrate (ADR-0027)
-      SPRING_KAFKA_BOOTSTRAP_SERVERS          = "127.0.0.1:9092"
-      SPRING_DATA_REDIS_URL                   = "redis://127.0.0.1:6379"
+      SPRING_DATASOURCE_URL          = local.jdbc_url
+      SPRING_DATASOURCE_USERNAME     = "${a.schema}_app"
+      SPRING_FLYWAY_ENABLED          = "false" # migrations run in <svc>-migrate (ADR-0027)
+      SPRING_KAFKA_BOOTSTRAP_SERVERS = "127.0.0.1:9092"
+      # Host and port, NOT spring.data.redis.url: Spring Boot takes the credentials from the URL when one is set and ignores
+      # spring.data.redis.password (PropertiesDataRedisConnectionDetails), so a URL here would drop the password below
+      # (demo-up #8: NOAUTH). Compose has no Redis password and uses the URL; the difference is in tests/compose-parity-allowlist.json.
+      SPRING_DATA_REDIS_HOST                  = "127.0.0.1"
+      SPRING_DATA_REDIS_PORT                  = "6379"
       OTEL_EXPORTER_OTLP_ENDPOINT             = "http://127.0.0.1:4318"
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY = "1.0"
       MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED  = "true"
       BPL_JVM_THREAD_COUNT                    = "50"
+      # Component names and statuses, never details: readiness.sh prints which component is DOWN when a service does not come up
+      # (the services default to show-components: never, so a failed demo-up would only say "not UP"). The health endpoint is
+      # reachable on loopback only; nginx does not route /actuator.
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS = "always"
     }, local.app_env[name])
     secrets = merge({
       SPRING_DATASOURCE_PASSWORD = "pg_${a.schema}_app_password"

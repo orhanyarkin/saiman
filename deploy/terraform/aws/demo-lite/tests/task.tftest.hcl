@@ -329,6 +329,78 @@ run "work_is_split_as_designed" {
   }
 }
 
+run "compose" {
+  # Reads deploy/compose/docker-compose.yml (tests/compose) for the next run.
+  command = plan
+
+  module {
+    source = "./tests/compose"
+  }
+}
+
+run "ecs_names_match_compose" {
+  # demo-up #8: the apps could not reach Redis (NOAUTH). ECS runs Redis with a password and gave the apps SPRING_DATA_REDIS_PASSWORD
+  # next to SPRING_DATA_REDIS_URL, but Spring Boot takes the credentials from the URL when one is set and ignores the password
+  # property. Nothing offline compared what compose and ECS give an app. This does, for the environment and secret names of
+  # the four apps, in both directions; every deliberate difference sits in tests/compose-parity-allowlist.json with its reason.
+  assert {
+    condition = length(flatten([
+      for svc, by in run.compose.compose_names : [
+        for c, raw in by : "${svc}: ${raw}" if !contains(local.app_property_names[svc], c) && !contains(run.compose.compose_only[svc], c)
+      ]
+    ])) == 0
+    error_message = "compose gives an app these names and ECS does not (add them to containers.tf, or to compose_only in tests/compose-parity-allowlist.json with a reason): ${join(", ", flatten([
+      for svc, by in run.compose.compose_names : [
+        for c, raw in by : "${svc}: ${raw}" if !contains(local.app_property_names[svc], c) && !contains(run.compose.compose_only[svc], c)
+      ]
+    ]))}"
+  }
+
+  assert {
+    condition = length(flatten([
+      for svc, names in local.app_property_names : [
+        for c in names : "${svc}: ${c}" if !contains(keys(run.compose.compose_names[svc]), c) && !contains(run.compose.ecs_only[svc], c)
+      ]
+    ])) == 0
+    error_message = "ECS gives an app these names (lower case, no . _ -) and compose does not (add them to docker-compose.yml, or to ecs_only in tests/compose-parity-allowlist.json with a reason): ${join(", ", flatten([
+      for svc, names in local.app_property_names : [
+        for c in names : "${svc}: ${c}" if !contains(keys(run.compose.compose_names[svc]), c) && !contains(run.compose.ecs_only[svc], c)
+      ]
+    ]))}"
+  }
+
+  assert {
+    condition = length(flatten([
+      for svc, cs in run.compose.compose_only : [
+        for c in cs : "${svc}: ${c}" if !contains(keys(run.compose.compose_names[svc]), c) || contains(local.app_property_names[svc], c)
+      ]
+    ])) == 0
+    error_message = "stale compose_only entries in tests/compose-parity-allowlist.json (compose no longer has the name, or ECS has it now): ${join(", ", flatten([
+      for svc, cs in run.compose.compose_only : [
+        for c in cs : "${svc}: ${c}" if !contains(keys(run.compose.compose_names[svc]), c) || contains(local.app_property_names[svc], c)
+      ]
+    ]))}"
+  }
+
+  assert {
+    condition = length(flatten([
+      for svc, cs in run.compose.ecs_only : [
+        for c in cs : "${svc}: ${c}" if !contains(local.app_property_names[svc], c) || contains(keys(run.compose.compose_names[svc]), c)
+      ]
+    ])) == 0
+    error_message = "stale ecs_only entries in tests/compose-parity-allowlist.json (ECS no longer has the name, or compose has it now): ${join(", ", flatten([
+      for svc, cs in run.compose.ecs_only : [
+        for c in cs : "${svc}: ${c}" if !contains(local.app_property_names[svc], c) || contains(keys(run.compose.compose_names[svc]), c)
+      ]
+    ]))}"
+  }
+
+  assert {
+    condition     = alltrue([for k, v in run.compose.aliases : contains(flatten(values(run.compose.raw_names)), k)])
+    error_message = "an alias in tests/compose-parity-allowlist.json names something compose no longer has"
+  }
+}
+
 run "provider_read_back_shape" {
   # The rules above and below already run over the `*_as_returned` copies (see the header). These assertions keep that
   # input honest: it must really lack the empty keys, and dropping them must not change what the rules look at.
@@ -456,18 +528,18 @@ run "exact_env_names" {
           "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS", "KAFKA_AUTO_CREATE_TOPICS_ENABLE", "KAFKA_LOG_DIRS", "KAFKA_HEAP_OPTS",
         ])
         orchestrator = sort(concat(
-          ["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_URL", "SPRING_FLYWAY_ENABLED", "SPRING_KAFKA_BOOTSTRAP_SERVERS"],
+          ["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_HOST", "SPRING_DATA_REDIS_PORT", "SPRING_FLYWAY_ENABLED", "MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS", "SPRING_KAFKA_BOOTSTRAP_SERVERS"],
           ["SAIMAN_AUTH_READER_TOKEN_SHA256", "SAIMAN_AUTH_OPERATOR_TOKEN_SHA256", "X402_CLIENT_ALLOWED_PAY_TO", "X402_CLIENT_ALLOWED_PLAINTEXT_HOSTS", "SPRING_HTTP_CLIENTS_REDIRECTS", "SAIMAN_SELLER_BASE_URL", "SAIMAN_ROUTER_REQUIRE_COST_SCOPE", "SAIMAN_ROUTER_MAX_SCOPE_BUDGET_USD_MICROS", "SAIMAN_ORCHESTRATOR_API_ALLOWED_HOSTS", "SAIMAN_ORCHESTRATOR_SPEND_APPROVAL_THRESHOLD_ATOMIC", "SAIMAN_CHAIN_RPC_URL", "SAIMAN_CHAIN_ALLOWED_HOSTS"],
         ))
         seller-api = sort(concat(
-          ["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_URL", "SPRING_FLYWAY_ENABLED", "SPRING_KAFKA_BOOTSTRAP_SERVERS"],
+          ["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_HOST", "SPRING_DATA_REDIS_PORT", "SPRING_FLYWAY_ENABLED", "MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS", "SPRING_KAFKA_BOOTSTRAP_SERVERS"],
           ["SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256", "SELLER_INGEST_BASE_URL", "SELLER_DISCLOSURES_SOURCE", "X402_SELLER_PAYTO_ADDRESS", "SELLER_INTERNAL_ALLOWED_HOSTS"],
         ))
         ledger = sort(concat(
-          ["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_URL", "SPRING_FLYWAY_ENABLED", "SPRING_KAFKA_BOOTSTRAP_SERVERS"],
+          ["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_HOST", "SPRING_DATA_REDIS_PORT", "SPRING_FLYWAY_ENABLED", "MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS", "SPRING_KAFKA_BOOTSTRAP_SERVERS"],
           ["SAIMAN_AUTH_READER_TOKEN_SHA256", "SAIMAN_AUTH_OPERATOR_TOKEN_SHA256", "SAIMAN_CHAIN_RPC_URL", "SAIMAN_CHAIN_ALLOWED_HOSTS", "SAIMAN_LEDGER_API_ALLOWED_HOSTS", "SAIMAN_LEDGER_SELLER_BASE_URL", "SAIMAN_LEDGER_SELLER_ALLOWED_HOSTS"],
         ))
-        ingest = sort(["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_URL", "SPRING_FLYWAY_ENABLED", "SPRING_KAFKA_BOOTSTRAP_SERVERS"])
+        ingest = sort(["BPL_JVM_THREAD_COUNT", "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED", "MANAGEMENT_TRACING_SAMPLING_PROBABILITY", "OTEL_EXPORTER_OTLP_ENDPOINT", "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATA_REDIS_HOST", "SPRING_DATA_REDIS_PORT", "SPRING_FLYWAY_ENABLED", "MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS", "SPRING_KAFKA_BOOTSTRAP_SERVERS"])
 
       }
     })
@@ -759,6 +831,70 @@ run "redis_bounded_and_not_evicting" {
       c.name != "redis" || (strcontains(join(" ", c.command), "--maxmemory 96mb") && strcontains(join(" ", c.command), "--maxmemory-policy noeviction"))
     ])
     error_message = "redis must be capped at 96mb with noeviction (a full Redis must reject writes, never drop nonce claims or day-cap counters)"
+  }
+}
+
+run "redis_credentials_reach_the_apps" {
+  # demo-up #8: Redis runs with --requirepass, but the apps were given spring.data.redis.url next to the password. Spring Boot
+  # takes the credentials from the URL when one is set and ignores spring.data.redis.password, so every app got NOAUTH and
+  # readiness failed after 20 minutes. The name parity test cannot see that (the URL exists on both sides); this pins the rule.
+  assert {
+    condition = alltrue([
+      for c in local.decoded_tasks.main :
+      !contains(keys(local.apps), c.name) || (
+        !anytrue([for e in try(c.environment, []) : startswith(e.name, "SPRING_DATA_REDIS_") && strcontains(e.name, "URL")])
+        && !anytrue([for e in try(c.environment, []) : strcontains(e.name, "REDIS") && strcontains(e.name, "PASSWORD")])
+      )
+    ])
+    error_message = "an app must not set spring.data.redis.url (Spring Boot then ignores spring.data.redis.password): use SPRING_DATA_REDIS_HOST and SPRING_DATA_REDIS_PORT"
+  }
+
+  assert {
+    condition = alltrue([
+      for c in local.decoded_tasks.main :
+      !contains(keys(local.apps), c.name) || (
+        contains([for e in c.environment : "${e.name}=${e.value}"], "SPRING_DATA_REDIS_HOST=127.0.0.1")
+        && contains([for e in c.environment : "${e.name}=${e.value}"], "SPRING_DATA_REDIS_PORT=6379")
+      )
+    ])
+    error_message = "every app reaches Redis on SPRING_DATA_REDIS_HOST=127.0.0.1 and SPRING_DATA_REDIS_PORT=6379"
+  }
+
+  assert {
+    condition = alltrue([
+      for c in local.decoded_tasks.main :
+      !contains(keys(local.apps), c.name) || anytrue([
+        for s in c.secrets : s.name == "SPRING_DATA_REDIS_PASSWORD" && endswith(s.valueFrom, "/redis_password")
+      ])
+    ])
+    error_message = "every app gets the Redis password (SSM redis_password) as SPRING_DATA_REDIS_PASSWORD"
+  }
+
+  assert {
+    condition = alltrue([
+      for c in local.decoded_tasks.main :
+      c.name != "redis" || (
+        strcontains(join(" ", c.command), "--bind 127.0.0.1") && strcontains(join(" ", c.command), "--requirepass")
+        && !strcontains(join(" ", c.command), "--port")
+        && anytrue([for s in c.secrets : s.name == "REDIS_PASSWORD" && endswith(s.valueFrom, "/redis_password")])
+      )
+    ])
+    error_message = "redis listens on 127.0.0.1:6379 (the apps' host and port) and requires the same SSM redis_password"
+  }
+}
+
+run "health_shows_component_names_only" {
+  # readiness.sh explains a failed demo-up from /actuator/health, which the services answer without components by default.
+  # ECS turns component names and statuses on and must never turn details on (hostnames, versions, error text).
+  assert {
+    condition = alltrue([
+      for c in local.decoded_tasks.main :
+      !contains(keys(local.apps), c.name) || (
+        contains([for e in c.environment : "${e.name}=${e.value}"], "MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS=always")
+        && !anytrue([for e in c.environment : strcontains(e.name, "SHOW_DETAILS") || strcontains(e.name, "SHOW-DETAILS")])
+      )
+    ])
+    error_message = "every app shows health component names (MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS=always) and none shows details"
   }
 }
 

@@ -164,6 +164,15 @@ locals {
     { for t, cs in local.decoded_registered : "${t}_as_returned" => [for c in cs : { for k, v in c : k => v if v != null && try(length(v) > 0, true) }] },
   )
   all_decoded_containers = flatten(values(local.decoded_tasks))
+
+  # Environment and secret names of the four app containers in the spelling Spring's relaxed binding sees (lower case, no
+  # "." "_" "-"). tests/task.tftest.hcl compares them with docker-compose (run ecs_names_match_compose). Only the tests read this.
+  app_property_names = {
+    for c in local.decoded_registered.main : c.name => [
+      for n in concat([for e in try(c.environment, []) : e.name], [for s in try(c.secrets, []) : s.name]) :
+      lower(replace(replace(replace(n, ".", ""), "_", ""), "-", ""))
+    ] if contains(keys(local.apps), c.name)
+  }
 }
 
 locals {
