@@ -108,7 +108,12 @@ tests/check-iam-coverage.sh          # every demo-lite resource type is listed i
 tests/check-workload-actions.sh      # every AWS CLI command a container runs is listed in tests/required-actions.json
 ```
 The same four commands plus `tests/check-foundation.sh` run in `demo-lite/`.
-`.github/workflows/terraform.yml` runs the same on pull requests and on `main`.
+`.github/workflows/terraform.yml` runs the same on pull requests and on `main`. Its `static` job is the
+required status check `terraform (fmt, validate, test)`, so it runs on **every** pull request and decides for
+itself whether there is work to do (`ops/guard-paths-changed.sh` against the job's `GUARD_PATHS` list, which
+the guard keeps equal to the push path filter): a pull request that touches none of those paths prints
+`no terraform changes` and ends green in seconds. A `paths` filter on the trigger would skip the workflow
+instead, and a workflow that is skipped reports no status, so the ruleset would wait for the check forever.
 
 ### Workload actions (what the containers call)
 

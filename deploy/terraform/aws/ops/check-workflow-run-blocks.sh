@@ -9,7 +9,10 @@
 #   6. a job with `id-token: write` OR `packages: write` must not set up a toolchain, use `cache:` or run a
 #      package manager (build code must not run with publish/deploy credentials; audit M1). The only exception is
 #      the explicit allowlist ALLOWED_BUILD_WITH_PUBLISH below;
-#   7. meta-check: terraform.yml's path filters (push and pull_request) cover the workflows and the scripts the
+#   7. meta-check: the workflows that own a REQUIRED status check (ci.yml, terraform.yml) have an unfiltered
+#      pull_request trigger, because a workflow skipped by path filtering reports no status at all and the
+#      protect-main ruleset then waits for that check forever; and terraform.yml's push path filter and the
+#      GUARD_PATHS list of its `static` job are the same list, covering the workflows and the scripts the
 #      Terraform guards depend on, so the guards cannot be bypassed by editing those files (audit M2).
 #
 # Usage: check-workflow-run-blocks.sh [<workflow.yml>...]     (default: EVERY file in .github/workflows)
@@ -45,6 +48,11 @@ bad = 0
 # Its residual risk is documented in docs/THREAT_MODEL.md (Image integrity). Nothing else may be added here
 # without an ADR.
 ALLOWED_BUILD_WITH_PUBLISH = {("ci.yml", "images")}
+MISSING = object()
+# The workflows that own a required status check of the protect-main ruleset: "backend (./gradlew check)",
+# "web (lint, typecheck, test, build)", "compose policy (deploy/compose)", "shellcheck (scripts, deploy, hooks)"
+# (ci.yml) and "terraform (fmt, validate, test)" (terraform.yml). Renaming one of those jobs breaks the ruleset.
+REQUIRED_CHECK_WORKFLOWS = {"ci.yml", "terraform.yml"}
 REQUIRED_TF_PATHS = [
     ".github/workflows/**",
     "scripts/ensure-secret-files.sh",
@@ -63,13 +71,34 @@ for path in files:
         if forbidden in trigger_names:
             print(f"FAIL {base}: trigger {forbidden} is forbidden (runs with secrets in the context of untrusted code)")
             bad += 1
-    if base == "terraform.yml" and isinstance(triggers, dict):
-        for event in ("push", "pull_request"):
-            have = (triggers.get(event) or {}).get("paths") or []
-            for want in REQUIRED_TF_PATHS:
-                if want not in have:
-                    print(f"FAIL {base}: {event} path filter lacks {want} (a guard change would skip the guards)")
+    # A workflow that path filtering skips reports NO status, and a required check that never reports blocks
+    # every pull request ("Expected - Waiting for status to be reported"), so the workflows that own one must
+    # trigger on every pull request. terraform.yml decides inside the job instead (GUARD_PATHS of `static`,
+    # kept equal to its push filter); ci.yml's four jobs are cheap enough to always run.
+    if base in REQUIRED_CHECK_WORKFLOWS and isinstance(triggers, dict):
+        pr = triggers.get("pull_request", MISSING)
+        if pr is MISSING:
+            print(f"FAIL {base}: no pull_request trigger, so its required status check would never report")
+            bad += 1
+        elif isinstance(pr, dict):
+            for key in ("paths", "paths-ignore"):
+                if pr.get(key):
+                    print(f"FAIL {base}: pull_request has a {key} filter: a skipped workflow reports no status and the ruleset waits for the required check forever")
                     bad += 1
+    if base == "terraform.yml" and isinstance(triggers, dict):
+        push_paths = (triggers.get("push") or {}).get("paths") or []
+        guard_env = ((doc.get("jobs") or {}).get("static") or {}).get("env") or {}
+        guard_paths = str(guard_env.get("GUARD_PATHS", "")).split()
+        for want in REQUIRED_TF_PATHS:
+            if want not in push_paths:
+                print(f"FAIL {base}: push path filter lacks {want} (a guard change would skip the guards)")
+                bad += 1
+            if want not in guard_paths:
+                print(f"FAIL {base}: the static job's GUARD_PATHS lacks {want} (a guard change would not run the guards)")
+                bad += 1
+        if sorted(set(push_paths)) != sorted(set(guard_paths)):
+            print(f"FAIL {base}: GUARD_PATHS {sorted(set(guard_paths))} and the push path filter {sorted(set(push_paths))} must be the same list")
+            bad += 1
     for job_id, job in (doc.get("jobs") or {}).items():
         perms = job.get("permissions", doc.get("permissions"))
         privileged = isinstance(perms, dict) and (perms.get("id-token") == "write" or perms.get("packages") == "write")
