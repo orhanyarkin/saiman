@@ -76,6 +76,8 @@ jobs:
         run: deploy/terraform/aws/bootstrap/tests/check-prevent-destroy.sh
       - name: Check that every demo-lite resource type has its IAM actions listed
         run: deploy/terraform/aws/bootstrap/tests/check-iam-coverage.sh
+      - name: Check that every AWS CLI command the containers run has its IAM actions listed
+        run: deploy/terraform/aws/bootstrap/tests/check-workload-actions.sh
       - name: demo-lite foundation checks (default tags, no IAM resources)
         run: deploy/terraform/aws/demo-lite/tests/check-foundation.sh
       - name: demo-lite task checks (secret reads, buyer key placement)

@@ -32,3 +32,7 @@ output "resources" {
 output "ops" {
   value = local.required.ops
 }
+
+output "workload" {
+  value = local.required.workload
+}

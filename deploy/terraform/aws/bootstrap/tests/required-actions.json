@@ -1,5 +1,5 @@
 {
- "_about": "What the AWS provider and the demo workflows call for each demo-lite resource type, per CI role. 'apply' also covers replace and tag changes; 'destroy' is the delete side plus the refresh reads. bootstrap.tftest.hcl requires every listed action in the role's inline policy (an action that only works with Resource '*' must sit in a statement with Resource '*'). tests/check-iam-coverage.sh requires an entry here for every resource type in ../demo-lite. Update both when demo-lite gains a resource type.",
+ "_about": "What the AWS provider and the demo workflows call for each demo-lite resource type, per CI role. 'apply' also covers replace and tag changes; 'destroy' is the delete side plus the refresh reads. bootstrap.tftest.hcl requires every listed action in the role's inline policy (an action that only works with Resource '*' must sit in a statement with Resource '*'). tests/check-iam-coverage.sh requires an entry here for every resource type in ../demo-lite. Update both when demo-lite gains a resource type. 'workload' is the same for the demo roles the containers run as (task role, task execution role): what the AWS CLI commands in the container definitions and the ECS agent call. tests/check-workload-actions.sh ties every `aws <service> <command>` found in the container sources to an entry here ('cli'), and bootstrap.tftest.hcl requires each action from the role AND from saiman-demo-boundary.",
  "resources": {
   "aws_vpc": {
    "apply": [
@@ -292,6 +292,46 @@
    "destroy": [
     "ssm:DescribeParameters",
     "ssm:ListTagsForResource"
+   ]
+  }
+ },
+ "workload": {
+  "assets container (init and stack task): aws s3 sync of demo/assets/<session>/ (ListObjectsV2 with a prefix, then GetObject per object)": {
+   "role": "task",
+   "cli": "s3 sync",
+   "actions": [
+    "s3:ListBucket",
+    "s3:GetObject"
+   ]
+  },
+  "assets container (init task): aws s3 cp of the corpus dump and its meta.json (HeadObject + GetObject, no listing)": {
+   "role": "task",
+   "cli": "s3 cp",
+   "actions": [
+    "s3:GetObject"
+   ]
+  },
+  "ECS Exec and the SSM port-forward (enable_execute_command)": {
+   "role": "task",
+   "actions": [
+    "ssmmessages:CreateControlChannel",
+    "ssmmessages:CreateDataChannel",
+    "ssmmessages:OpenControlChannel",
+    "ssmmessages:OpenDataChannel"
+   ]
+  },
+  "ECS agent: secrets[].valueFrom from SSM SecureStrings": {
+   "role": "execution",
+   "actions": [
+    "ssm:GetParameters",
+    "kms:Decrypt"
+   ]
+  },
+  "ECS agent: awslogs log driver": {
+   "role": "execution",
+   "actions": [
+    "logs:CreateLogStream",
+    "logs:PutLogEvents"
    ]
   }
  }

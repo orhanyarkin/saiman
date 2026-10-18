@@ -26,6 +26,12 @@ locals {
   # Read scope of the task role (and the boundary ceiling): the corpus dump and the per-session assets only.
   demo_s3_read_arns = ["${local.bucket_arn}/artifacts/corpus/*", "${local.bucket_arn}/demo/assets/*"]
 
+  # `aws s3 sync s3://<bucket>/demo/assets/<session>/` (both `assets` containers) lists with ListObjectsV2 and prefix
+  # demo/assets/<session>/. `aws s3 cp` of the corpus dump is HeadObject + GetObject: no listing, so artifacts/corpus/ is NOT
+  # listed. The state objects (bootstrap/, demo-lite/) match no prefix here, so they cannot be listed (a list without a
+  # prefix has no s3:prefix value and matches nothing either).
+  demo_s3_list_prefixes = ["demo/assets/*"]
+
   demo_trust = { for svc in ["ecs-tasks", "scheduler"] : svc => jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -107,6 +113,14 @@ resource "aws_iam_role_policy" "demo_task" {
         Effect   = "Allow"
         Action   = ["s3:GetObject"]
         Resource = local.demo_s3_read_arns
+      },
+      {
+        # The bucket ARN (not bucket/*) with a prefix condition: only the demo assets can be listed.
+        Sid       = "ListDemoAssets"
+        Effect    = "Allow"
+        Action    = ["s3:ListBucket"]
+        Resource  = local.bucket_arn
+        Condition = { StringLike = { "s3:prefix" = local.demo_s3_list_prefixes } }
       },
       {
         # ssmmessages has no resource-level permissions. Needed for ECS Exec and the SSM

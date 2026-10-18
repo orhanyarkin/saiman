@@ -326,6 +326,7 @@ tf-check: test-aws-assets ## Offline Terraform checks (fmt, validate, test) for 
 	done
 	$(TF_AWS)/bootstrap/tests/check-prevent-destroy.sh
 	$(TF_AWS)/bootstrap/tests/check-iam-coverage.sh
+	$(TF_AWS)/bootstrap/tests/check-workload-actions.sh
 	$(TF_AWS)/demo-lite/tests/check-foundation.sh
 	$(TF_AWS)/demo-lite/tests/check-task.sh
 	bash $(TF_AWS)/ops/test-check-demo-down.sh
