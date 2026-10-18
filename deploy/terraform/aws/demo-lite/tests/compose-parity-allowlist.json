@@ -1,0 +1,41 @@
+{
+ "_about": "Deliberate differences between deploy/compose/docker-compose.yml and the ECS container definitions (demo-lite/containers.tf) in the environment and secret names of the four app services. tests/task.tftest.hcl (run ecs_names_match_compose) fails on every other difference, in both directions, and on entries here that are no longer true. A name is compared in Spring's relaxed spelling (lower case, no . _ -): SPRING_DATASOURCE_PASSWORD equals the compose secret target spring.datasource.password. 'aliases': one compose name that ECS spells with other names; 'services.<svc>.compose_only' / 'ecs_only': names only one side has.",
+ "aliases": {
+  "openai_api_key": {"ecs": ["SAIMAN_ROUTER_OPENAI_API_KEY"], "why": "Compose mounts the key as the configtree file openai_api_key; ECS can only inject env vars, so it uses the relaxed-binding spelling of saiman.router.openai.api-key. RouterPropertiesBinder reads both."},
+  "SPRING_DATA_REDIS_URL": {"ecs": ["SPRING_DATA_REDIS_HOST", "SPRING_DATA_REDIS_PORT"], "why": "ECS Redis requires a password. Spring Boot ignores spring.data.redis.password when spring.data.redis.url is set (credentials come from the URL), and the password is a secret that cannot be written into an env var URL, so ECS uses host and port. Compose has no Redis password."}
+ },
+ "services": {
+  "orchestrator": {
+   "compose_only": {},
+   "ecs_only": {
+    "SPRING_DATA_REDIS_PASSWORD": "ECS Redis runs with --requirepass (compose Redis has no password); the password is the SSM secret redis_password.",
+    "MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS": "Component names and statuses (never details) in /actuator/health, so a failed demo-up shows which component is DOWN (readiness.sh); the services default to show-components: never. Loopback only; nginx does not route /actuator."
+   }
+  },
+  "seller-api": {
+   "compose_only": {
+    "SAIMAN_AUTH_SERVICE_TOKENS_EVALS_SHA256": "The evals harness is not part of the AWS demo, so seller-api has no evals service token to verify."
+   },
+   "ecs_only": {
+    "SPRING_DATA_REDIS_PASSWORD": "ECS Redis runs with --requirepass (compose Redis has no password); the password is the SSM secret redis_password.",
+    "MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS": "Component names and statuses (never details) in /actuator/health, so a failed demo-up shows which component is DOWN (readiness.sh); the services default to show-components: never. Loopback only; nginx does not route /actuator."
+   }
+  },
+  "ledger": {
+   "compose_only": {},
+   "ecs_only": {
+    "SPRING_DATA_REDIS_PASSWORD": "ECS Redis runs with --requirepass (compose Redis has no password); the password is the SSM secret redis_password.",
+    "MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS": "Component names and statuses (never details) in /actuator/health, so a failed demo-up shows which component is DOWN (readiness.sh); the services default to show-components: never. Loopback only; nginx does not route /actuator."
+   }
+  },
+  "ingest": {
+   "compose_only": {
+    "mkk_credentials": "The AWS demo restores the frozen corpus dump and never calls the MKK KAP API (the credential is a private Basic-auth login), so ingest gets no MKK credential."
+   },
+   "ecs_only": {
+    "SPRING_DATA_REDIS_PASSWORD": "ECS Redis runs with --requirepass (compose Redis has no password); the password is the SSM secret redis_password.",
+    "MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS": "Component names and statuses (never details) in /actuator/health, so a failed demo-up shows which component is DOWN (readiness.sh); the services default to show-components: never. Loopback only; nginx does not route /actuator."
+   }
+  }
+ }
+}

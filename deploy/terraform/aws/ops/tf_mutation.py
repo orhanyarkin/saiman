@@ -31,7 +31,10 @@ def _edits(entry):
     return entry[0], entry[1], entry[2]
 
 
-def run(module_dir, test_filter, mutations, argv):
+def run(module_dir, test_filter, mutations, argv, repo_root=None, extra_dirs=()):
+    """repo_root/extra_dirs: copy the module to the same place below a temporary root and copy these repo-relative directories
+    next to it (for tests that read files outside the module, e.g. deploy/compose); edit them with file names like
+    '../../../compose/docker-compose.yml' (relative to the module)."""
     entries = [_edits(m) for m in mutations]
     wanted = set(argv)
     unknown = wanted - {e[0] for e in entries}
@@ -40,7 +43,12 @@ def run(module_dir, test_filter, mutations, argv):
         return 2
     work = tempfile.mkdtemp(prefix="saiman-mutation.")
     try:
-        mod = os.path.join(work, os.path.basename(module_dir))
+        if repo_root:
+            mod = os.path.join(work, os.path.relpath(module_dir, repo_root))
+            for extra in extra_dirs:
+                shutil.copytree(os.path.join(repo_root, extra), os.path.join(work, extra))
+        else:
+            mod = os.path.join(work, os.path.basename(module_dir))
         shutil.copytree(module_dir, mod, ignore=shutil.ignore_patterns(".terraform", "terraform.tfstate*", "*.tfplan", "backend.tf", "backend.hcl", "terraform.tfvars", "__pycache__"))
         if os.path.isdir(os.path.join(module_dir, ".terraform")):
             os.symlink(os.path.join(module_dir, ".terraform"), os.path.join(mod, ".terraform"))
