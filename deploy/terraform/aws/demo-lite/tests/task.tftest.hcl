@@ -1,6 +1,10 @@
 # Offline tests of the two Fargate task definitions (ecs.tf, containers.tf): the long-running `main` stack and
-# the run-to-completion `init`. The container definitions are decoded from the task definition JSON
-# (local.decoded_tasks), so the assertions see exactly what ECS would receive. A mock provider does not apply
+# the run-to-completion `init`. The container definitions are decoded from the JSON string the task definitions
+# register (local.container_json, never from the provider's attribute), so the assertions see exactly what ECS would
+# receive. local.decoded_tasks also holds each task as `main_as_returned` / `init_as_returned`: the same containers with
+# every null and empty value dropped, the way the AWS provider reads a task definition back after apply (the API
+# omits `dependsOn` when it is empty; a mock provider just echoes the configuration). Every rule that iterates
+# local.decoded_tasks or local.all_decoded_containers runs over all four. A mock provider does not apply
 # ECS's own rules (at most 10 containers per task definition, at least one essential container, dependsOn
 # targets inside the same task definition), so those are asserted here explicitly.
 # Things a mock provider cannot see (no IAM/SSM resources, no ssm data sources) live in tests/check-task.sh.
@@ -66,7 +70,7 @@ run "ecs_register_task_definition_rules" {
   # Quota "Task definition size: 64 KiB" (not adjustable). The container definitions are the bulk of it; keep a margin
   # for the rest of the registered document (family, roles, volumes).
   assert {
-    condition     = length(aws_ecs_task_definition.main.container_definitions) < 56000 && length(aws_ecs_task_definition.init.container_definitions) < 56000
+    condition     = length(local.container_json.main) < 56000 && length(local.container_json.init) < 56000
     error_message = "a task definition may be at most 64 KiB; its container definitions must stay under 56000 bytes"
   }
 
@@ -130,14 +134,14 @@ run "ecs_register_task_definition_rules" {
 
   # --- dependencies (ContainerDependency) ---
   assert {
-    condition     = alltrue([for c in local.all_decoded_containers : alltrue([for d in c.dependsOn : contains(["START", "COMPLETE", "SUCCESS", "HEALTHY"], d.condition)])])
+    condition     = alltrue([for c in local.all_decoded_containers : alltrue([for d in try(c.dependsOn, []) : contains(["START", "COMPLETE", "SUCCESS", "HEALTHY"], d.condition)])])
     error_message = "a dependency condition must be START, COMPLETE, SUCCESS or HEALTHY"
   }
 
   assert {
     condition = alltrue([
       for cs in values(local.decoded_tasks) :
-      alltrue([for c in cs : alltrue([for d in c.dependsOn : d.containerName != c.name && contains([for x in cs : x.name], d.containerName)])])
+      alltrue([for c in cs : alltrue([for d in try(c.dependsOn, []) : d.containerName != c.name && contains([for x in cs : x.name], d.containerName)])])
     ])
     error_message = "a dependency must name another container of the same task definition"
   }
@@ -145,7 +149,7 @@ run "ecs_register_task_definition_rules" {
   assert {
     condition = alltrue([
       for cs in values(local.decoded_tasks) :
-      alltrue([for c in cs : alltrue([for d in c.dependsOn : d.condition != "HEALTHY" || try([for x in cs : can(x.healthCheck) if x.name == d.containerName][0], false)])])
+      alltrue([for c in cs : alltrue([for d in try(c.dependsOn, []) : d.condition != "HEALTHY" || try([for x in cs : can(x.healthCheck) if x.name == d.containerName][0], false)])])
     ])
     error_message = "HEALTHY may only target a container that has a health check"
   }
@@ -161,14 +165,14 @@ run "ecs_register_task_definition_rules" {
   assert {
     condition = alltrue([
       for t, td in { main = aws_ecs_task_definition.main, init = aws_ecs_task_definition.init } :
-      alltrue([for c in local.decoded_tasks[t] : alltrue([for m in c.mountPoints : contains([for v in td.volume : v.name], m.sourceVolume) && startswith(m.containerPath, "/")])])
+      alltrue([for c in local.decoded_tasks[t] : alltrue([for m in try(c.mountPoints, []) : contains([for v in td.volume : v.name], m.sourceVolume) && startswith(m.containerPath, "/")])])
     ])
     error_message = "a mount point must name a volume of its own task definition and use an absolute path"
   }
 
   # --- environment and secrets ---
   assert {
-    condition     = alltrue([for c in local.all_decoded_containers : length(distinct(concat([for e in c.environment : e.name], [for s in c.secrets : s.name]))) == length(c.environment) + length(c.secrets)])
+    condition     = alltrue([for c in local.all_decoded_containers : length(distinct(concat([for e in try(c.environment, []) : e.name], [for s in try(c.secrets, []) : s.name]))) == length(try(c.environment, [])) + length(try(c.secrets, []))])
     error_message = "environment and secret names must be unique within a container (and not appear in both)"
   }
 
@@ -248,12 +252,12 @@ run "ecs_rules_the_mock_provider_does_not_apply" {
   # ECS rejects a task definition with more than 10 containers ("Too many containers") when it is registered; a mock
   # provider never does. Counted statically on exactly what ECS would receive, per task definition.
   assert {
-    condition     = length(jsondecode(aws_ecs_task_definition.main.container_definitions)) <= 10
+    condition     = length(local.decoded_registered.main) <= 10
     error_message = "the stack task definition has more than 10 containers (ECS limit)"
   }
 
   assert {
-    condition     = length(jsondecode(aws_ecs_task_definition.init.container_definitions)) <= 10
+    condition     = length(local.decoded_registered.init) <= 10
     error_message = "the init task definition has more than 10 containers (ECS limit)"
   }
 
@@ -272,7 +276,7 @@ run "ecs_rules_the_mock_provider_does_not_apply" {
   assert {
     condition = alltrue([
       for cs in values(local.decoded_tasks) :
-      alltrue([for c in cs : alltrue([for d in c.dependsOn : contains([for x in cs : x.name], d.containerName)])])
+      alltrue([for c in cs : alltrue([for d in try(c.dependsOn, []) : contains([for x in cs : x.name], d.containerName)])])
     ])
     error_message = "a dependsOn target must be in the same task definition"
   }
@@ -281,7 +285,7 @@ run "ecs_rules_the_mock_provider_does_not_apply" {
   assert {
     condition = alltrue([
       for cs in values(local.decoded_tasks) :
-      alltrue([for c in cs : alltrue([for d in c.dependsOn : d.condition == "HEALTHY" || !try([for x in cs : x.essential if x.name == d.containerName][0], false)])])
+      alltrue([for c in cs : alltrue([for d in try(c.dependsOn, []) : d.condition == "HEALTHY" || !try([for x in cs : x.essential if x.name == d.containerName][0], false)])])
     ])
     error_message = "a SUCCESS dependency must not point at an essential container"
   }
@@ -309,7 +313,7 @@ run "work_is_split_as_designed" {
   assert {
     condition = alltrue([
       for c in local.decoded_tasks.main :
-      alltrue([for s in c.secrets : !can(regex("pg_master_password|_owner_password$", s.valueFrom))])
+      alltrue([for s in try(c.secrets, []) : !can(regex("pg_master_password|_owner_password$", s.valueFrom))])
     ])
     error_message = "the long-running task must not see the master or owner passwords"
   }
@@ -318,10 +322,48 @@ run "work_is_split_as_designed" {
   assert {
     condition = alltrue([
       for c in local.decoded_tasks.main :
-      jsonencode(sort([for d in c.dependsOn : d.containerName])) == jsonencode(["kafka", "redis"])
+      jsonencode(sort([for d in try(c.dependsOn, []) : d.containerName])) == jsonencode(["kafka", "redis"])
       if contains(["orchestrator", "seller-api", "ledger", "ingest"], c.name)
     ])
     error_message = "apps depend on kafka and redis only"
+  }
+}
+
+run "provider_read_back_shape" {
+  # The rules above and below already run over the `*_as_returned` copies (see the header). These assertions keep that
+  # input honest: it must really lack the empty keys, and dropping them must not change what the rules look at.
+  assert {
+    condition = (
+      length([for c in local.decoded_tasks.main_as_returned : c if !can(c.dependsOn)]) > 0
+      && length([for c in local.decoded_tasks.init_as_returned : c if !can(c.dependsOn)]) > 0
+      && length([for c in local.decoded_tasks.main_as_returned : c if !can(c.environment)]) > 0
+    )
+    error_message = "the as-returned copies must lack the empty keys (dependsOn, environment), otherwise the shape test is a no-op"
+  }
+
+  assert {
+    condition = alltrue([
+      for t in ["main", "init"] :
+      jsonencode([for c in local.decoded_tasks["${t}_as_returned"] : c.name]) == jsonencode([for c in local.decoded_tasks[t] : c.name])
+    ])
+    error_message = "dropping empty values must neither drop nor reorder containers"
+  }
+
+  assert {
+    condition = alltrue([
+      for t in ["main", "init"] :
+      jsonencode(local.dep_graph["${t}_as_returned"]) == jsonencode(local.dep_graph[t])
+    ])
+    error_message = "the dependency graph must be the same for the registered and the read-back shape"
+  }
+
+  assert {
+    condition = alltrue([
+      for t in ["main", "init"] :
+      jsonencode([for c in local.decoded_tasks["${t}_as_returned"] : [sort([for e in try(c.environment, []) : e.name]), sort([for s in try(c.secrets, []) : s.name])]])
+      == jsonencode([for c in local.decoded_tasks[t] : [sort([for e in try(c.environment, []) : e.name]), sort([for s in try(c.secrets, []) : s.name])]])
+    ])
+    error_message = "environment and secret names must be the same for the registered and the read-back shape"
   }
 }
 
@@ -329,8 +371,8 @@ run "exact_secret_map" {
   # EXACT map per container and task: secret env name -> SSM parameter name. Anything extra or missing fails.
   assert {
     condition = jsonencode({
-      for t, cs in local.decoded_tasks : t => {
-        for c in cs : c.name => { for s in c.secrets : s.name => trimprefix(s.valueFrom, "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/demo/") }
+      for t, cs in local.decoded_registered : t => {
+        for c in cs : c.name => { for s in try(c.secrets, []) : s.name => trimprefix(s.valueFrom, "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/demo/") }
       }
       }) == jsonencode({
       init = {
@@ -390,7 +432,7 @@ run "exact_env_names" {
   # EXACT environment-name allowlist per container and task (migrators: exactly the four of ADR-0027).
   assert {
     condition = jsonencode({
-      for t, cs in local.decoded_tasks : t => { for c in cs : c.name => sort([for e in c.environment : e.name]) }
+      for t, cs in local.decoded_registered : t => { for c in cs : c.name => sort([for e in try(c.environment, []) : e.name]) }
       }) == jsonencode({
       init = {
         assets                 = ["AWS_DEFAULT_REGION", "AWS_PAGER"]
@@ -440,7 +482,7 @@ run "no_injection_or_secret_like_names" {
     condition = alltrue([
       for c in local.all_decoded_containers :
       alltrue([
-        for n in concat([for e in c.environment : e.name], [for s in c.secrets : s.name]) :
+        for n in concat([for e in try(c.environment, []) : e.name], [for s in try(c.secrets, []) : s.name]) :
         !can(regex("^(SPRING_FLYWAY_URL|SPRING_APPLICATION_JSON|JAVA_TOOL_OPTIONS|JDK_JAVA_OPTIONS|_JAVA_OPTIONS|JAVA_OPTS|SPRING_AUTOCONFIGURE_EXCLUDE|SAIMAN_SECRETS_DIR|OPENAI_API_KEY|OPENAI_BASE_URL|AZURE_OPENAI_BASE_URL|OPENAI_LOG)$|^SPRING_(CONFIG|MAIN)_|^BPL_(DEBUG|JMX)_|^(SPRING_AI_OPENAI_|SAIMAN_INGEST_MKK_|SPRINGDOC_)", replace(replace(upper(replace(n, "/[.-]/", "_")), "/_+/", "_"), "/_[0-9]+_?$/", "")))
       ])
     ])
@@ -461,7 +503,7 @@ run "no_injection_or_secret_like_names" {
     condition = alltrue([
       for c in local.all_decoded_containers :
       alltrue([
-        for e in c.environment :
+        for e in try(c.environment, []) :
         !can(regex("PASSWORD|TOKEN|PRIVATE|SECRET|KEY", e.name)) || contains(["SAIMAN_AUTH_READER_TOKEN_SHA256", "SAIMAN_AUTH_OPERATOR_TOKEN_SHA256", "SAIMAN_AUTH_SERVICE_TOKENS_LEDGER_SHA256", "BOOTSTRAP_SECRET_SOURCE"], e.name)
       ])
     ])
@@ -472,7 +514,7 @@ run "no_injection_or_secret_like_names" {
   assert {
     condition = alltrue([
       for c in local.all_decoded_containers :
-      alltrue([for e in c.environment : !can(regex("0x[0-9a-fA-F]{64}", e.value)) && !can(regex("://[^/@]*:[^/@]*@", e.value))])
+      alltrue([for e in try(c.environment, []) : !can(regex("0x[0-9a-fA-F]{64}", e.value)) && !can(regex("://[^/@]*:[^/@]*@", e.value))])
     ])
     error_message = "no private key or credentialed URL in an environment value"
   }
@@ -481,7 +523,7 @@ run "no_injection_or_secret_like_names" {
   assert {
     condition = alltrue([
       for c in local.all_decoded_containers :
-      alltrue([for s in c.secrets : startswith(s.valueFrom, "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/demo/")])
+      alltrue([for s in try(c.secrets, []) : startswith(s.valueFrom, "arn:aws:ssm:eu-central-1:123456789012:parameter/saiman/demo/")])
     ])
     error_message = "secrets must be SSM parameter ARNs under /saiman/demo/"
   }
@@ -599,7 +641,7 @@ run "app_hardening" {
   assert {
     condition = alltrue([
       for c in local.all_decoded_containers :
-      [for e in c.environment : e.value if e.name == "SPRING_FLYWAY_ENABLED"] == ["false"]
+      [for e in try(c.environment, []) : e.value if e.name == "SPRING_FLYWAY_ENABLED"] == ["false"]
       if contains(["orchestrator", "seller-api", "ledger", "ingest"], c.name)
     ])
     error_message = "SPRING_FLYWAY_ENABLED=false on every app"
@@ -608,7 +650,7 @@ run "app_hardening" {
   assert {
     condition = alltrue([
       for c in local.all_decoded_containers :
-      length([for e in c.environment : e if e.name == "SAIMAN_RUN_MODE" && e.value == "migrate"]) == (endswith(c.name, "-migrate") ? 1 : 0) && length([for e in c.environment : e if e.name == "SAIMAN_RUN_MODE"]) == (endswith(c.name, "-migrate") ? 1 : 0)
+      length([for e in try(c.environment, []) : e if e.name == "SAIMAN_RUN_MODE" && e.value == "migrate"]) == (endswith(c.name, "-migrate") ? 1 : 0) && length([for e in try(c.environment, []) : e if e.name == "SAIMAN_RUN_MODE"]) == (endswith(c.name, "-migrate") ? 1 : 0)
     ])
     error_message = "SAIMAN_RUN_MODE=migrate exactly on the four migrators"
   }
@@ -616,7 +658,7 @@ run "app_hardening" {
   assert {
     condition = alltrue([
       for c in local.all_decoded_containers :
-      length([for e in c.environment : e if can(regex("^(SPRING_FLYWAY_URL|SPRING_APPLICATION_JSON|JAVA_TOOL_OPTIONS|JDK_JAVA_OPTIONS|_JAVA_OPTIONS|JAVA_OPTS|SPRING_AUTOCONFIGURE_EXCLUDE)$|^SPRING_(CONFIG|MAIN)_", e.name))]) == 0
+      length([for e in try(c.environment, []) : e if can(regex("^(SPRING_FLYWAY_URL|SPRING_APPLICATION_JSON|JAVA_TOOL_OPTIONS|JDK_JAVA_OPTIONS|_JAVA_OPTIONS|JAVA_OPTS|SPRING_AUTOCONFIGURE_EXCLUDE)$|^SPRING_(CONFIG|MAIN)_", e.name))]) == 0
     ])
     error_message = "config-injection environment keys are forbidden"
   }
@@ -624,7 +666,7 @@ run "app_hardening" {
   assert {
     condition = alltrue([
       for c in local.decoded_tasks.init :
-      [for e in c.environment : e.value if e.name == "SPRING_DATASOURCE_URL"] == [for a in local.decoded_tasks.main : [for e2 in a.environment : e2.value if e2.name == "SPRING_DATASOURCE_URL"][0] if a.name == trimsuffix(c.name, "-migrate")]
+      [for e in try(c.environment, []) : e.value if e.name == "SPRING_DATASOURCE_URL"] == [for a in local.decoded_tasks.main : [for e2 in a.environment : e2.value if e2.name == "SPRING_DATASOURCE_URL"][0] if a.name == trimsuffix(c.name, "-migrate")]
       if endswith(c.name, "-migrate")
     ])
     error_message = "a migrator (init task) uses the same JDBC URL as its app (stack task)"
@@ -633,7 +675,7 @@ run "app_hardening" {
   assert {
     condition = alltrue([
       for c in local.all_decoded_containers :
-      alltrue([for e in c.environment : startswith(e.value, "jdbc:postgresql://") && endswith(e.value, ":5432/saiman?sslmode=require") if e.name == "SPRING_DATASOURCE_URL"])
+      alltrue([for e in try(c.environment, []) : startswith(e.value, "jdbc:postgresql://") && endswith(e.value, ":5432/saiman?sslmode=require") if e.name == "SPRING_DATASOURCE_URL"])
     ])
     error_message = "JDBC URLs must be plain RDS URLs with sslmode=require and no credentials"
   }
@@ -641,7 +683,7 @@ run "app_hardening" {
   assert {
     condition = alltrue([
       for c in local.all_decoded_containers :
-      [for e in c.environment : e.value if e.name == "SAIMAN_CHAIN_RPC_URL"] == ["https://sepolia.base.org"]
+      [for e in try(c.environment, []) : e.value if e.name == "SAIMAN_CHAIN_RPC_URL"] == ["https://sepolia.base.org"]
       if contains(["orchestrator", "ledger"], c.name)
     ])
     error_message = "chain RPC is the public Base Sepolia endpoint"
@@ -656,7 +698,7 @@ run "ordering_and_images" {
       for cs in values(local.decoded_tasks) :
       alltrue([
         for c in cs : alltrue([
-          for d in c.dependsOn :
+          for d in try(c.dependsOn, []) :
           d.condition == ([for t in cs : t.essential if t.name == d.containerName][0] ? "HEALTHY" : "SUCCESS")
         ])
       ])
@@ -667,7 +709,7 @@ run "ordering_and_images" {
   assert {
     condition = alltrue([
       for cs in values(local.decoded_tasks) :
-      alltrue([for c in cs : alltrue([for d in c.dependsOn : d.condition != "HEALTHY" || [for t in cs : can(t.healthCheck.command) if t.name == d.containerName][0]])])
+      alltrue([for c in cs : alltrue([for d in try(c.dependsOn, []) : d.condition != "HEALTHY" || [for t in cs : can(t.healthCheck.command) if t.name == d.containerName][0]])])
     ])
     error_message = "HEALTHY dependencies need a health check"
   }
@@ -675,7 +717,7 @@ run "ordering_and_images" {
   assert {
     condition = alltrue([
       for c in local.decoded_tasks.init :
-      contains([for d in c.dependsOn : d.containerName], "db-init")
+      contains([for d in try(c.dependsOn, []) : d.containerName], "db-init")
       if endswith(c.name, "-migrate")
     ]) && contains([for d in [for c in local.decoded_tasks.init : c if c.name == "corpus-restore"][0].dependsOn : d.containerName], "ingest-migrate")
     error_message = "migrators wait for db-init; corpus-restore waits for ingest-migrate"
@@ -727,7 +769,7 @@ run "otel_collector_config" {
   }
 
   assert {
-    condition     = length([for c in local.decoded_tasks.main : c if c.name == "otel-collector" && length(c.secrets) == 0 && length(c.environment) == 0]) == 1
+    condition     = length([for c in local.decoded_tasks.main : c if c.name == "otel-collector" && length(try(c.secrets, [])) == 0 && length(try(c.environment, [])) == 0]) == 1
     error_message = "no Grafana env or secret when the endpoint is unset"
   }
 }
@@ -744,8 +786,8 @@ run "otel_collector_grafana" {
 
   assert {
     condition = (
-      [for c in local.decoded_tasks.main : [for s in c.secrets : s.name] if c.name == "otel-collector"][0] == ["GRAFANA_OTLP_AUTH"]
-      && [for c in local.decoded_tasks.main : [for e in c.environment : e.name] if c.name == "otel-collector"][0] == ["GRAFANA_OTLP_ENDPOINT"]
+      [for c in local.decoded_tasks.main : [for s in try(c.secrets, []) : s.name] if c.name == "otel-collector"][0] == ["GRAFANA_OTLP_AUTH"]
+      && [for c in local.decoded_tasks.main : [for e in try(c.environment, []) : e.name] if c.name == "otel-collector"][0] == ["GRAFANA_OTLP_ENDPOINT"]
     )
     error_message = "auth only via secrets, endpoint via environment"
   }

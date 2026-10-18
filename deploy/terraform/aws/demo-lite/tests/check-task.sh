@@ -4,7 +4,10 @@
 #   2. no IAM, random_password, aws_ssm_parameter or Secrets Manager resources anywhere,
 #   3. the buyer key parameter appears exactly once, inside app_secrets.orchestrator,
 #   4. the ECS service and task keep the flags the destroy role and the human depend on, the init task exists, the
-#      service starts at zero tasks (demo-up scales it after the init task) and the 10-container guard is intact.
+#      service starts at zero tasks (demo-up scales it after the init task) and the 10-container guard is intact,
+#   5. nothing reads a task definition's container_definitions back from the resource: after apply the provider holds
+#      what ECS returned (empty lists such as dependsOn are omitted), a mock provider echoes the configuration, so a
+#      check built on it passes offline and fails on the first real demo-up. Use local.container_json instead.
 # (Which environment names and secrets reach which container is asserted by task.tftest.hcl.)
 set -euo pipefail
 
@@ -32,5 +35,8 @@ for needle in 'cpu_architecture        = "ARM64"' 'force_delete = true' 'enable_
   grep -qF "$needle" "$dir/ecs.tf" || err "ecs.tf is missing: $needle"
 done
 
-[[ "$fail" == 0 ]] && echo "OK: no secret reads, no IAM, buyer key only on orchestrator, ECS flags verified"
+provider_reads="$(grep -nE 'aws_ecs_task_definition\.[A-Za-z0-9_]+(\[[^]]*\])?\.container_definitions' "$dir"/*.tf "$dir"/tests/*.tftest.hcl || true)"
+[[ -z "$provider_reads" ]] || err "container_definitions is read from the task definition resource (use local.container_json): $provider_reads"
+
+[[ "$fail" == 0 ]] && echo "OK: no secret reads, no IAM, buyer key only on orchestrator, ECS flags verified, no read-back of container_definitions"
 exit "$fail"
