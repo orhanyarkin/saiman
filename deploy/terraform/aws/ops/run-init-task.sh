@@ -4,8 +4,8 @@
 # live in a second, run-to-completion task definition and `dependsOn` can no longer gate the long-running service.
 # demo-up starts the service (desired count 1) only after this script succeeded.
 #
-# The task ends by itself: its essential `done` container starts when every one-shot exited 0. If a one-shot fails,
-# `done` never starts and the task may keep running, so a failed container stops the task here (fail fast), and so
+# The task ends by itself: its essential `corpus-restore` container (the last stage) starts when every other container
+# exited 0 and its exit ends the task. If an earlier container fails, it never starts and the task may keep running, so a failed container stops the task here (fail fast), and so
 # does the timeout. Output lists container names, exit codes and ECS reasons only; no environment, no secrets.
 #
 # Usage: run-init-task.sh --region R --cluster C --task-definition ARN --subnets subnet-a,subnet-b --security-group sg-x

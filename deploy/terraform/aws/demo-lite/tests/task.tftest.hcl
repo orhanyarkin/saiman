@@ -265,7 +265,7 @@ run "ecs_rules_the_mock_provider_does_not_apply" {
   # Every task definition needs at least one essential container.
   assert {
     condition     = length([for c in local.decoded_tasks.main : c if c.essential]) >= 1 && length([for c in local.decoded_tasks.init : c if c.essential]) >= 1
-    error_message = "each task definition needs an essential container (the init task ends with its `done` container)"
+    error_message = "each task definition needs an essential container (the init task ends with corpus-restore)"
   }
 
   # dependsOn cannot cross task definitions: every target must be a container of the same one.
@@ -286,10 +286,10 @@ run "ecs_rules_the_mock_provider_does_not_apply" {
     error_message = "a SUCCESS dependency must not point at an essential container"
   }
 
-  # The init task ends only when every one-shot succeeded.
+  # The init task ends only when every other container succeeded: the essential corpus-restore starts last.
   assert {
-    condition     = jsonencode(sort([for d in [for c in local.decoded_tasks.init : c if c.name == "done"][0].dependsOn : d.containerName])) == jsonencode(sort([for c in local.decoded_tasks.init : c.name if c.name != "done"]))
-    error_message = "`done` must wait for every other init container"
+    condition     = jsonencode(sort([for d in [for c in local.decoded_tasks.init : c if c.name == "corpus-restore"][0].dependsOn : d.containerName])) == jsonencode(sort([for c in local.decoded_tasks.init : c.name if c.name != "corpus-restore"]))
+    error_message = "corpus-restore (the essential last init container) must wait for every other init container"
   }
 }
 
@@ -301,7 +301,7 @@ run "work_is_split_as_designed" {
   }
 
   assert {
-    condition     = length([for c in local.decoded_tasks.main : c if contains(["db-init", "corpus-restore", "done"], c.name) || endswith(c.name, "-migrate")]) == 0
+    condition     = length([for c in local.decoded_tasks.main : c if contains(["db-init", "corpus-restore"], c.name) || endswith(c.name, "-migrate")]) == 0
     error_message = "no migrator, db-init or corpus-restore in the long-running task"
   }
 
@@ -335,7 +335,6 @@ run "exact_secret_map" {
       }) == jsonencode({
       init = {
         assets                 = {}
-        done                   = {}
         "corpus-restore"       = { PGPASSWORD = "pg_ingest_owner_password" }
         "orchestrator-migrate" = { SPRING_FLYWAY_PASSWORD = "pg_orchestrator_owner_password" }
         "seller-api-migrate"   = { SPRING_FLYWAY_PASSWORD = "pg_seller_api_owner_password" }
@@ -401,7 +400,6 @@ run "exact_env_names" {
         "seller-api-migrate"   = ["BPL_JVM_THREAD_COUNT", "SAIMAN_RUN_MODE", "SPRING_DATASOURCE_URL", "SPRING_FLYWAY_USER"]
         "ledger-migrate"       = ["BPL_JVM_THREAD_COUNT", "SAIMAN_RUN_MODE", "SPRING_DATASOURCE_URL", "SPRING_FLYWAY_USER"]
         "ingest-migrate"       = ["BPL_JVM_THREAD_COUNT", "SAIMAN_RUN_MODE", "SPRING_DATASOURCE_URL", "SPRING_FLYWAY_USER"]
-        done                   = []
       }
       main = {
         assets           = ["AWS_DEFAULT_REGION", "AWS_PAGER"]
@@ -506,7 +504,7 @@ run "no_namespace_sharing_or_privileges" {
   }
 
   assert {
-    condition     = jsonencode(sort([for c in local.decoded_tasks.init : c.name])) == jsonencode(sort(["assets", "db-init", "orchestrator-migrate", "seller-api-migrate", "ledger-migrate", "ingest-migrate", "corpus-restore", "done"]))
+    condition     = jsonencode(sort([for c in local.decoded_tasks.init : c.name])) == jsonencode(sort(["assets", "db-init", "orchestrator-migrate", "seller-api-migrate", "ledger-migrate", "ingest-migrate", "corpus-restore"]))
     error_message = "the init container set is fixed"
   }
 
@@ -702,11 +700,11 @@ run "ordering_and_images" {
 
   assert {
     condition = (
-      alltrue([for c in local.all_decoded_containers : c.essential == false if contains(["assets", "db-init", "corpus-restore", "readiness", "otel-collector"], c.name) || endswith(c.name, "-migrate")])
+      alltrue([for c in local.all_decoded_containers : c.essential == false if contains(["assets", "db-init", "readiness", "otel-collector"], c.name) || endswith(c.name, "-migrate")])
       && alltrue([for c in local.decoded_tasks.main : c.essential == true if contains(["kafka", "redis", "web", "orchestrator", "seller-api", "ledger", "ingest"], c.name)])
-      && [for c in local.decoded_tasks.init : c.essential if c.name == "done"][0] == true
+      && [for c in local.decoded_tasks.init : c.essential if c.name == "corpus-restore"][0] == true
     )
-    error_message = "one-shots, readiness and the collector are non-essential; the long-running services and the init `done` container are essential"
+    error_message = "one-shots, readiness and the collector are non-essential; the long-running services and the init corpus-restore container are essential"
   }
 }
 

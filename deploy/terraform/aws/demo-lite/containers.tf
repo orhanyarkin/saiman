@@ -117,7 +117,7 @@ locals {
   oneshot = {
     essential = false
     # How long a dependent container waits for this one to finish. Fargate allows 2-120 seconds (ContainerDefinition
-    # reference), so a one-shot that must run longer cannot be a SUCCESS dependency of anything; see init_done below.
+    # reference), so a one-shot that must run longer cannot be a SUCCESS dependency of anything; see corpus-restore below.
     startTimeout = 120
   }
 
@@ -231,8 +231,15 @@ locals {
     # Restores the private corpus dump as ingest_owner (the schema owner) once ingest is migrated.
     # The assets container already fetched the dump from S3 into the shared `corpus` volume, so this
     # container needs no AWS access. Idempotent: corpus-restore.sh skips when rows exist.
-    corpus-restore = merge(local.oneshot, {
+    #
+    # It is the LAST and the only ESSENTIAL container of the init task, which a task definition needs at least one of:
+    # it starts once every other init container exited 0, and its own exit ends the task. Nothing depends on it, so the
+    # 120 s limit that Fargate puts on a dependency wait (startTimeout) does not cap how long the restore may run (the
+    # HNSW index is built while the rows are inserted). If an earlier one-shot fails, this container never starts and
+    # demo-up stops the task (run-init-task.sh).
+    corpus-restore = {
       image      = local.images.postgres
+      essential  = true
       memory     = 256
       entryPoint = ["bash"]
       command    = ["/assets/postgres/corpus-restore.sh", "/corpus"]
@@ -247,9 +254,8 @@ locals {
         { volume = "assets", path = "/assets", ro = true },
         { volume = "corpus", path = "/corpus", ro = true },
       ]
-      depends = { assets = "SUCCESS", "ingest-migrate" = "SUCCESS" }
-    })
-
+      depends = { for name in concat(["assets", "db-init"], [for a in keys(local.apps) : "${a}-migrate"]) : name => "SUCCESS" }
+    }
   }
 
   # --- stack task ---------------------------------------------------------------------------------
@@ -382,20 +388,7 @@ locals {
     }
   }
 
-  # An ECS task definition needs at least one essential container, and every init container is a one-shot. `done`
-  # is that container: it does nothing, starts only once every other init container exited 0 (SUCCESS), and its
-  # exit ends the task. If any one-shot fails, `done` never starts and demo-up stops the task (run-init-task.sh).
-  init_done = {
-    done = {
-      image      = local.images.busybox
-      essential  = true
-      memory     = 32
-      entryPoint = ["true"]
-      depends    = { for name in keys(merge(local.init_fixed, local.migrate_specs)) : name => "SUCCESS" }
-    }
-  }
-
-  init_specs  = merge(local.init_fixed, local.migrate_specs, local.init_done)
+  init_specs  = merge(local.init_fixed, local.migrate_specs)
   stack_specs = merge(local.stack_fixed, local.app_specs)
 
   # Spec -> ECS container definition. env/secrets/depends/mounts are the readable spellings.

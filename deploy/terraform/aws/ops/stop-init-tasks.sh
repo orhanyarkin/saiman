@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stops init tasks that demo-up started with `ecs run-task` (--started-by demo-up) and are still active, then waits
 # briefly until none is left. Terraform does not know them (they are not part of the state), and ECS refuses to delete
-# a cluster that still has active tasks, so a stuck init task (a cancelled demo-up, or an essential `done` container that
+# a cluster that still has active tasks, so a stuck init task (a cancelled demo-up, or the essential `corpus-restore` container that
 # never started) would block `terraform destroy`. Service-managed tasks are not touched: Terraform deletes the service.
 #
 # Usage: stop-init-tasks.sh --region R [--cluster saiman-demo] [--timeout-seconds 180]
