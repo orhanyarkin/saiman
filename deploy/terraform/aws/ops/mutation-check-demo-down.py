@@ -21,7 +21,10 @@ muts = [
  ("notfound-not-recognised", "grep -qE 'NotFound|Unable to describe task definition'", "grep -qE 'NoSuchThing'"),
  ("inactive-cluster-counts-as-live", 'select(.status != "INACTIVE")\' ecs describe-clusters', '.\' ecs describe-clusters'),
  ("jq-failure-reads-as-gone", '*) verdict=failed ;;', '*) verdict=gone ;;'),
- ("inactive-listing-failure-fails-the-run", 'notes+=("INACTIVE task definitions could not be listed")', 'errors+=("INACTIVE task definitions could not be listed")'),
+ ("inactive-listing-failure-fails-the-run", 'notes+=("${status} task definitions could not be listed")', 'errors+=("${status} task definitions could not be listed")'),
+ ("inactive-listing-uses-family-prefix", 'ecs list-task-definitions --status "${status}"', 'ecs list-task-definitions --family-prefix "${NAME_PREFIX}" --status "${status}"'),
+ ("inactive-listing-keeps-foreign-families", '.taskDefinitionArns[]? | select((split("/") | last) | startswith("\'"${NAME_PREFIX}"\'"))', '.taskDefinitionArns[]?'),
+ ("delete-in-progress-not-listed", 'for status in INACTIVE DELETE_IN_PROGRESS; do', 'for status in INACTIVE; do'),
 ]
 bad = 0
 for name, old, new in muts:

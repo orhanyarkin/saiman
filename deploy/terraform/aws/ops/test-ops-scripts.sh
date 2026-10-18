@@ -17,6 +17,22 @@ echo "$*" >>"${FAKE_AWS_DIR}/calls.log"
 while [[ ${#args[@]} -gt 0 && "${args[0]}" == --region ]]; do args=("${args[@]:2}"); done
 while [[ ${#args[@]} -gt 0 && "${args[0]}" == --output ]]; do args=("${args[@]:2}"); done
 key="${args[0]}_${args[1]}"
+# ListTaskDefinitions: fixtures per --status (<key>.status-<S>.json) and --family-prefix is an EXACT family name, as in AWS.
+if [[ "${key}" == ecs_list-task-definitions ]]; then
+  status="" fam=""
+  for ((i = 2; i < ${#args[@]}; i++)); do
+    [[ "${args[i]}" == --status ]] && status="${args[i + 1]:-}"
+    [[ "${args[i]}" == --family-prefix ]] && fam="${args[i + 1]:-}"
+  done
+  src="${FAKE_AWS_DIR}/${key}.json"
+  [[ -e "${FAKE_AWS_DIR}/${key}.status-${status}.json" ]] && src="${FAKE_AWS_DIR}/${key}.status-${status}.json"
+  if [[ -e "${src}" ]]; then
+    jq --arg f "${fam}" 'if $f == "" then . else .taskDefinitionArns |= map(select((split("/") | last | split(":")[0]) == $f)) end' "${src}"
+  else
+    echo '{}'
+  fi
+  exit 0
+fi
 if [[ -e "${FAKE_AWS_DIR}/${key}.once.json" ]]; then
   cat "${FAKE_AWS_DIR}/${key}.once.json"
   mv "${FAKE_AWS_DIR}/${key}.once.json" "${FAKE_AWS_DIR}/${key}.served"
@@ -209,11 +225,25 @@ if grep -q 'get-parameter' "${fx}/calls.log"; then bad "expiry used get-paramete
 reset
 echo '{"Parameters":[{"Name":"/saiman/demo/openai_api_key"},{"Name":"/saiman/demo/expires-at"},{"Name":"/saiman/demo/pg_master_password"}]}' >"${fx}/ssm_describe-parameters.json"
 echo '{"Versions":[{"Key":"demo/a","VersionId":"v1"}],"DeleteMarkers":[{"Key":"demo/b","VersionId":"v2"}]}' >"${fx}/s3api_list-object-versions.once.json"
-echo '{"taskDefinitionArns":["arn:aws:ecs:eu-central-1:1:task-definition/saiman-demo-lite:1"]}' >"${fx}/ecs_list-task-definitions.json"
+td="arn:aws:ecs:eu-central-1:1:task-definition"
+echo '{"taskDefinitionArns":["'"${td}"'/saiman-demo-lite:2","'"${td}"'/other-app:7"]}' >"${fx}/ecs_list-task-definitions.status-ACTIVE.json"
+echo '{"taskDefinitionArns":["'"${td}"'/saiman-demo-init:1","'"${td}"'/saiman-demo-init:2","'"${td}"'/saiman-demo-lite:1","'"${td}"'/other-app:3"]}' >"${fx}/ecs_list-task-definitions.status-INACTIVE.json"
 expect "cleanup runs" 0 "expires-at kept" "${ops}/demo-cleanup.sh" --region eu-central-1 --state-bucket saiman-1-tfstate
 if grep -q 'delete-parameters --names /saiman/demo/openai_api_key /saiman/demo/pg_master_password' "${fx}/calls.log"; then ok "cleanup deletes the secrets in a batch"; else bad "secret batch delete missing"; fi
 if grep -q 's3api delete-objects --bucket saiman-1-tfstate' "${fx}/calls.log"; then ok "cleanup purges versions and delete markers"; else bad "no s3api delete-objects"; fi
-if grep -q 'ecs deregister-task-definition' "${fx}/calls.log"; then ok "cleanup deregisters ACTIVE task definitions"; else bad "no deregister"; fi
+if grep -q "ecs deregister-task-definition --task-definition ${td}/saiman-demo-lite:2" "${fx}/calls.log"; then ok "cleanup deregisters ACTIVE saiman-demo task definitions"; else bad "no deregister of saiman-demo-lite:2"; fi
+if grep -q 'deregister-task-definition.*other-app' "${fx}/calls.log"; then bad "cleanup touched a foreign task definition"; else ok "cleanup leaves foreign ACTIVE task definitions alone"; fi
+if grep -q -- '--family-prefix' "${fx}/calls.log"; then bad "cleanup used --family-prefix (an exact family name: saiman-demo matches nothing)"; else ok "cleanup lists by status, not by --family-prefix"; fi
+if grep -q "ecs delete-task-definitions --task-definitions ${td}/saiman-demo-init:1 ${td}/saiman-demo-init:2 ${td}/saiman-demo-lite:1\$" "${fx}/calls.log"; then ok "cleanup deletes exactly the INACTIVE saiman-demo revisions"; else bad "INACTIVE saiman-demo revisions were not deleted as one batch"; grep 'delete-task-definitions' "${fx}/calls.log" >&2 || true; fi
+if grep -q 'delete-task-definitions.*other-app' "${fx}/calls.log"; then bad "cleanup tried to delete a foreign task definition"; else ok "cleanup never deletes foreign task definitions"; fi
+echo '{"taskDefinitions":[],"failures":[{"arn":"'"${td}"'/saiman-demo-init:1","reason":"TASK_DEFINITION_IN_USE"}]}' >"${fx}/ecs_delete-task-definitions.json"
+expect "cleanup names a revision ECS refused to delete (200 with failures) and still succeeds" 0 "could not delete saiman-demo-init:1: TASK_DEFINITION_IN_USE" "${ops}/demo-cleanup.sh" --region eu-central-1 --state-bucket saiman-1-tfstate
+rm -f "${fx}/ecs_delete-task-definitions.json"
+: >"${fx}/calls.log"
+twelve='{"taskDefinitionArns":['"$(for i in $(seq 1 12); do printf '"%s/saiman-demo-lite:%s",' "${td}" "${i}"; done | sed 's/,$//')"']}'
+echo "${twelve}" >"${fx}/ecs_list-task-definitions.status-INACTIVE.json"
+expect "cleanup deletes more than ten revisions in batches of ten" 0 "asked ECS to delete 12 INACTIVE one(s)" "${ops}/demo-cleanup.sh" --region eu-central-1 --state-bucket saiman-1-tfstate
+if [[ "$(grep -c 'ecs delete-task-definitions' "${fx}/calls.log")" == 2 ]]; then ok "twelve revisions take two delete calls"; else bad "expected two delete-task-definitions calls"; fi
 if grep -q 'delete-parameter --name /saiman/demo/expires-at' "${fx}/calls.log"; then bad "default cleanup deleted expires-at (the reaper must stay armed until the check passed)"; else ok "expires-at survives the default cleanup"; fi
 : >"${fx}/calls.log"
 expect "cleanup --expiry-only deletes expires-at" 0 "deleted /saiman/demo/expires-at" "${ops}/demo-cleanup.sh" --region eu-central-1 --state-bucket saiman-1-tfstate --expiry-only
@@ -221,7 +251,7 @@ if grep -q 'delete-parameter --name /saiman/demo/expires-at' "${fx}/calls.log"; 
 # Leftovers keep expires-at: the check fails (exit 1) so the workflow never reaches --expiry-only.
 echo '{"Vpcs":[{"VpcId":"vpc-left"}]}' >"${fx}/ec2_describe-vpcs.json"
 expect "teardown check fails on leftovers (so expires-at is kept)" 1 "vpc-left" "${ops}/check-demo-down.sh" --region eu-central-1 --state-bucket saiman-1-tfstate --allow-unverified --ignore-expiry-param
-rm -f "${fx}/ec2_describe-vpcs.json" "${fx}/ecs_list-task-definitions.json"
+rm -f "${fx}/ec2_describe-vpcs.json" "${fx}"/ecs_list-task-definitions*.json
 echo '{"Parameters":[{"Name":"/saiman/demo/expires-at"}]}' >"${fx}/ssm_describe-parameters.json"
 expect "teardown check ignores only the expires-at parameter" 0 "" "${ops}/check-demo-down.sh" --region eu-central-1 --state-bucket saiman-1-tfstate --allow-unverified --ignore-expiry-param
 if grep -qE 'terraform|ssm (put|get)|ecs (create|run|register|update)' "${fx}/calls.log"; then bad "cleanup made a create/read-secret call"; else ok "cleanup only deletes/lists"; fi
@@ -439,6 +469,22 @@ expect "iam coverage: a new resource type without an entry fails and is named" 1
 rm -f "${cov}/demo-lite/zz.tf"
 jq '.resources["aws_gone"] = {"apply": [], "destroy": []}' "${cov}/bootstrap/tests/required-actions.json" >"${cov}/bootstrap/tests/r.tmp" && mv "${cov}/bootstrap/tests/r.tmp" "${cov}/bootstrap/tests/required-actions.json"
 expect "iam coverage: a stale entry fails and is named" 1 "aws_gone" bash "${cov}/bootstrap/tests/check-iam-coverage.sh"
+
+# --- check-task.sh: container_definitions must come from local.container_json, never from the resource ------
+ct="${work}/check-task"
+mkdir -p "${ct}/demo-lite/tests"
+cp "${here}"/../demo-lite/*.tf "${ct}/demo-lite/"
+cp "${here}/../demo-lite/tests/check-task.sh" "${here}"/../demo-lite/tests/*.tftest.hcl "${ct}/demo-lite/tests/"
+expect "check-task: today's module passes" 0 "OK" bash "${ct}/demo-lite/tests/check-task.sh"
+cp "${ct}/demo-lite/ecs.tf" "${ct}/ecs.tf.orig"
+sed -i 's|decoded_registered = { for t, j in local.container_json : t => jsondecode(j) }|decoded_registered = { main = jsondecode(aws_ecs_task_definition.main.container_definitions), init = jsondecode(aws_ecs_task_definition.init.container_definitions) }|' "${ct}/demo-lite/ecs.tf"
+expect "check-task: a local that reads the provider's container_definitions fails" 1 "use local.container_json" bash "${ct}/demo-lite/tests/check-task.sh"
+cp "${ct}/ecs.tf.orig" "${ct}/demo-lite/ecs.tf"
+printf 'output "x" { value = length(jsondecode(aws_ecs_task_definition.init.container_definitions)) }\n' >"${ct}/demo-lite/zz.tf"
+expect "check-task: an output that reads it fails" 1 "use local.container_json" bash "${ct}/demo-lite/tests/check-task.sh"
+rm -f "${ct}/demo-lite/zz.tf"
+sed -i 's|length(local.decoded_registered.main) <= 10|length(jsondecode(aws_ecs_task_definition.main.container_definitions)) <= 10|' "${ct}/demo-lite/tests/task.tftest.hcl"
+expect "check-task: a test that reads it fails" 1 "use local.container_json" bash "${ct}/demo-lite/tests/check-task.sh"
 
 if [[ "${fails}" -gt 0 ]]; then
   echo "test-ops-scripts: ${fails} failure(s)" >&2

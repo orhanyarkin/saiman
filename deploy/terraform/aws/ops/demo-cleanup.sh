@@ -86,7 +86,13 @@ done
 echo "demo-cleanup: removed ${removed} object version(s) under s3://${bucket}/demo/"
 
 # --- 3. task definitions ---------------------------------------------------------------------------------
-aws_json ecs list-task-definitions --family-prefix saiman-demo --status ACTIVE | jq -r '.taskDefinitionArns[]?' >"${work}/active.txt"
+# `ecs list-task-definitions --family-prefix` is an EXACT family name despite its name (`saiman-demo` matches nothing, the
+# families are saiman-demo-lite and saiman-demo-init), so list by status and keep the saiman-demo* families here.
+demo_task_definitions() { # <status>
+  aws_json ecs list-task-definitions --status "$1" |
+    jq -r '.taskDefinitionArns[]? | select((split("/") | last) | startswith("saiman-demo"))'
+}
+demo_task_definitions ACTIVE >"${work}/active.txt"
 deregistered=0
 while IFS= read -r arn; do
   [[ -n "${arn}" ]] || continue
@@ -96,19 +102,23 @@ while IFS= read -r arn; do
     echo "demo-cleanup: could not deregister ${arn##*/} (role limit?); it stays ACTIVE" >&2
   fi
 done <"${work}/active.txt"
-aws_json ecs list-task-definitions --family-prefix saiman-demo --status INACTIVE | jq -r '.taskDefinitionArns[]?' >"${work}/inactive.txt"
+# Deregistered revisions are INACTIVE until deleted. Deleting is asynchronous (DELETE_IN_PROGRESS, then gone), and the API
+# answers 200 with per-ARN `failures` instead of an error, so count what was accepted and name what was not.
+demo_task_definitions INACTIVE >"${work}/inactive.txt"
 deleted_td=0
 while [[ -s "${work}/inactive.txt" ]]; do
   head -n 10 "${work}/inactive.txt" >"${work}/batch.txt"
   tail -n +11 "${work}/inactive.txt" >"${work}/rest.txt"
   mv "${work}/rest.txt" "${work}/inactive.txt"
   mapfile -t batch <"${work}/batch.txt"
-  if aws_json ecs delete-task-definitions --task-definitions "${batch[@]}" >/dev/null; then
-    deleted_td=$((deleted_td + ${#batch[@]}))
+  if aws_json ecs delete-task-definitions --task-definitions "${batch[@]}" >"${work}/delete-result.json"; then
+    failed="$(jq '(.failures // []) | length' "${work}/delete-result.json")"
+    deleted_td=$((deleted_td + ${#batch[@]} - failed))
+    jq -r '(.failures // [])[] | "demo-cleanup: could not delete \(.arn | split("/") | last): \(.reason // "unknown reason"); harmless, it costs nothing"' "${work}/delete-result.json" >&2
   else
     echo "demo-cleanup: could not delete ${#batch[@]} INACTIVE task definition(s); harmless, they cost nothing" >&2
   fi
 done
-echo "demo-cleanup: deregistered ${deregistered} task definition(s), deleted ${deleted_td} INACTIVE one(s)"
+echo "demo-cleanup: deregistered ${deregistered} task definition(s), asked ECS to delete ${deleted_td} INACTIVE one(s)"
 
 echo "demo-cleanup: /saiman/demo/expires-at kept; run with --expiry-only once the teardown check passed"

@@ -44,8 +44,20 @@ if [[ -e "${FAKE_AWS_DIR}/${key}.err" ]]; then
   cat "${FAKE_AWS_DIR}/${key}.err" >&2
   exit 254
 fi
+# The real ListTaskDefinitions treats --family-prefix as an EXACT family name (`saiman-demo` matches nothing); model that.
+serve() {
+  local fam="" i
+  if [[ "${args[0]}_${args[1]}" == ecs_list-task-definitions ]]; then
+    for ((i = 2; i < ${#args[@]}; i++)); do [[ "${args[i]}" == --family-prefix ]] && fam="${args[i + 1]:-}"; done
+    if [[ -n "${fam}" ]]; then
+      jq --arg f "${fam}" '.taskDefinitionArns |= map(select((split("/") | last | split(":")[0]) == $f))'
+      return
+    fi
+  fi
+  cat
+}
 if [[ -e "${FAKE_AWS_DIR}/${key}.json" ]]; then
-  cat "${FAKE_AWS_DIR}/${key}.json"
+  serve <"${FAKE_AWS_DIR}/${key}.json"
 else
   echo '{}'
 fi
@@ -231,10 +243,15 @@ echo '{"taskDefinition":{"status":"ACTIVE"}}' >"${fx}/ecs_describe-task-definiti
 run_case "a tagged ACTIVE task definition is a LEFTOVER" 1 "LEFTOVER    tagged resources (saiman:stack=demo-lite): ${td_stack}" "${common[@]}" --strict
 
 reset
-echo '{"taskDefinitionArns":["'"${td_init}"'","'"${td_stack}"'"]}' >"${fx}/ecs_list-task-definitions--family-prefix.json"
+echo '{"taskDefinitionArns":["'"${td_init}"'","'"${td_stack}"'","arn:aws:ecs:eu-central-1:123456789012:task-definition/other-app:3"]}' >"${fx}/ecs_list-task-definitions--status=INACTIVE.json"
 run_case "INACTIVE saiman-demo task definitions are listed on their own and do not fail" 0 "INACTIVE    ecs task definition: ${td_stack}" "${common[@]}" --strict
 grep -qF "INACTIVE    ecs task definition: ${td_init}" "${work}/out.txt" && ok "every INACTIVE revision is listed" || bad "an INACTIVE revision is missing from the output"
-touch "${fx}/ecs_list-task-definitions--family-prefix.fail"
+grep -q "other-app" "${work}/out.txt" && bad "a foreign INACTIVE task definition was listed" || ok "foreign INACTIVE task definitions are not listed"
+grep -q -- "--family-prefix" "${fx}/calls.log" && bad "the listing must not use --family-prefix (exact family name)" || ok "no --family-prefix in the listing"
+reset
+echo '{"taskDefinitionArns":["'"${td_init}"'"]}' >"${fx}/ecs_list-task-definitions--status=DELETE_IN_PROGRESS.json"
+run_case "DELETE_IN_PROGRESS task definitions are shown as INACTIVE rows and do not fail" 0 "INACTIVE    ecs task definition: ${td_init}" "${common[@]}" --strict
+touch "${fx}/ecs_list-task-definitions--status=INACTIVE.fail"
 run_case "failing to list INACTIVE task definitions is a NOTE, not a failure" 0 "NOTE        INACTIVE task definitions could not be listed" "${common[@]}" --strict
 
 reset
