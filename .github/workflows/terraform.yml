@@ -4,16 +4,13 @@ name: Terraform
 # self-tests; no cloud credentials. `plan`: read-only OIDC role (PLAN_ROLE_ARN), placeholder inputs, never
 # apply. `infracost`: cost estimate when INFRACOST_API_KEY exists. apply/destroy live in demo-up/demo-destroy.
 on:
-  # The filters include every file the guards and the demo workflows depend on: a change to any of them must
-  # run the guards (ops/check-workflow-run-blocks.sh enforces this list).
+  # `terraform (fmt, validate, test)` is a required status check of the protect-main ruleset, and a workflow
+  # that path filtering skips reports NOTHING: the ruleset would wait for it forever on a pull request that
+  # touches no Terraform file ("Expected - Waiting for status to be reported"). So the pull_request trigger has
+  # no `paths` filter; the `static` job decides from GUARD_PATHS below whether there is work to do, and
+  # ops/check-workflow-run-blocks.sh keeps the two lists equal and this trigger unfiltered. A push to main
+  # still filters: nothing waits for it, and the plan and cost jobs should not run for unrelated commits.
   pull_request:
-    paths:
-      - "deploy/terraform/**"
-      - ".github/workflows/**"
-      - "scripts/ensure-secret-files.sh"
-      - "scripts/with-auth-digests.sh"
-      - "deploy/compose/postgres/**"
-      - "deploy/compose/nginx.conf"
   push:
     branches: [main]
     paths:
@@ -36,19 +33,41 @@ jobs:
     name: terraform (fmt, validate, test)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      terraform: ${{ steps.changes.outputs.terraform }}
+    env:
+      # Every file the guards and the demo workflows depend on, in GitHub's filter spelling: a change to any of
+      # them must run the guards, so this list stays equal to the push path filter above
+      # (ops/check-workflow-run-blocks.sh enforces both). A pull request that touches none of them prints
+      # "no terraform changes" and the required check goes green in seconds.
+      GUARD_PATHS: |
+        deploy/terraform/**
+        .github/workflows/**
+        scripts/ensure-secret-files.sh
+        scripts/with-auth-digests.sh
+        deploy/compose/postgres/**
+        deploy/compose/nginx.conf
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The whole history is ~3 MiB and the decision below needs the merge base with the base branch.
+          fetch-depth: 0
+      - name: Did anything under the guard paths change?
+        id: changes
+        run: deploy/terraform/aws/ops/guard-paths-changed.sh
       - name: Set up Terraform
+        if: steps.changes.outputs.terraform == 'true'
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.16.4"
           terraform_wrapper: false
       - name: terraform fmt
+        if: steps.changes.outputs.terraform == 'true'
         run: terraform fmt -check -recursive deploy/terraform
       - name: terraform init -backend=false and validate
+        if: steps.changes.outputs.terraform == 'true'
         run: |
           # Every root module and module directory (anything with a versions.tf).
           find deploy/terraform -name versions.tf -not -path '*/.terraform/*' -print0 |
@@ -60,6 +79,7 @@ jobs:
               echo "::endgroup::"
             done
       - name: terraform test (mock providers, offline)
+        if: steps.changes.outputs.terraform == 'true'
         run: |
           find deploy/terraform -name '*.tftest.hcl' -not -path '*/.terraform/*' -print0 |
             while IFS= read -r -d '' file; do
@@ -73,22 +93,30 @@ jobs:
               echo "::endgroup::"
             done
       - name: Bucket keeps prevent_destroy
+        if: steps.changes.outputs.terraform == 'true'
         run: deploy/terraform/aws/bootstrap/tests/check-prevent-destroy.sh
       - name: Check that every demo-lite resource type has its IAM actions listed
+        if: steps.changes.outputs.terraform == 'true'
         run: deploy/terraform/aws/bootstrap/tests/check-iam-coverage.sh
       - name: Check that every AWS CLI command the containers run has its IAM actions listed
+        if: steps.changes.outputs.terraform == 'true'
         run: deploy/terraform/aws/bootstrap/tests/check-workload-actions.sh
       - name: demo-lite foundation checks (default tags, no IAM resources)
+        if: steps.changes.outputs.terraform == 'true'
         run: deploy/terraform/aws/demo-lite/tests/check-foundation.sh
       - name: demo-lite task checks (secret reads, buyer key placement)
+        if: steps.changes.outputs.terraform == 'true'
         run: deploy/terraform/aws/demo-lite/tests/check-task.sh
       - name: ops self-tests (teardown check, scripts; fake aws, offline)
+        if: steps.changes.outputs.terraform == 'true'
         run: |
           bash deploy/terraform/aws/ops/test-check-demo-down.sh
           bash deploy/terraform/aws/ops/test-ops-scripts.sh
       - name: SSM parameters created by demo-up equal containers.tf valueFrom
+        if: steps.changes.outputs.terraform == 'true'
         run: deploy/terraform/aws/ops/check-ssm-names.sh
       - name: Workflow run blocks (no expressions, no set -x, shellcheck)
+        if: steps.changes.outputs.terraform == 'true'
         run: deploy/terraform/aws/ops/check-workflow-run-blocks.sh
 
   # Read-only `terraform plan` of demo-lite with PLACEHOLDER inputs (ops/tf-dummy-env.sh: non-secret dummy
@@ -101,7 +129,8 @@ jobs:
     name: terraform plan (demo-lite, read-only role)
     needs: static
     if: >-
-      vars.PLAN_ROLE_ARN != ''
+      needs.static.outputs.terraform == 'true'
+      && vars.PLAN_ROLE_ARN != ''
       && github.actor != 'dependabot[bot]'
       && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04

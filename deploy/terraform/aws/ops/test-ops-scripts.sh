@@ -119,6 +119,8 @@ jobs:
 EOF
 expect "run-blocks: pull_request_target is rejected" 1 "pull_request_target" "${ops}/check-workflow-run-blocks.sh" "${work}/prt.yml"
 mkdir -p "${work}/wf"
+# The bug this guards against (PR #50): a pull_request paths filter on a workflow that owns a required status
+# check. The workflow never runs, so the check never reports and the ruleset waits for it forever.
 cat >"${work}/wf/terraform.yml" <<'EOF'
 name: Terraform
 on:
@@ -132,7 +134,108 @@ jobs:
     steps:
       - run: echo hi
 EOF
-expect "run-blocks: terraform.yml path filters must cover the guard inputs" 1 "path filter lacks" "${ops}/check-workflow-run-blocks.sh" "${work}/wf/terraform.yml"
+expect "run-blocks: a pull_request paths filter on terraform.yml is rejected" 1 "waits for the required check forever" "${ops}/check-workflow-run-blocks.sh" "${work}/wf/terraform.yml"
+cat >"${work}/wf/ci.yml" <<'EOF'
+name: CI
+on:
+  pull_request:
+    paths-ignore: ["docs/**"]
+jobs:
+  x:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo hi
+EOF
+expect "run-blocks: a paths-ignore filter on ci.yml is rejected too" 1 "paths-ignore filter" "${ops}/check-workflow-run-blocks.sh" "${work}/wf/ci.yml"
+cat >"${work}/wf/ci.yml" <<'EOF'
+name: CI
+on:
+  push:
+    branches: [main]
+jobs:
+  x:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo hi
+EOF
+expect "run-blocks: ci.yml without a pull_request trigger is rejected" 1 "would never report" "${ops}/check-workflow-run-blocks.sh" "${work}/wf/ci.yml"
+
+# terraform.yml: the push filter and the static job's GUARD_PATHS must be the same list, and it must cover
+# every input the guards depend on (audit M2) - now in two places, so the guard compares them with each other.
+guard_list="deploy/terraform/**
+.github/workflows/**
+scripts/ensure-secret-files.sh
+scripts/with-auth-digests.sh
+deploy/compose/postgres/**
+deploy/compose/nginx.conf"
+{
+  printf 'name: Terraform\non:\n  pull_request:\n  push:\n    paths:\n'
+  while IFS= read -r path; do printf '      - "%s"\n' "${path}"; done <<<"${guard_list}"
+  printf 'jobs:\n  static:\n    runs-on: ubuntu-24.04\n    env:\n      GUARD_PATHS: |\n'
+  while IFS= read -r path; do printf '        %s\n' "${path}"; done <<<"${guard_list}"
+  printf '    steps:\n      - run: echo hi\n'
+} >"${work}/wf/good-terraform.yml"
+cp "${work}/wf/good-terraform.yml" "${work}/wf/terraform.yml"
+expect "run-blocks: an unfiltered pull_request with equal push/GUARD_PATHS lists is clean" 0 "clean" "${ops}/check-workflow-run-blocks.sh" "${work}/wf/terraform.yml"
+grep -vxF '      - "deploy/compose/nginx.conf"' "${work}/wf/good-terraform.yml" >"${work}/wf/terraform.yml"
+expect "run-blocks: a push path filter that lacks a guard input is rejected" 1 "path filter lacks deploy/compose/nginx.conf" "${ops}/check-workflow-run-blocks.sh" "${work}/wf/terraform.yml"
+grep -vxF '        deploy/compose/nginx.conf' "${work}/wf/good-terraform.yml" >"${work}/wf/terraform.yml"
+expect "run-blocks: GUARD_PATHS that lacks a guard input is rejected" 1 "GUARD_PATHS lacks deploy/compose/nginx.conf" "${ops}/check-workflow-run-blocks.sh" "${work}/wf/terraform.yml"
+sed 's|^        deploy/compose/nginx.conf$|        deploy/compose/other.conf|' "${work}/wf/good-terraform.yml" >"${work}/wf/terraform.yml"
+expect "run-blocks: a GUARD_PATHS entry the push filter does not have is rejected" 1 "must be the same list" "${ops}/check-workflow-run-blocks.sh" "${work}/wf/terraform.yml"
+
+# --- guard-paths-changed: the required check runs on every PR and decides for itself whether to do the work ---
+gp="${work}/gp"
+mkdir -p "${gp}/docs" "${gp}/deploy/terraform/aws" "${gp}/.github/workflows"
+git -C "${gp}" init -q -b main
+git -C "${gp}" config user.email test@example.invalid
+git -C "${gp}" config user.name "ops self-test"
+echo base >"${gp}/docs/PROGRESS.md"
+echo base >"${gp}/deploy/terraform/aws/main.tf"
+git -C "${gp}" add -A
+git -C "${gp}" commit -qm base
+# What actions/checkout leaves behind for a pull request: the base branch as a remote-tracking ref.
+git -C "${gp}" update-ref refs/remotes/origin/main HEAD
+gp_paths="${guard_list}"
+detect() { (cd "${gp}" && GUARD_PATHS="${gp_paths}" "${ops}/guard-paths-changed.sh"); }
+decided() { # decided <description> <expected terraform= line>
+  if grep -qxF "$2" "${work}/decision"; then ok "$1"; else bad "$1: GITHUB_OUTPUT has '$(cat "${work}/decision")'"; fi
+}
+
+git -C "${gp}" checkout -q -b docs-only
+echo more >>"${gp}/docs/PROGRESS.md"
+git -C "${gp}" commit -qam "docs only"
+: >"${work}/decision"
+GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF=main GITHUB_OUTPUT="${work}/decision" \
+  expect "guard paths: a docs-only pull request ends green without running the guards" 0 "no terraform changes" detect
+decided "guard paths: a docs-only pull request decides terraform=false" "terraform=false"
+
+# Fail closed: not a pull request, or a base ref that is not there (shallow clone) -> run the guards.
+: >"${work}/decision"
+GITHUB_EVENT_NAME=push GITHUB_OUTPUT="${work}/decision" \
+  expect "guard paths: a push runs the guards" 0 "is not a pull request" detect
+decided "guard paths: a push decides terraform=true" "terraform=true"
+: >"${work}/decision"
+GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF=no-such-branch GITHUB_OUTPUT="${work}/decision" \
+  expect "guard paths: an unknown base ref runs the guards" 0 "no merge base" detect
+decided "guard paths: an unknown base ref decides terraform=true" "terraform=true"
+
+for path in deploy/terraform/aws/main.tf .github/workflows/x.yml scripts/with-auth-digests.sh deploy/compose/postgres/init.sql deploy/compose/nginx.conf; do
+  git -C "${gp}" checkout -q main
+  git -C "${gp}" checkout -q -B "pr-${path//[\/.]/-}"
+  mkdir -p "${gp}/$(dirname "${path}")"
+  echo change >>"${gp}/${path}"
+  git -C "${gp}" add -A
+  git -C "${gp}" commit -qm "change ${path}"
+  : >"${work}/decision"
+  GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF=main GITHUB_OUTPUT="${work}/decision" \
+    expect "guard paths: a change to ${path} runs the guards" 0 "guard path changed: ${path}" detect
+  decided "guard paths: a change to ${path} decides terraform=true" "terraform=true"
+done
+
+gp_paths=""
+expect "guard paths: an empty GUARD_PATHS is a configuration error, not a silent skip" 1 "GUARD_PATHS is empty" detect
+gp_paths="${guard_list}"
 
 # --- .gitignore keeps Terraform artifacts out of the repo (audit L7) ----------------------------------------------
 for name in x.tfplan tfplan crash.log .terraformrc terraform.rc deploy/terraform/aws/demo-lite/ci_backend.tf plan.json state.json; do

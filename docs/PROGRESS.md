@@ -7,6 +7,18 @@ M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-10-18 — Fix: the required Terraform check never reported on a docs-only pull request
+
+**What changed**
+- PR #50 (docs only) could not be merged: the required check `terraform (fmt, validate, test)` stayed on "Expected — Waiting for status to be reported". `terraform.yml` filtered its `pull_request` trigger by path, so a pull request that touches no Terraform file never ran the workflow — and a workflow that path filtering skips reports **no status at all**, which leaves the `protect-main` ruleset waiting for that check forever. Only this one check was affected: the other four (`backend (./gradlew check)`, `web (lint, typecheck, test, build)`, `compose policy (deploy/compose)`, `shellcheck (scripts, deploy, hooks)`) live in `ci.yml`, whose `pull_request` trigger has no filter.
+- The `pull_request` trigger has no `paths` filter any more and the `static` job decides for itself: `ops/guard-paths-changed.sh` matches the files changed since the merge base against `GUARD_PATHS` (the job's env: the same six entries as the push filter) and writes `terraform=true|false`; every working step is gated on it, so a docs-only pull request prints `no terraform changes` and the check is green in seconds. The job name is untouched — renaming it would break the ruleset. The detector fails closed: a push, a manual run, an unknown base ref, a shallow clone or a failing `git diff` all count as changed. It lives under `deploy/terraform/` on purpose, so a change to the detector is itself a guard path.
+- `push` keeps its path filter (nothing waits for it, and the `plan`/`infracost` jobs should not run for unrelated commits); the read-only `plan` job follows the same decision through `needs.static.outputs.terraform`.
+- `ops/check-workflow-run-blocks.sh` meta-check #7 enforces the new shape instead of the old one: `ci.yml` and `terraform.yml` must have a `pull_request` trigger with neither `paths` nor `paths-ignore`, and `terraform.yml`'s push filter and `GUARD_PATHS` must be the same list and cover every guard input (the list now exists twice and GitHub's workflow YAML has no anchors).
+
+**How verified**: `ops/test-ops-scripts.sh`, 24 new checks (one of them replaces the old path-filter check) — the guard rejects a `pull_request` paths filter, a `paths-ignore` on `ci.yml`, a missing `pull_request` trigger, a push filter or a `GUARD_PATHS` missing an entry, and the two lists drifting apart, and passes today's workflows; the detector runs against a throwaway git repository (docs-only → `terraform=false`; a change to each of the five guard-path shapes → `true`; push and unknown base ref → `true`; empty `GUARD_PATHS` → exit 1). Also `make tf-check` and the pinned shellcheck. The no-changes path cannot be proven by this pull request itself: it changes `.github/workflows/**`, so the guards run on it — PR #50 is the live proof.
+
+**Next**: PR #50 needs a re-trigger after this merges (a `pull_request` run uses the workflow from that pull request's own merge commit, and updating the base branch fires no event): rebase and push, or close and reopen it.
+
 ### 2026-10-18 — Fix: the tunnel's port clashed with the local stack ("API refused the token"), and readiness never saw a real UP
 
 **What changed**
