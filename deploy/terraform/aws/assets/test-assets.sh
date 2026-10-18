@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Offline self-test for the demo-lite assets (ADR-0028): runs in CI and locally, needs only bash,
-# coreutils, python3 and wget. No AWS, no pnpm build (a fixture web dist is used), no network but loopback.
+# coreutils, python3, wget and nc. No AWS, no pnpm build (a fixture web dist is used), no network but loopback.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -138,13 +138,35 @@ serve() { # <dir> <port>
 }
 mkdir -p "${work}/up/actuator" "${work}/down/actuator"
 printf '{"status":"UP","groups":["liveness","readiness"]}' >"${work}/up/actuator/health"
-printf '{"status":"DOWN","components":{"db":{"status":"UP","details":{"secret-looking":"visible"}}}}' >"${work}/down/actuator/health"
+# What a DOWN service answers: HTTP 503 and a body. details are NOT supposed to be there, but readiness.sh must stay safe if they are.
+printf '{"status":"DOWN","components":{"db":{"status":"UP","details":{"secret-looking":"visible"}},"redis":{"status":"DOWN","details":{"error":"NOAUTH leaked-error-text"}}}}' >"${work}/down/actuator/health"
+printf '{"status":"DOWN"}' >"${work}/down/health-bare"
+serve503() { # <body file> <port>: every GET answers 503 with the file as body
+  python3 -I -c '
+import http.server, sys
+body = open(sys.argv[1], "rb").read()
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(503)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a):
+        pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[2])), H).serve_forever()
+' "$1" "$2" >/dev/null 2>&1 &
+  pids+=("$!")
+}
 p1="$(free_port)"
 p2="$(free_port)"
 p3="$(free_port)"
+p5="$(free_port)"
+p6="$(free_port)"
 serve "${work}/up" "${p1}"
 serve "${work}/up" "${p2}"
-serve "${work}/down" "${p3}"
+serve503 "${work}/down/actuator/health" "${p3}"
+serve503 "${work}/down/health-bare" "${p5}"
 sleep 1
 
 READINESS_TARGETS="alpha:${p1} beta:${p2}" READINESS_TIMEOUT_SECONDS=10 READINESS_INTERVAL=1 "${here}/readiness.sh" >"${work}/ready-up.txt" 2>&1 \
@@ -157,7 +179,43 @@ if READINESS_TARGETS="alpha:${p1} gamma:${p3}" READINESS_TIMEOUT_SECONDS=3 READI
 else ok "readiness.sh times out (non-zero) when a target stays DOWN"; fi
 elapsed=$(($(date +%s) - start))
 if [[ ${elapsed} -ge 3 && ${elapsed} -lt 15 ]]; then ok "timeout honoured (${elapsed}s for a 3s limit)"; else bad "timeout took ${elapsed}s"; fi
-if grep -q 'gamma' "${work}/ready-down.txt" && ! grep -qE 'status|details|visible|components' "${work}/ready-down.txt"; then ok "timeout output names the failing service and no response body"; else bad "timeout output leaks or omits info"; fi
+if grep -q 'gamma' "${work}/ready-down.txt"; then ok "timeout output names the failing service"; else bad "timeout output does not name the failing service"; fi
+# demo-up #8: the cause (a DOWN component) must be in the log, and nothing but names and statuses.
+if grep -qF 'gamma (port '"${p3}"'): HTTP 503, status DOWN, components not UP: redis=DOWN' "${work}/ready-down.txt"; then ok "the failure says which component is DOWN (redis=DOWN)"; else
+  bad "the failure does not name the DOWN component"
+  sed 's/^/      /' "${work}/ready-down.txt" >&2
+fi
+if grep -qE 'db=|visible|secret-looking|NOAUTH|leaked-error-text|details|[{}]' "${work}/ready-down.txt"; then
+  bad "the failure output leaks a component that is UP, details, an error text or raw JSON"
+  sed 's/^/      /' "${work}/ready-down.txt" >&2
+else ok "the failure output holds names and statuses only (no UP component, no details, no error text, no JSON)"; fi
+READINESS_TARGETS="bare:${p5}" READINESS_TIMEOUT_SECONDS=2 READINESS_INTERVAL=1 "${here}/readiness.sh" >"${work}/ready-bare.txt" 2>&1 || true
+if grep -q 'bare (port '"${p5}"'): HTTP 503, status DOWN, no component listed as not UP (is MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS=always set?)' "${work}/ready-bare.txt"; then ok "a body without components gets a hint instead of a guess"; else bad "no hint for a body without components"; fi
+READINESS_TARGETS="closed:${p6}" READINESS_TIMEOUT_SECONDS=2 READINESS_INTERVAL=1 "${here}/readiness.sh" >"${work}/ready-closed.txt" 2>&1 || true
+if grep -q 'closed (port '"${p6}"'): no answer' "${work}/ready-closed.txt"; then ok "a service that does not listen is reported as no answer"; else bad "no 'no answer' line for a closed port"; fi
+# Progress reports while waiting, not only at the end.
+READINESS_TARGETS="gamma:${p3}" READINESS_TIMEOUT_SECONDS=5 READINESS_INTERVAL=1 READINESS_REPORT_INTERVAL=2 "${here}/readiness.sh" >"${work}/ready-progress.txt" 2>/dev/null || true
+if [[ "$(grep -c 'components not UP: redis=DOWN' "${work}/ready-progress.txt")" -ge 1 ]]; then ok "readiness.sh reports the cause while it is still waiting"; else bad "no progress report before the timeout"; fi
+
+# The same script in the real image of the readiness container (busybox pinned by digest in demo-lite/containers.tf): the host's
+# wget, nc, sed and grep are not busybox's. Runs only when that exact image is already local (no pull: the registry rate-limits).
+bb_digest="$(sed -nE 's|.*busybox:[0-9.]+@(sha256:[0-9a-f]{64}).*|\1|p' "${here}/../demo-lite/containers.tf" | head -n 1)"
+if [[ -n "${bb_digest}" ]] && command -v docker >/dev/null 2>&1 && docker image inspect "busybox@${bb_digest}" >/dev/null 2>&1; then
+  docker run --rm -v "${here}/readiness.sh:/readiness.sh:ro" "busybox@${bb_digest}" sh -c '
+    B="{\"status\":\"DOWN\",\"components\":{\"db\":{\"status\":\"UP\",\"details\":{\"x\":\"visible\"}},\"redis\":{\"status\":\"DOWN\"}}}"
+    (while true; do printf "HTTP/1.1 503 Service Unavailable\r\nContent-Length: %s\r\n\r\n%s" "${#B}" "$B" | nc -l -p 18503 >/dev/null; done) &
+    sleep 1
+    READINESS_TARGETS="orchestrator:18503 ledger:18504" READINESS_TIMEOUT_SECONDS=2 READINESS_INTERVAL=1 sh /readiness.sh' >"${work}/ready-busybox.txt" 2>&1 || true
+  if grep -qF 'orchestrator (port 18503): HTTP 503, status DOWN, components not UP: redis=DOWN' "${work}/ready-busybox.txt" \
+    && grep -qF 'ledger (port 18504): no answer' "${work}/ready-busybox.txt" && ! grep -qE 'db=|visible|[{}]' "${work}/ready-busybox.txt"; then
+    ok "readiness.sh explains a DOWN component in the pinned busybox image (wget would have shown nothing for a 503)"
+  else
+    bad "readiness.sh misbehaves in the pinned busybox image"
+    sed 's/^/      /' "${work}/ready-busybox.txt" >&2
+  fi
+else
+  echo "skip: the pinned busybox image is not local, readiness.sh was only tested with the host's tools"
+fi
 
 # A target that comes up late: UP after ~2s.
 mkdir -p "${work}/late/actuator"
