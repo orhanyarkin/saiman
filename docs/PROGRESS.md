@@ -7,6 +7,16 @@ M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-10-18 — Fix: the teardown check no longer calls Tagging API lag a leftover
+
+**What changed**
+- `ops/check-demo-down.sh`: the Resource Groups Tagging API keeps listing deleted security group rules and task definitions for a while, which showed up as LEFTOVER after a clean `demo-down`. Every tagged ARN is now confirmed with the owning service's own describe call (EC2, ECS, RDS, logs, Scheduler): it exists -> LEFTOVER; it is gone -> a separate `STALE (tagging index)` row that does not fail, not even with `--strict`; a deregistered task definition -> a separate `INACTIVE` row (also listed from `ecs list-task-definitions --status INACTIVE`). A type with no direct check, a denied check or an ambiguous answer stays LEFTOVER or ERROR (fail closed), so the sweep is never weaker than reading the index.
+- The NotFound mappings were checked against real AWS error codes with read-only describe calls on nonexistent ids (`InvalidSecurityGroupRuleId.NotFound`, `InvalidGroup.NotFound`, `InvalidVpcID.NotFound`, ..., `DBInstanceNotFound`, `ResourceNotFoundException`, ECS `Unable to describe task definition`, `failures: MISSING` for clusters).
+
+**How verified**: `ops/test-check-demo-down.sh` (fake `aws`, now answering per flag and value; 78 checks), `ops/mutation-check-demo-down.py` (11 mutations of the new rules, all caught), pinned shellcheck, `make tf-check`. No resource was touched.
+
+**Next**: the human runs `make demo-down-check` after the next `demo-down`; expect STALE/INACTIVE rows instead of LEFTOVER while the index catches up.
+
 ### 2026-10-18 — Fix: IAM actions the roles were missing, and a test that finds them offline
 
 **What changed**
@@ -17,7 +27,7 @@ M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4 
 
 **How verified**: `terraform test` in bootstrap (20 tests) and demo-lite, `make tf-check`, `make tf-mutation-check`, `ops/test-ops-scripts.sh`; the pre-fix `iam.tf` fails 3 of the new tests; `terraform plan` against the real bootstrap state (read-only, `-lock=false`) shows 2 policy updates. Nothing applied.
 
-**Next**: the human re-applies `bootstrap` after merge; PR for `check-demo-down.sh` (confirm Tagging API hits with the service's own describe call, report stale index entries and INACTIVE task definitions separately).
+**Next**: the human re-applies `bootstrap` after merge; the `check-demo-down.sh` follow-up is the entry above (PR #45).
 
 ### 2026-10-06 — M6b: migrate one-shot, demo-lite Terraform and demo workflows (ADR-0027, ADR-0028)
 

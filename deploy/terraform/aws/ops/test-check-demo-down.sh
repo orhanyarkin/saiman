@@ -2,6 +2,10 @@
 # Self-test for check-demo-down.sh with a fake `aws` executable on PATH (no AWS call, no credentials).
 # The fake keys on "<service>_<operation>" and serves canned JSON from a fixtures directory:
 #   <key>.json  response (default: {})     <key>.deny  AccessDenied, exit 254     <key>.fail  other error, exit 255
+#   <key>.err   exit 254 with the file's text on stderr (for example a NotFound error)
+# A call whose first flag is --f with value v is looked up as "<key>--f=v" (slashes in v become _), then "<key>--f", so the
+# direct confirmation of a tagged ARN (--group-ids, --task-definition, ...) can answer differently from the sweep
+# of the same operation (--filters, --log-group-name-prefix /saiman).
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +23,15 @@ args=("$@")
 while [[ ${#args[@]} -gt 0 && "${args[0]}" == --* ]]; do args=("${args[@]:2}"); done
 key="${args[0]}_${args[1]}"
 echo "${args[0]} ${args[1]}" >>"${FAKE_AWS_DIR}/calls.log"
+if [[ -n "${args[2]:-}" && "${args[2]}" == --* ]]; then
+  val="${args[3]:-}"
+  base="${key}"
+  for cand in "${base}${args[2]}=${val//\//_}" "${base}${args[2]}"; do
+    for ext in deny fail err json; do
+      if [[ -e "${FAKE_AWS_DIR}/${cand}.${ext}" ]]; then key="${cand}"; break 2; fi
+    done
+  done
+fi
 if [[ -e "${FAKE_AWS_DIR}/${key}.deny" ]]; then
   echo "An error occurred (AccessDenied) when calling the ${args[1]} operation: not authorized" >&2
   exit 254
@@ -26,6 +39,10 @@ fi
 if [[ -e "${FAKE_AWS_DIR}/${key}.fail" ]]; then
   echo "Could not connect to the endpoint URL" >&2
   exit 255
+fi
+if [[ -e "${FAKE_AWS_DIR}/${key}.err" ]]; then
+  cat "${FAKE_AWS_DIR}/${key}.err" >&2
+  exit 254
 fi
 if [[ -e "${FAKE_AWS_DIR}/${key}.json" ]]; then
   cat "${FAKE_AWS_DIR}/${key}.json"
@@ -120,7 +137,6 @@ expect_leftover() { # <description> <fixture key> <json> <expected substring>
   printf '%s\n' "$3" >"${fx}/$2.json"
   run_case "leftover: $1" 1 "$4" "${common[@]}" --allow-unverified
 }
-expect_leftover "tagged resource" resourcegroupstaggingapi_get-resources '{"ResourceTagMappingList":[{"ResourceARN":"arn:aws:ecs:eu-central-1:1:cluster/x"}]}' "LEFTOVER    tagged resources"
 expect_leftover "ecs cluster" ecs_list-clusters '{"clusterArns":["arn:aws:ecs:eu-central-1:1:cluster/saiman-demo"]}' "ecs cluster: arn:aws:ecs:eu-central-1:1:cluster/saiman-demo"
 expect_leftover "ecs task definition" ecs_list-task-definitions '{"taskDefinitionArns":["arn:aws:ecs:eu-central-1:1:task-definition/saiman-demo-lite:3"]}' "ecs task definitions (ACTIVE, any family)"
 expect_leftover "rds instance" rds_describe-db-instances '{"DBInstances":[{"DBInstanceIdentifier":"saiman-demo"},{"DBInstanceIdentifier":"other"}]}' "rds instances: saiman-demo"
@@ -153,6 +169,131 @@ run_case "an unparseable response is exit 2, never CLEAN" 2 "unparseable respons
 reset
 echo 'this is not json' >"${fx}/iam_list-roles.json"
 run_case "an unparseable IAM response is never clean" 1 "unparseable response" "${common[@]}"
+
+# --- tagged resources are confirmed with the service's own describe call --------------------------------
+tagged() { # <arn>...: what the Tagging API returns
+  local arn first=1
+  printf '{"ResourceTagMappingList":['
+  for arn in "$@"; do
+    [[ "${first}" -eq 1 ]] || printf ','
+    printf '{"ResourceARN":"%s"}' "${arn}"
+    first=0
+  done
+  printf ']}\n'
+}
+acct="arn:aws:%s:eu-central-1:123456789012"
+# shellcheck disable=SC2059 # the account prefix is a printf template on purpose
+arn_of() { printf "${acct}:%s" "$1" "$2"; } # <service> <resource>
+sgr="$(arn_of ec2 security-group-rule/sgr-0abc)"
+sg="$(arn_of ec2 security-group/sg-0abc)"
+td_init="$(arn_of ecs task-definition/saiman-demo-init:1)"
+td_stack="$(arn_of ecs task-definition/saiman-demo-stack:2)"
+
+reset
+tagged "${sgr}" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo 'An error occurred (InvalidSecurityGroupRuleId.NotFound) when calling the DescribeSecurityGroupRules operation: The security group rule ID does not exist' >"${fx}/ec2_describe-security-group-rules--security-group-rule-ids.err"
+run_case "a security group rule the Tagging API still lists but EC2 says is gone is STALE and does not fail (strict)" 0 "STALE       (tagging index) ${sgr}" "${common[@]}" --strict
+if grep -q "LEFTOVER" "${work}/out.txt"; then bad "stale entry was also reported as LEFTOVER"; else ok "stale entry is not a LEFTOVER"; fi
+if grep -qF "CLEAN       tagged resources (saiman:stack=demo-lite)" "${work}/out.txt"; then ok "tagged sweep is CLEAN when every entry is stale"; else bad "tagged sweep should be CLEAN when every entry is stale"; fi
+if grep -qvE '^[a-z0-9]+ (list|describe|get)-' "${fx}/calls.log"; then bad "confirmation made a non-read call"; else ok "confirmation uses read calls only"; fi
+
+reset
+tagged "${sg}" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo '{"SecurityGroups":[{"GroupId":"sg-0abc"}]}' >"${fx}/ec2_describe-security-groups--group-ids.json"
+run_case "a tagged security group that still exists is a LEFTOVER" 1 "LEFTOVER    tagged resources (saiman:stack=demo-lite): ${sg}" "${common[@]}" --strict
+
+reset
+tagged "${sg}" "${sgr}" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo '{"SecurityGroups":[{"GroupId":"sg-0abc"}]}' >"${fx}/ec2_describe-security-groups--group-ids.json"
+echo 'An error occurred (InvalidSecurityGroupRuleId.NotFound)' >"${fx}/ec2_describe-security-group-rules--security-group-rule-ids.err"
+run_case "a stale entry does not hide a real leftover next to it" 1 "STALE       (tagging index) ${sgr}" "${common[@]}" --strict
+grep -qF "LEFTOVER    tagged resources (saiman:stack=demo-lite): ${sg}" "${work}/out.txt" && ok "the live one is still a LEFTOVER" || bad "the live one lost its LEFTOVER row"
+
+reset
+tagged "${td_init}" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo '{"taskDefinition":{"status":"INACTIVE","family":"saiman-demo-init","revision":1}}' >"${fx}/ecs_describe-task-definition--task-definition.json"
+run_case "an INACTIVE task definition is its own row and does not fail (strict)" 0 "INACTIVE    ecs task definition: ${td_init}" "${common[@]}" --strict
+grep -q "LEFTOVER" "${work}/out.txt" && bad "INACTIVE task definition was reported as LEFTOVER" || ok "INACTIVE task definition is not a LEFTOVER"
+
+reset
+tagged "${td_init}" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo '{"taskDefinition":{"status":"DELETE_IN_PROGRESS"}}' >"${fx}/ecs_describe-task-definition--task-definition.json"
+run_case "a DELETE_IN_PROGRESS task definition is shown as INACTIVE, not a failure" 0 "INACTIVE    ecs task definition: ${td_init}" "${common[@]}" --strict
+
+reset
+tagged "${td_init}" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo 'An error occurred (ClientException) when calling the DescribeTaskDefinition operation: Unable to describe task definition.' >"${fx}/ecs_describe-task-definition--task-definition.err"
+run_case "a deleted task definition the index still lists is STALE" 0 "STALE       (tagging index) ${td_init}" "${common[@]}" --strict
+
+reset
+tagged "${td_stack}" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo '{"taskDefinition":{"status":"ACTIVE"}}' >"${fx}/ecs_describe-task-definition--task-definition.json"
+run_case "a tagged ACTIVE task definition is a LEFTOVER" 1 "LEFTOVER    tagged resources (saiman:stack=demo-lite): ${td_stack}" "${common[@]}" --strict
+
+reset
+echo '{"taskDefinitionArns":["'"${td_init}"'","'"${td_stack}"'"]}' >"${fx}/ecs_list-task-definitions--family-prefix.json"
+run_case "INACTIVE saiman-demo task definitions are listed on their own and do not fail" 0 "INACTIVE    ecs task definition: ${td_stack}" "${common[@]}" --strict
+grep -qF "INACTIVE    ecs task definition: ${td_init}" "${work}/out.txt" && ok "every INACTIVE revision is listed" || bad "an INACTIVE revision is missing from the output"
+touch "${fx}/ecs_list-task-definitions--family-prefix.fail"
+run_case "failing to list INACTIVE task definitions is a NOTE, not a failure" 0 "NOTE        INACTIVE task definitions could not be listed" "${common[@]}" --strict
+
+reset
+tagged "$(arn_of ecs cluster/saiman-demo)" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo '{"clusters":[{"clusterName":"saiman-demo","status":"ACTIVE"}],"failures":[]}' >"${fx}/ecs_describe-clusters.json"
+run_case "a tagged ECS cluster that exists is a LEFTOVER" 1 "LEFTOVER    tagged resources (saiman:stack=demo-lite): arn:aws:ecs:eu-central-1:123456789012:cluster/saiman-demo" "${common[@]}" --strict
+echo '{"clusters":[{"clusterName":"saiman-demo","status":"INACTIVE"}],"failures":[]}' >"${fx}/ecs_describe-clusters.json"
+run_case "an INACTIVE (deleted) ECS cluster the index still lists is STALE" 0 "STALE       (tagging index)" "${common[@]}" --strict
+echo '{"clusters":[],"failures":[{"reason":"MISSING"}]}' >"${fx}/ecs_describe-clusters.json"
+run_case "a MISSING ECS cluster is STALE" 0 "STALE       (tagging index)" "${common[@]}" --strict
+
+reset
+tagged "$(arn_of ecs service/saiman-demo/web)" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo '{"services":[{"serviceName":"web","status":"DRAINING"}],"failures":[]}' >"${fx}/ecs_describe-services.json"
+run_case "a DRAINING ECS service is a LEFTOVER" 1 "LEFTOVER    tagged resources" "${common[@]}" --strict
+echo '{"services":[{"serviceName":"web","status":"INACTIVE"}],"failures":[]}' >"${fx}/ecs_describe-services.json"
+run_case "an INACTIVE ECS service is STALE" 0 "STALE       (tagging index)" "${common[@]}" --strict
+
+reset
+tagged "$(arn_of rds db:saiman-demo-db)" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo '{"DBInstances":[{"DBInstanceIdentifier":"saiman-demo-db"}]}' >"${fx}/rds_describe-db-instances--db-instance-identifier.json"
+run_case "a tagged RDS instance that exists is a LEFTOVER" 1 "LEFTOVER    tagged resources" "${common[@]}" --strict
+rm "${fx}/rds_describe-db-instances--db-instance-identifier.json"
+echo 'An error occurred (DBInstanceNotFound) when calling the DescribeDBInstances operation: DBInstance saiman-demo-db not found.' >"${fx}/rds_describe-db-instances--db-instance-identifier.err"
+run_case "a deleted RDS instance is STALE" 0 "STALE       (tagging index)" "${common[@]}" --strict
+
+reset
+tagged "$(arn_of logs log-group:/saiman-demo-lite:*)" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo '{"logGroups":[{"logGroupName":"/saiman-demo-lite-other"}]}' >"${fx}/logs_describe-log-groups--log-group-name-prefix=_saiman-demo-lite.json"
+run_case "a log group is matched by its exact name, not by prefix (another group does not keep it alive)" 0 "STALE       (tagging index)" "${common[@]}" --strict
+echo '{"logGroups":[{"logGroupName":"/saiman-demo-lite"}]}' >"${fx}/logs_describe-log-groups--log-group-name-prefix=_saiman-demo-lite.json"
+run_case "a tagged log group that exists is a LEFTOVER" 1 "LEFTOVER    tagged resources" "${common[@]}" --strict
+
+reset
+tagged "$(arn_of scheduler schedule/default/saiman-demo-stop)" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+echo '{"Name":"saiman-demo-stop"}' >"${fx}/scheduler_get-schedule--group-name.json"
+run_case "a tagged schedule that exists is a LEFTOVER" 1 "LEFTOVER    tagged resources" "${common[@]}" --strict
+rm "${fx}/scheduler_get-schedule--group-name.json"
+echo 'An error occurred (ResourceNotFoundException) when calling the GetSchedule operation: Schedule saiman-demo-stop does not exist.' >"${fx}/scheduler_get-schedule--group-name.err"
+run_case "a deleted schedule is STALE" 0 "STALE       (tagging index)" "${common[@]}" --strict
+
+reset
+tagged "arn:aws:sqs:eu-central-1:123456789012:saiman-demo-queue" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+run_case "a tagged type without a direct check stays a LEFTOVER, marked unverified" 1 "no direct check for this resource type" "${common[@]}" --strict
+
+reset
+tagged "${sg}" >"${fx}/resourcegroupstaggingapi_get-resources.json"
+touch "${fx}/ec2_describe-security-groups--group-ids.deny"
+run_case "a tagged ARN this role may not describe stays a LEFTOVER (fail closed)" 1 "this role may not describe it" "${common[@]}" --strict
+rm "${fx}/ec2_describe-security-groups--group-ids.deny"
+touch "${fx}/ec2_describe-security-groups--group-ids.fail"
+run_case "a confirmation that fails for another reason is an error (exit 2), never STALE" 2 "could not confirm ${sg}" "${common[@]}" --strict
+rm "${fx}/ec2_describe-security-groups--group-ids.fail"
+echo 'this is not json' >"${fx}/ec2_describe-security-groups--group-ids.json"
+run_case "an unparseable confirmation is an error (exit 2), never STALE" 2 "could not confirm" "${common[@]}" --strict
+
+reset
+echo 'this is not json' >"${fx}/resourcegroupstaggingapi_get-resources.json"
+run_case "an unparseable tagging response is exit 2" 2 "unparseable response" "${common[@]}" --strict
 
 # --- UNVERIFIED handling: strict vs allow-unverified ----------------------------------------------------
 reset
