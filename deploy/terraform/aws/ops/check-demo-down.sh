@@ -273,19 +273,21 @@ fi
 # Every family, not only saiman-demo*: an ACTIVE task definition of any name is not part of the bootstrap stack.
 check "ecs task definitions (ACTIVE, any family)" '.taskDefinitionArns[]?' \
   ecs list-task-definitions --status ACTIVE
-# Informational: deregistered saiman-demo* revisions stay listed as INACTIVE until demo-cleanup.sh deletes them.
-if aws --region "${region}" --output json ecs list-task-definitions --family-prefix "${NAME_PREFIX}" --status INACTIVE \
-  >"${out}" 2>"${err}" </dev/null; then
-  if jq -r '.taskDefinitionArns[]?' "${out}" >"${work}/inactive.txt" 2>/dev/null; then
-    while IFS= read -r arn; do
-      [[ -n "${arn}" ]] && inactive+=("${arn}")
-    done <"${work}/inactive.txt"
+# Informational: deregistered saiman-demo* revisions stay listed as INACTIVE (then DELETE_IN_PROGRESS) until ECS has
+# deleted them (demo-cleanup.sh asks for it). --family-prefix is an exact family name, so filter by name here instead.
+for status in INACTIVE DELETE_IN_PROGRESS; do
+  if aws --region "${region}" --output json ecs list-task-definitions --status "${status}" >"${out}" 2>"${err}" </dev/null; then
+    if jq -r '.taskDefinitionArns[]? | select((split("/") | last) | startswith("'"${NAME_PREFIX}"'"))' "${out}" >"${work}/inactive.txt" 2>/dev/null; then
+      while IFS= read -r arn; do
+        [[ -n "${arn}" ]] && inactive+=("${arn}")
+      done <"${work}/inactive.txt"
+    else
+      notes+=("${status} task definitions: unparseable response")
+    fi
   else
-    notes+=("INACTIVE task definitions: unparseable response")
+    notes+=("${status} task definitions could not be listed")
   fi
-else
-  notes+=("INACTIVE task definitions could not be listed")
-fi
+done
 
 # --- RDS ------------------------------------------------------------------------------------------
 check "rds instances" "$(prefix_filter '.DBInstances[]?.DBInstanceIdentifier')" rds describe-db-instances
@@ -383,7 +385,7 @@ inactive_count=0
 while IFS= read -r item; do
   [[ -n "${item}" ]] || continue
   inactive_count=$((inactive_count + 1))
-  echo "INACTIVE    ecs task definition: ${item} (history, not a leftover; demo-cleanup.sh deletes it)"
+  echo "INACTIVE    ecs task definition: ${item} (history or being deleted, not a leftover; demo-cleanup.sh deletes it)"
 done < <(printf '%s\n' "${inactive[@]}" | sort -u)
 for item in "${notes[@]}"; do
   echo "NOTE        ${item}"
