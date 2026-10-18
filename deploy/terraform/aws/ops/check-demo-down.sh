@@ -10,6 +10,11 @@
 #   --strict            (default) UNVERIFIED checks fail the run: use it with your own SSO admin profile.
 #   --allow-unverified  UNVERIFIED checks are printed but do not fail: used by the demo-destroy workflow.
 #
+# Two more rows never fail the run (they are not leftovers):
+#   STALE (tagging index)  the Tagging API still lists the ARN (it lags behind deletes by minutes to an hour) but
+#                          the owning service's own describe call says it is gone.
+#   INACTIVE               a deregistered ECS task definition: history that costs nothing (demo-cleanup.sh deletes it).
+#
 # Exit codes: 0 clean, 1 leftovers (or UNVERIFIED in --strict mode), 2 usage, credentials or AWS error.
 set -euo pipefail
 
@@ -24,6 +29,7 @@ readonly ALLOWED_ROLES=(
 )
 readonly ALLOWED_POLICIES=("/saiman/bootstrap/|saiman-demo-boundary")
 readonly NAME_PREFIX="saiman-demo"
+readonly DENIED_RE='AccessDenied|UnauthorizedOperation|not authorized|AuthorizationError|UnauthorizedAccess'
 
 usage() {
   sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//' >&2
@@ -99,6 +105,9 @@ leftovers=()
 unverified=()
 errors=()
 clean=()
+stale=()    # tagged ARNs the owning service says are gone (Tagging API lag): reported, never a failure
+inactive=() # deregistered ECS task definitions: history, reported, never a failure
+notes=()    # informational checks that could not run: reported, never a failure
 
 # fetch <label> <aws args...>: JSON result in ${out}. Returns 1 (after recording why) when the call failed.
 # Runs in the main shell on purpose: results travel through the arrays and files, not through $(...).
@@ -108,7 +117,7 @@ fetch() {
   if aws --region "${region}" --output json "$@" >"${out}" 2>"${err}"; then
     return 0
   fi
-  if grep -qiE 'AccessDenied|UnauthorizedOperation|not authorized|AuthorizationError|UnauthorizedAccess' "${err}"; then
+  if grep -qiE "${DENIED_RE}" "${err}"; then
     unverified+=("${label}")
   else
     errors+=("${label}")
@@ -148,8 +157,100 @@ prefix_filter() { # <jq expression yielding the name> -> jq filter listing names
 }
 
 # --- tag-based sweep (anything demo-lite created and tagged) ----------------------------------------
-check "tagged resources (saiman:stack=demo-lite)" '.ResourceTagMappingList[]?.ResourceARN' \
-  resourcegroupstaggingapi get-resources --tag-filters "Key=saiman:stack,Values=demo-lite"
+# The Resource Groups Tagging API is eventually consistent: it keeps listing deleted resources (security group
+# rules, task definitions) for a while. So every tagged ARN is confirmed with the owning service's own describe call:
+#   exists -> LEFTOVER   gone -> STALE (tagging index), not a failure   INACTIVE task definition -> INACTIVE row
+# A type without a direct check, a denied check and an ambiguous answer all stay a LEFTOVER or an ERROR (fail
+# closed): the sweep is never weaker than reading the index.
+verdict=""
+direct_arg=""
+
+# direct <jq expression yielding the live objects ($n = ${direct_arg})> <aws args...>: one service's own describe
+# call. Sets verdict to exists, gone, denied or failed; the response is left in ${out} when the call worked.
+direct() {
+  local live="$1" rc=0
+  shift
+  if aws --region "${region}" --output json "$@" >"${out}" 2>"${err}" </dev/null; then
+    jq -e --arg n "${direct_arg}" "[${live}] | length > 0" "${out}" >/dev/null 2>&1 && rc=0 || rc=$?
+    case "${rc}" in
+      0) verdict=exists ;;
+      1) verdict=gone ;;
+      *) verdict=failed ;;
+    esac
+  elif grep -qiE "${DENIED_RE}" "${err}"; then
+    verdict=denied
+  elif grep -qE 'NotFound|Unable to describe task definition' "${err}"; then
+    verdict=gone
+  else
+    verdict=failed
+  fi
+}
+
+# confirm_tagged <arn>: sets verdict to exists, gone, inactive, denied, failed or unknown (no direct check known).
+confirm_tagged() {
+  local arn="$1" svc="" rest="" name=""
+  IFS=: read -r _ _ svc _ _ rest <<<"${arn}"
+  verdict=unknown
+  direct_arg=""
+  case "${svc}:${rest}" in
+    ec2:security-group-rule/*) direct '.SecurityGroupRules[]?' ec2 describe-security-group-rules --security-group-rule-ids "${rest#*/}" ;;
+    ec2:security-group/*) direct '.SecurityGroups[]?' ec2 describe-security-groups --group-ids "${rest#*/}" ;;
+    ec2:vpc/*) direct '.Vpcs[]?' ec2 describe-vpcs --vpc-ids "${rest#*/}" ;;
+    ec2:subnet/*) direct '.Subnets[]?' ec2 describe-subnets --subnet-ids "${rest#*/}" ;;
+    ec2:internet-gateway/*) direct '.InternetGateways[]?' ec2 describe-internet-gateways --internet-gateway-ids "${rest#*/}" ;;
+    ec2:route-table/*) direct '.RouteTables[]?' ec2 describe-route-tables --route-table-ids "${rest#*/}" ;;
+    ec2:network-interface/*) direct '.NetworkInterfaces[]?' ec2 describe-network-interfaces --network-interface-ids "${rest#*/}" ;;
+    ec2:elastic-ip/*) direct '.Addresses[]?' ec2 describe-addresses --allocation-ids "${rest#*/}" ;;
+    ecs:task-definition/*)
+      # A deregistered revision is still described (status INACTIVE, later DELETE_IN_PROGRESS); a deleted one is not.
+      direct '.taskDefinition // empty' ecs describe-task-definition --task-definition "${arn}"
+      if [[ "${verdict}" == exists && "$(jq -r '.taskDefinition.status // empty' "${out}")" != "ACTIVE" ]]; then
+        verdict=inactive
+      fi
+      ;;
+    ecs:cluster/*) direct '.clusters[]? | select(.status != "INACTIVE")' ecs describe-clusters --clusters "${arn}" ;;
+    ecs:service/*/*)
+      name="${rest#service/}"
+      direct '.services[]? | select(.status != "INACTIVE")' ecs describe-services --cluster "${name%%/*}" --services "${arn}"
+      ;;
+    rds:db:*) direct '.DBInstances[]?' rds describe-db-instances --db-instance-identifier "${rest#db:}" ;;
+    rds:subgrp:*) direct '.DBSubnetGroups[]?' rds describe-db-subnet-groups --db-subnet-group-name "${rest#subgrp:}" ;;
+    rds:pg:*) direct '.DBParameterGroups[]?' rds describe-db-parameter-groups --db-parameter-group-name "${rest#pg:}" ;;
+    logs:log-group:*)
+      name="${rest#log-group:}"
+      direct_arg="${name%:\*}"
+      direct '.logGroups[]? | select(.logGroupName == $n)' logs describe-log-groups --log-group-name-prefix "${direct_arg}"
+      ;;
+    scheduler:schedule/*/*)
+      name="${rest#schedule/}"
+      direct '.Name // empty' scheduler get-schedule --group-name "${name%%/*}" --name "${name#*/}"
+      ;;
+    *) ;;
+  esac
+}
+
+tag_label="tagged resources (saiman:stack=demo-lite)"
+if fetch "${tag_label}" resourcegroupstaggingapi get-resources --tag-filters "Key=saiman:stack,Values=demo-lite"; then
+  if jq -r '.ResourceTagMappingList[]?.ResourceARN' "${out}" >"${work}/tagged.txt" 2>/dev/null; then
+    tag_problem=0
+    while IFS= read -r arn; do
+      [[ -n "${arn}" ]] || continue
+      confirm_tagged "${arn}"
+      case "${verdict}" in
+        exists) leftovers+=("${tag_label}: ${arn}") ;;
+        gone) stale+=("${arn}") ;;
+        inactive) inactive+=("${arn}") ;;
+        denied) leftovers+=("${tag_label}: ${arn} (tagging index only: this role may not describe it)") ;;
+        unknown) leftovers+=("${tag_label}: ${arn} (unverified: no direct check for this resource type)") ;;
+        *) errors+=("${tag_label}: could not confirm ${arn}") ;;
+      esac
+      [[ "${verdict}" == gone || "${verdict}" == inactive ]] || tag_problem=1
+    done <"${work}/tagged.txt"
+    [[ "${tag_problem}" -eq 0 ]] && clean+=("${tag_label}")
+  else
+    errors+=("${tag_label} (unparseable response)")
+  fi
+fi
 
 # --- ECS ------------------------------------------------------------------------------------------
 if fetch "ecs clusters" ecs list-clusters; then
@@ -172,6 +273,19 @@ fi
 # Every family, not only saiman-demo*: an ACTIVE task definition of any name is not part of the bootstrap stack.
 check "ecs task definitions (ACTIVE, any family)" '.taskDefinitionArns[]?' \
   ecs list-task-definitions --status ACTIVE
+# Informational: deregistered saiman-demo* revisions stay listed as INACTIVE until demo-cleanup.sh deletes them.
+if aws --region "${region}" --output json ecs list-task-definitions --family-prefix "${NAME_PREFIX}" --status INACTIVE \
+  >"${out}" 2>"${err}" </dev/null; then
+  if jq -r '.taskDefinitionArns[]?' "${out}" >"${work}/inactive.txt" 2>/dev/null; then
+    while IFS= read -r arn; do
+      [[ -n "${arn}" ]] && inactive+=("${arn}")
+    done <"${work}/inactive.txt"
+  else
+    notes+=("INACTIVE task definitions: unparseable response")
+  fi
+else
+  notes+=("INACTIVE task definitions could not be listed")
+fi
 
 # --- RDS ------------------------------------------------------------------------------------------
 check "rds instances" "$(prefix_filter '.DBInstances[]?.DBInstanceIdentifier')" rds describe-db-instances
@@ -262,9 +376,24 @@ done
 for item in "${errors[@]}"; do
   echo "ERROR       ${item} (the aws call failed, not a permission problem)"
 done
+for item in "${stale[@]}"; do
+  echo "STALE       (tagging index) ${item} (gone on a direct check; the Tagging API lags behind deletes)"
+done
+inactive_count=0
+while IFS= read -r item; do
+  [[ -n "${item}" ]] || continue
+  inactive_count=$((inactive_count + 1))
+  echo "INACTIVE    ecs task definition: ${item} (history, not a leftover; demo-cleanup.sh deletes it)"
+done < <(printf '%s\n' "${inactive[@]}" | sort -u)
+for item in "${notes[@]}"; do
+  echo "NOTE        ${item}"
+done
 for item in "${leftovers[@]}"; do
   echo "LEFTOVER    ${item}"
 done
+if [[ ${#stale[@]} -gt 0 || "${inactive_count}" -gt 0 ]]; then
+  echo "check-demo-down: ${#stale[@]} stale tagging-index entr(ies) and ${inactive_count} INACTIVE task definition(s) are not counted as leftovers"
+fi
 
 if [[ ${#errors[@]} -gt 0 ]]; then
   echo "check-demo-down: ${#errors[@]} AWS call(s) failed; result is unreliable" >&2

@@ -243,6 +243,22 @@ Teardown check: `ops/check-demo-down.sh` (exit 0 clean, 1 leftovers, 2 usage/cre
 list every service (tagging API, ELB, ECR, Cloud Map, Secrets Manager, S3 bucket list, IAM roles), so the workflow
 runs it with `--allow-unverified` and prints which checks were UNVERIFIED; `make demo-down-check` is the strict run.
 
+The Tagging API (`tag:GetResources`) lags behind deletes by minutes to an hour, so it keeps listing security group
+rules or task definitions that are already gone. The check therefore confirms every tagged ARN with the owning
+service's own describe call before it counts:
+
+| Row | Meaning | Fails the run? |
+| --- | --- | --- |
+| `LEFTOVER` | the direct call says it exists (or the type has no direct check, or the call was denied: fail closed) | yes |
+| `STALE       (tagging index)` | the direct call says it is gone; only the index is behind | no, not even with `--strict` |
+| `INACTIVE    ecs task definition` | a deregistered revision (also listed from `ecs list-task-definitions --status INACTIVE`); history that costs nothing, `ops/demo-cleanup.sh` deletes it | no |
+| `ERROR` | a direct call failed for another reason (exit 2): never read as STALE | exit 2 |
+
+The sweep covers EC2 (VPC, subnet, internet gateway, route table, security group and rule, network interface,
+Elastic IP), ECS (cluster, service, task definition), RDS (instance, subnet group, parameter group), log groups
+and Scheduler schedules. `ops/test-check-demo-down.sh` pins each case with a fake `aws`, and
+`ops/mutation-check-demo-down.py` proves the self-test goes red when a rule is broken.
+
 Bootstrap permissions these workflows rely on (reconciled in `bootstrap/iam.tf`):
 1. apply role: `s3:PutObject` on `<bucket>/demo/*` only (assets are uploaded with `aws s3 cp --recursive`, which
    needs no listing; reads of `demo/*` stay denied), plus `ssm:PutParameter` and `ssm:AddTagsToResource` on
