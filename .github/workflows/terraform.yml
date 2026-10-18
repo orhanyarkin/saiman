@@ -92,7 +92,7 @@ jobs:
   # when the repository variable PLAN_ROLE_ARN is set, for same-repository pull requests and pushes to main:
   # never for forks or Dependabot (their runs get no OIDC trust and no secrets). The plan role cannot read
   # SSM values or private artifacts and has no S3 write, hence -lock=false. The artifact is the redacted
-  # `terraform show` text (sensitive values print as "(sensitive value)"; db_master_password stays null).
+  # `terraform show` text (sensitive values print as "(sensitive value)"; db_master_password is a constant non-secret placeholder).
   plan:
     name: terraform plan (demo-lite, read-only role)
     needs: static
