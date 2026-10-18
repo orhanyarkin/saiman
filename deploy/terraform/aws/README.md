@@ -232,7 +232,7 @@ the demo does not use), and a stale entry fails too. Names are not enough for wh
 | `orchestrator`, `seller-api`, `ledger`, `ingest` | stack, essential | app password only, `SPRING_FLYWAY_ENABLED=false`, 768 MiB hard limit |
 | `otel-collector` | stack, non-essential | `assets/otel/config.yaml`; `grafana.yaml` overlay only when `grafana_otlp_endpoint` is set |
 | `web` | stack, essential | nginx on port 80, the conventional SSM port-forward target (not a control: a forward reaches every loopback port) |
-| `readiness` | stack, one-shot | runs `/assets/scripts/readiness.sh` (the assets prefix must contain `scripts/readiness.sh`), exits 0 when all four services are UP; while it waits (every 2 min) and when it gives up it prints, per service, the HTTP status, the overall status and the `name=STATUS` of every health component that is not UP (read with `nc`: busybox `wget` discards the body of a 503), never the body itself |
+| `readiness` | stack, one-shot | runs `/assets/scripts/readiness.sh` (the assets prefix must contain `scripts/readiness.sh`), exits 0 when all four services answer HTTP 200 on `/actuator/health` (Boot writes the body's keys alphabetically, so `status` is the last key; the body is not what decides); while it waits (every 2 min) and when it gives up it prints, per service, the HTTP status, the overall status and the `name=STATUS` of every health component that is not UP (read with `nc`: busybox `wget` discards the body of a 503), never the body itself |
 
 SSM parameters the `demo-up` workflow must create under `/saiman/demo/` (SecureString):
 `pg_master_password`, `pg_<schema>_{owner,app}_password` for `orchestrator`, `ledger`, `seller_api`, `ingest`,
@@ -271,8 +271,16 @@ Using the demo (your SSO profile, AWS CLI v2 + session-manager-plugin):
 ```bash
 make demo-tunnel                      # localhost:8088 -> web container; open http://localhost:8088
 make demo-capture                     # tokens from SSM into a 0700 temp dir, then make capture-demo against :8088
+make demo-tunnel TUNNEL_PORT=18088    # another local port (give make demo-capture the same TUNNEL_PORT)
 make demo-down-check STATE_BUCKET=<bucket>   # strict teardown check (admin profile) after demo-down
 ```
+
+**Port 8088 is also the local compose stack's dashboard** (`web` publishes `127.0.0.1:8088`). With both running, `localhost:8088` is the
+local stack, not the demo, and it answers **401 to the demo's tokens** (its services hold the digests of your local `secrets/`
+tokens). That is exactly what "The API refused the token" looked like on the demo, with no 401 in the AWS logs. `demo-tunnel.sh`
+now refuses a local port that is already listening, names the holder (a docker container, or what `ss`/`lsof` report) and suggests
+another one; stop the local stack (`docker compose -f deploy/compose/docker-compose.yml stop web`) or use `TUNNEL_PORT`. The
+dashboard token is the raw `api_operator_token` / `api_reader_token` from SSM (`ops/demo-tokens.sh`), never a digest.
 
 Teardown check: `ops/check-demo-down.sh` (exit 0 clean, 1 leftovers, 2 usage/credentials). The destroy role may not
 list every service (tagging API, ELB, ECR, Cloud Map, Secrets Manager, S3 bucket list, IAM roles), so the workflow

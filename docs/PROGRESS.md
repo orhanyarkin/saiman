@@ -7,6 +7,20 @@ M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-10-18 — Fix: the tunnel's port clashed with the local stack ("API refused the token"), and readiness never saw a real UP
+
+**What changed**
+- Diagnosis of "The API refused the token" on the AWS demo, which the code could not explain (SSM token digest == task definition digest, same property binding as compose): the **local compose stack** (`saiman-web-1`) publishes `127.0.0.1:8088`, the port `make demo-tunnel` also forwards, so `localhost:8088` was the local stack, whose services hold the digests of the local `secrets/` tokens. Its nginx access log held the 401s for exactly the four endpoints that were curled; the AWS logs had none. The AWS stack was fine (a later end-to-end run: 2 x402 payments settled, ledger balanced, reconciliation 2/2).
+- `ops/demo-tunnel.sh` refuses a local port that is already listening (IPv4 or IPv6), before any AWS call, names the holder (docker container, else `ss`/`lsof`) and suggests `make demo-tunnel TUNNEL_PORT=18088`; `--dry-run` is unaffected. The Makefile has `TUNNEL_PORT ?= 8088` for `demo-tunnel`, and `demo-capture` now follows it (it hard-coded `localhost:8088`, the same trap: it would have captured the local stack with AWS tokens). README and SETUP.md describe the clash.
+- `assets/readiness.sh` could never see a real service UP: it matched a body that starts with `{"status":"UP"`, but Boot 4.1.1 writes the keys alphabetically (`{"groups":["liveness","readiness"],"status":"UP"}`, `status` last; with components `{"components":{...},"groups":[...],"status":"UP"}`). It was written against a fixture with the wrong order and hidden in demo-up #8 because nothing came up. UP is now HTTP 200 (busybox `wget` exits 0 for a 2xx), and `explain()` walks the JSON by depth in awk, so key order, details-first components and odd keys do not matter; only the status code and tokens matching `[A-Za-z0-9_-]+` / `[A-Z_]+` are printed (an escaped or odd key is dropped, not rendered).
+- The real bodies (UP and DOWN, components never/always, details always) were recorded from the orchestrator under `@SpringBootTest` (throwaway test, not committed) into `assets/testdata/health` with a PROVENANCE file; `assets/test-readiness.sh` (split out of `test-assets.sh`) uses them with fake servers and, when the pinned busybox 1.38.0 image is local, inside that image with busybox `nc`/`awk`. 17 mutations (`ops/mutation-check-tunnel-readiness.py`, in `make tf-mutation-check`) all caught after two gaps they exposed were closed (hostile component names, the Makefile checks).
+
+**How verified**: `assets/test-assets.sh` (16 readiness checks), `ops/test-ops-scripts.sh` (busy-port cases with a real listener and fake docker, Makefile checks), the port helpers against the real local stack (finds `saiman-web-1`), pinned shellcheck, `make tf-check`, `make tf-mutation-check`. Nothing was applied; no AWS call was made by the tests.
+
+**Process note**: running `make -n demo-capture` while checking the Makefile executed its recipe (a line with `$(MAKE)` runs even under `-n`) and made one `ssm get-parameter` attempt that failed with `ParameterNotFound` because the demo was down: nothing was read or changed. The test for the Makefile now greps it instead.
+
+**Next**: the human merges, then stops the local `web` container or uses `TUNNEL_PORT=18088`.
+
 ### 2026-10-18 — Fix: the apps ignored the Redis password on ECS (demo-up #8), a compose/ECS parity test and readiness that says why
 
 **What changed**

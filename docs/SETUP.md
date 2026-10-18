@@ -139,6 +139,10 @@ Bilinçli olarak sana sorulacaklar: `git push`, `helm install/upgrade`, `kubectl
 Needed only to run the demo-lite stack on AWS. See `deploy/terraform/aws/README.md` for the bootstrap and the roles.
 
 - **AWS CLI v2** and the **session-manager-plugin** (for `make demo-tunnel`): install from the official AWS docs.
+  `make demo-tunnel` forwards `localhost:8088` by default, the same port the local compose stack's dashboard uses (`make up`).
+  Running both makes `localhost:8088` the local stack, which refuses the demo's API tokens (401): the tunnel stops with a clear
+  message when its port is taken; stop the local `web` container or use `make demo-tunnel TUNNEL_PORT=18088` (and
+  `make demo-capture TUNNEL_PORT=18088`).
   Configure an IAM Identity Center profile (`aws configure sso`, `aws sso login --profile <profile>`, then
   `export AWS_PROFILE=<profile>`). The profile is yours (admin, MFA); CI uses OIDC roles, never your keys.
 - **GitHub environments**: `demo-apply` (required reviewer = you, deployment branches = `main` only, admin bypass off)
