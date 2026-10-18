@@ -503,3 +503,166 @@ run "state_bucket_is_locked_down" {
     error_message = "lifecycle: noncurrent 30 days, demo/ prefix 3 days"
   }
 }
+
+run "facts" {
+  # Loads tests/iam-action-facts.json and tests/required-actions.json once (see tests/facts/main.tf).
+  command = plan
+
+  module {
+    source = "./tests/facts"
+  }
+}
+
+run "iam_action_names_exist" {
+  # Facts from AWS's Service Reference (ops/refresh-iam-facts.py). An action IAM does not know silently grants nothing, for
+  # example budgets:DeleteBudget (the real action is budgets:ModifyBudget). Services outside the facts file are not checked.
+  assert {
+    condition = length(distinct(flatten([
+      for pol in [aws_iam_role_policy.plan.policy, aws_iam_role_policy.apply.policy, aws_iam_role_policy.destroy.policy, aws_iam_role_policy.demo_task.policy, aws_iam_role_policy.demo_task_execution.policy, aws_iam_role_policy.demo_scheduler.policy, aws_iam_policy.demo_boundary.policy] : [
+        for s in jsondecode(pol).Statement : [
+          for p in try(tolist(s.Action), try([s.Action], [])) : p
+          if contains(run.facts.services, split(":", p)[0])
+          && (endswith(p, "*") ? !anytrue([for k in run.facts.known : startswith(k, trimsuffix(p, "*"))]) : !lookup(run.facts.known_map, p, false))
+        ]
+      ]
+    ]))) == 0
+    error_message = "actions (or wildcard patterns) the Service Reference does not know: ${join(", ", distinct(flatten([
+      for pol in [aws_iam_role_policy.plan.policy, aws_iam_role_policy.apply.policy, aws_iam_role_policy.destroy.policy, aws_iam_role_policy.demo_task.policy, aws_iam_role_policy.demo_task_execution.policy, aws_iam_role_policy.demo_scheduler.policy, aws_iam_policy.demo_boundary.policy] : [
+        for s in jsondecode(pol).Statement : [
+          for p in try(tolist(s.Action), try([s.Action], [])) : p
+          if contains(run.facts.services, split(":", p)[0])
+          && (endswith(p, "*") ? !anytrue([for k in run.facts.known : startswith(k, trimsuffix(p, "*"))]) : !lookup(run.facts.known_map, p, false))
+        ]
+      ]
+    ])))}"
+  }
+}
+
+run "star_only_actions_are_never_in_scoped_statements" {
+  # An action without resource types only works with Resource "*". Listed in a statement that names ARNs it is never granted:
+  # ecs:DeregisterTaskDefinition in a task-definition-scoped statement made demo-down fail ("on resource: *").
+  assert {
+    condition = length(distinct(flatten([
+      for pol in [aws_iam_role_policy.plan.policy, aws_iam_role_policy.apply.policy, aws_iam_role_policy.destroy.policy, aws_iam_role_policy.demo_task.policy, aws_iam_role_policy.demo_task_execution.policy, aws_iam_role_policy.demo_scheduler.policy, aws_iam_policy.demo_boundary.policy] : [
+        for s in jsondecode(pol).Statement : [
+          for p in try(tolist(s.Action), try([s.Action], [])) : "${try(s.Sid, "?")}: ${p}"
+          if s.Effect == "Allow" && !contains(try(tolist(s.Resource), try([s.Resource], ["*"])), "*")
+          && (endswith(p, "*") ? anytrue([for so in run.facts.star_only : startswith(so, trimsuffix(p, "*"))]) : lookup(run.facts.star_map, p, false))
+        ]
+      ]
+    ]))) == 0
+    error_message = "actions that only support Resource \"*\" inside scoped statements: ${join(", ", distinct(flatten([
+      for pol in [aws_iam_role_policy.plan.policy, aws_iam_role_policy.apply.policy, aws_iam_role_policy.destroy.policy, aws_iam_role_policy.demo_task.policy, aws_iam_role_policy.demo_task_execution.policy, aws_iam_role_policy.demo_scheduler.policy, aws_iam_policy.demo_boundary.policy] : [
+        for s in jsondecode(pol).Statement : [
+          for p in try(tolist(s.Action), try([s.Action], [])) : "${try(s.Sid, "?")}: ${p}"
+          if s.Effect == "Allow" && !contains(try(tolist(s.Resource), try([s.Resource], ["*"])), "*")
+          && (endswith(p, "*") ? anytrue([for so in run.facts.star_only : startswith(so, trimsuffix(p, "*"))]) : lookup(run.facts.star_map, p, false))
+        ]
+      ]
+    ])))}"
+  }
+}
+
+run "demo_lite_resources_have_their_api_actions" {
+  # tests/required-actions.json lists, per demo-lite resource type, what the provider calls to create, update, replace, tag and
+  # delete it. Every such action must be allowed for that role (and, if it only works with "*", by a statement with "*").
+  assert {
+    condition = length(flatten([
+      for name, req in run.facts.resources : [
+        for a in req.apply : "${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+          s.Effect == "Allow"
+          && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+          && (!lookup(run.facts.star_map, a, false) || contains(try(tolist(s.Resource), try([s.Resource], ["*"])), "*"))
+        ])
+      ]
+    ])) == 0
+    error_message = "the apply role lacks: ${join(", ", flatten([
+      for name, req in run.facts.resources : [
+        for a in req.apply : "${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+          s.Effect == "Allow"
+          && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+          && (!lookup(run.facts.star_map, a, false) || contains(try(tolist(s.Resource), try([s.Resource], ["*"])), "*"))
+        ])
+      ]
+    ]))}"
+  }
+
+  assert {
+    condition = length(flatten([
+      for name, req in run.facts.resources : [
+        for a in req.destroy : "${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(aws_iam_role_policy.destroy.policy).Statement :
+          s.Effect == "Allow"
+          && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+          && (!lookup(run.facts.star_map, a, false) || contains(try(tolist(s.Resource), try([s.Resource], ["*"])), "*"))
+        ])
+      ]
+    ])) == 0
+    error_message = "the destroy role lacks: ${join(", ", flatten([
+      for name, req in run.facts.resources : [
+        for a in req.destroy : "${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(aws_iam_role_policy.destroy.policy).Statement :
+          s.Effect == "Allow"
+          && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+          && (!lookup(run.facts.star_map, a, false) || contains(try(tolist(s.Resource), try([s.Resource], ["*"])), "*"))
+        ])
+      ]
+    ]))}"
+  }
+
+  assert {
+    condition = length(flatten([
+      for name, req in run.facts.ops : [
+        for a in req.apply : "${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+          s.Effect == "Allow"
+          && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+          && (!lookup(run.facts.star_map, a, false) || contains(try(tolist(s.Resource), try([s.Resource], ["*"])), "*"))
+        ])
+      ]
+    ])) == 0
+    error_message = "the apply role lacks what the workflows call: ${join(", ", flatten([
+      for name, req in run.facts.ops : [
+        for a in req.apply : "${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+          s.Effect == "Allow"
+          && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+          && (!lookup(run.facts.star_map, a, false) || contains(try(tolist(s.Resource), try([s.Resource], ["*"])), "*"))
+        ])
+      ]
+    ]))}"
+  }
+
+  assert {
+    condition = length(flatten([
+      for name, req in run.facts.ops : [
+        for a in req.destroy : "${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(aws_iam_role_policy.destroy.policy).Statement :
+          s.Effect == "Allow"
+          && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+          && (!lookup(run.facts.star_map, a, false) || contains(try(tolist(s.Resource), try([s.Resource], ["*"])), "*"))
+        ])
+      ]
+    ])) == 0
+    error_message = "the destroy role lacks what the workflows call: ${join(", ", flatten([
+      for name, req in run.facts.ops : [
+        for a in req.destroy : "${name}: ${a}"
+        if !anytrue([
+          for s in jsondecode(aws_iam_role_policy.destroy.policy).Statement :
+          s.Effect == "Allow"
+          && anytrue([for p in try(tolist(s.Action), try([s.Action], [])) : p == a || (endswith(p, "*") && startswith(a, trimsuffix(p, "*")))])
+          && (!lookup(run.facts.star_map, a, false) || contains(try(tolist(s.Resource), try([s.Resource], ["*"])), "*"))
+        ])
+      ]
+    ]))}"
+  }
+}

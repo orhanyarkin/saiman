@@ -1,0 +1,298 @@
+{
+ "_about": "What the AWS provider and the demo workflows call for each demo-lite resource type, per CI role. 'apply' also covers replace and tag changes; 'destroy' is the delete side plus the refresh reads. bootstrap.tftest.hcl requires every listed action in the role's inline policy (an action that only works with Resource '*' must sit in a statement with Resource '*'). tests/check-iam-coverage.sh requires an entry here for every resource type in ../demo-lite. Update both when demo-lite gains a resource type.",
+ "resources": {
+  "aws_vpc": {
+   "apply": [
+    "ec2:CreateVpc",
+    "ec2:ModifyVpcAttribute",
+    "ec2:DeleteVpc",
+    "ec2:CreateTags",
+    "ec2:DeleteTags",
+    "ec2:DescribeVpcs"
+   ],
+   "destroy": [
+    "ec2:DeleteVpc",
+    "ec2:DescribeVpcs"
+   ]
+  },
+  "aws_subnet": {
+   "apply": [
+    "ec2:CreateSubnet",
+    "ec2:ModifySubnetAttribute",
+    "ec2:DeleteSubnet",
+    "ec2:CreateTags",
+    "ec2:DeleteTags",
+    "ec2:DescribeSubnets"
+   ],
+   "destroy": [
+    "ec2:DeleteSubnet",
+    "ec2:DescribeSubnets"
+   ]
+  },
+  "aws_internet_gateway": {
+   "apply": [
+    "ec2:CreateInternetGateway",
+    "ec2:AttachInternetGateway",
+    "ec2:DetachInternetGateway",
+    "ec2:DeleteInternetGateway",
+    "ec2:CreateTags",
+    "ec2:DeleteTags",
+    "ec2:DescribeInternetGateways"
+   ],
+   "destroy": [
+    "ec2:DetachInternetGateway",
+    "ec2:DeleteInternetGateway",
+    "ec2:DescribeInternetGateways"
+   ]
+  },
+  "aws_route_table": {
+   "apply": [
+    "ec2:CreateRouteTable",
+    "ec2:DeleteRouteTable",
+    "ec2:CreateTags",
+    "ec2:DeleteTags",
+    "ec2:DescribeRouteTables"
+   ],
+   "destroy": [
+    "ec2:DeleteRouteTable",
+    "ec2:DescribeRouteTables"
+   ]
+  },
+  "aws_route": {
+   "apply": [
+    "ec2:CreateRoute",
+    "ec2:ReplaceRoute",
+    "ec2:DeleteRoute",
+    "ec2:DescribeRouteTables"
+   ],
+   "destroy": [
+    "ec2:DeleteRoute",
+    "ec2:DescribeRouteTables"
+   ]
+  },
+  "aws_route_table_association": {
+   "apply": [
+    "ec2:AssociateRouteTable",
+    "ec2:DisassociateRouteTable",
+    "ec2:DescribeRouteTables"
+   ],
+   "destroy": [
+    "ec2:DisassociateRouteTable",
+    "ec2:DescribeRouteTables"
+   ]
+  },
+  "aws_security_group": {
+   "apply": [
+    "ec2:CreateSecurityGroup",
+    "ec2:DeleteSecurityGroup",
+    "ec2:AuthorizeSecurityGroupIngress",
+    "ec2:AuthorizeSecurityGroupEgress",
+    "ec2:RevokeSecurityGroupIngress",
+    "ec2:RevokeSecurityGroupEgress",
+    "ec2:CreateTags",
+    "ec2:DeleteTags",
+    "ec2:DescribeSecurityGroups"
+   ],
+   "destroy": [
+    "ec2:DeleteSecurityGroup",
+    "ec2:RevokeSecurityGroupIngress",
+    "ec2:RevokeSecurityGroupEgress",
+    "ec2:DescribeSecurityGroups"
+   ]
+  },
+  "aws_vpc_security_group_egress_rule": {
+   "apply": [
+    "ec2:AuthorizeSecurityGroupEgress",
+    "ec2:RevokeSecurityGroupEgress",
+    "ec2:ModifySecurityGroupRules",
+    "ec2:UpdateSecurityGroupRuleDescriptionsEgress",
+    "ec2:CreateTags",
+    "ec2:DeleteTags",
+    "ec2:DescribeSecurityGroupRules"
+   ],
+   "destroy": [
+    "ec2:RevokeSecurityGroupEgress",
+    "ec2:DescribeSecurityGroupRules"
+   ]
+  },
+  "aws_vpc_security_group_ingress_rule": {
+   "apply": [
+    "ec2:AuthorizeSecurityGroupIngress",
+    "ec2:RevokeSecurityGroupIngress",
+    "ec2:ModifySecurityGroupRules",
+    "ec2:UpdateSecurityGroupRuleDescriptionsIngress",
+    "ec2:CreateTags",
+    "ec2:DeleteTags",
+    "ec2:DescribeSecurityGroupRules"
+   ],
+   "destroy": [
+    "ec2:RevokeSecurityGroupIngress",
+    "ec2:DescribeSecurityGroupRules"
+   ]
+  },
+  "aws_db_subnet_group": {
+   "apply": [
+    "rds:CreateDBSubnetGroup",
+    "rds:ModifyDBSubnetGroup",
+    "rds:DeleteDBSubnetGroup",
+    "rds:AddTagsToResource",
+    "rds:RemoveTagsFromResource",
+    "rds:DescribeDBSubnetGroups",
+    "rds:ListTagsForResource"
+   ],
+   "destroy": [
+    "rds:DeleteDBSubnetGroup",
+    "rds:DescribeDBSubnetGroups"
+   ]
+  },
+  "aws_db_parameter_group": {
+   "apply": [
+    "rds:CreateDBParameterGroup",
+    "rds:ModifyDBParameterGroup",
+    "rds:DeleteDBParameterGroup",
+    "rds:AddTagsToResource",
+    "rds:RemoveTagsFromResource",
+    "rds:DescribeDBParameterGroups",
+    "rds:DescribeDBParameters",
+    "rds:ListTagsForResource"
+   ],
+   "destroy": [
+    "rds:DeleteDBParameterGroup",
+    "rds:DescribeDBParameterGroups"
+   ]
+  },
+  "aws_db_instance": {
+   "apply": [
+    "rds:CreateDBInstance",
+    "rds:ModifyDBInstance",
+    "rds:DeleteDBInstance",
+    "rds:AddTagsToResource",
+    "rds:RemoveTagsFromResource",
+    "rds:DescribeDBInstances",
+    "rds:ListTagsForResource"
+   ],
+   "destroy": [
+    "rds:ModifyDBInstance",
+    "rds:DeleteDBInstance",
+    "rds:DescribeDBInstances"
+   ]
+  },
+  "aws_cloudwatch_log_group": {
+   "apply": [
+    "logs:CreateLogGroup",
+    "logs:DeleteLogGroup",
+    "logs:PutRetentionPolicy",
+    "logs:TagResource",
+    "logs:UntagResource",
+    "logs:DescribeLogGroups",
+    "logs:ListTagsForResource"
+   ],
+   "destroy": [
+    "logs:DeleteLogGroup",
+    "logs:DescribeLogGroups"
+   ]
+  },
+  "aws_ecs_cluster": {
+   "apply": [
+    "ecs:CreateCluster",
+    "ecs:UpdateCluster",
+    "ecs:UpdateClusterSettings",
+    "ecs:DeleteCluster",
+    "ecs:TagResource",
+    "ecs:UntagResource",
+    "ecs:DescribeClusters"
+   ],
+   "destroy": [
+    "ecs:DeleteCluster",
+    "ecs:DescribeClusters"
+   ]
+  },
+  "aws_ecs_service": {
+   "apply": [
+    "ecs:CreateService",
+    "ecs:UpdateService",
+    "ecs:DeleteService",
+    "ecs:TagResource",
+    "ecs:UntagResource",
+    "ecs:DescribeServices"
+   ],
+   "destroy": [
+    "ecs:DeleteService",
+    "ecs:DescribeServices"
+   ]
+  },
+  "aws_ecs_task_definition": {
+   "apply": [
+    "ecs:RegisterTaskDefinition",
+    "ecs:DeregisterTaskDefinition",
+    "ecs:DescribeTaskDefinition",
+    "ecs:TagResource"
+   ],
+   "destroy": [
+    "ecs:DeregisterTaskDefinition",
+    "ecs:DescribeTaskDefinition"
+   ]
+  },
+  "aws_scheduler_schedule": {
+   "apply": [
+    "scheduler:CreateSchedule",
+    "scheduler:UpdateSchedule",
+    "scheduler:DeleteSchedule",
+    "scheduler:GetSchedule",
+    "iam:PassRole"
+   ],
+   "destroy": [
+    "scheduler:DeleteSchedule",
+    "scheduler:GetSchedule"
+   ]
+  }
+ },
+ "ops": {
+  "demo-up: run-init-task.sh and the service start": {
+   "apply": [
+    "ecs:RunTask",
+    "ecs:DescribeTasks",
+    "ecs:StopTask",
+    "ecs:UpdateService",
+    "iam:PassRole"
+   ],
+   "destroy": []
+  },
+  "demo-destroy: stop-init-tasks.sh": {
+   "apply": [],
+   "destroy": [
+    "ecs:ListTasks",
+    "ecs:StopTask"
+   ]
+  },
+  "demo-destroy: demo-cleanup.sh (INACTIVE task definitions, SSM parameters, demo/ objects)": {
+   "apply": [],
+   "destroy": [
+    "ecs:ListTaskDefinitions",
+    "ecs:DeregisterTaskDefinition",
+    "ecs:DeleteTaskDefinitions",
+    "ssm:DescribeParameters",
+    "ssm:DeleteParameters",
+    "ssm:DeleteParameter",
+    "s3:ListBucketVersions",
+    "s3:DeleteObject",
+    "s3:DeleteObjectVersion"
+   ]
+  },
+  "demo-up: put-demo-parameters.sh and the asset upload": {
+   "apply": [
+    "ssm:PutParameter",
+    "ssm:AddTagsToResource",
+    "s3:PutObject"
+   ],
+   "destroy": []
+  },
+  "demo-reaper: demo-expiry.sh": {
+   "apply": [],
+   "destroy": [
+    "ssm:DescribeParameters",
+    "ssm:ListTagsForResource"
+   ]
+  }
+ }
+}
