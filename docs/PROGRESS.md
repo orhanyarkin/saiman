@@ -1,8 +1,9 @@
 # Progress
 
 ## Current milestone
-M6b — migrate one-shot (ADR-0027) and AWS demo-lite automation (ADR-0028): **built, audited, verified locally; not yet pushed**. Branch `m6b-deploy-migrate` (not merged). Remaining work is human-only: bootstrap apply, `demo-up`, capture, `demo-down`, Cloudflare Pages, video, blog.
-M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4 are done and merged.
+M6b — migrate one-shot (ADR-0027) and AWS demo-lite automation (ADR-0028): **merged** (PR #33) and **verified on AWS end to end on 2026-10-18**: `bootstrap` applied, `demo-up` brought the stack up, a run settled 2 x402 payments, the ledger balances and reconciliation resolved 2/2; `demo-down` then tore it down and the strict `make demo-down-check` came back clean, leaving only `STALE (tagging index)` rows (the Tagging API lagging behind the deletes, which the check does not count as a failure). The fixes the first `demo-up`/`demo-down` attempts exposed are merged too (PRs #44-#49: missing IAM actions, the teardown check against the tagging index, ECS task registration, the task role listing `demo/assets`, Redis credentials on ECS, the tunnel port clash and readiness).
+Remaining work is human-only: the capture for the replay has not been taken, so another `demo-up`, `make demo-tunnel` (with the local `web` container stopped, or the same `TUNNEL_PORT=18088` on it and on `make demo-capture`), a run or two started on the dashboard, `make demo-capture` and `demo-down` again; after that the Cloudflare Pages replay, Infracost and `terraform plan` output in the README, the video and the blog post.
+All milestones through M6b are done and merged: M6b, M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4.
 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
