@@ -9,6 +9,8 @@ secrets/
 .claude/agent-memory-local/
 
 # Build outputs
+__pycache__/
+*.pyc
 build/
 .gradle/
 .kotlin/
