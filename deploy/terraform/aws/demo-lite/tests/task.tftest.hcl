@@ -145,6 +145,145 @@ run "ecs_rules_the_mock_provider_does_not_apply" {
   }
 }
 
+run "ecs_register_task_definition_rules" {
+  # The rules of the ECS RegisterTaskDefinition API that a mock provider never applies, checked on exactly what ECS would
+  # receive, for BOTH task definitions. Numbers are from the API reference (HealthCheck, ContainerDefinition,
+  # ContainerDependency, ContainerRestartPolicy). A violation otherwise costs a whole demo-up (minutes of AWS time):
+  # demo-up #3 failed on `retries = 20` ("Health check retries must be less than or equal to ... 10").
+
+  # --- task level ---
+  assert {
+    condition     = alltrue([for td in [aws_ecs_task_definition.main, aws_ecs_task_definition.init] : can(regex("^[A-Za-z0-9_-]{1,255}$", td.family))])
+    error_message = "family: up to 255 letters, numbers, hyphens and underscores"
+  }
+
+  assert {
+    condition = alltrue([
+      for td in [aws_ecs_task_definition.main, aws_ecs_task_definition.init] : (
+        (tonumber(td.cpu) == 256 && contains([512, 1024, 2048], tonumber(td.memory)))
+        || (tonumber(td.cpu) == 512 && tonumber(td.memory) >= 1024 && tonumber(td.memory) <= 4096 && tonumber(td.memory) % 1024 == 0)
+        || (tonumber(td.cpu) == 1024 && tonumber(td.memory) >= 2048 && tonumber(td.memory) <= 8192 && tonumber(td.memory) % 1024 == 0)
+        || (tonumber(td.cpu) == 2048 && tonumber(td.memory) >= 4096 && tonumber(td.memory) <= 16384 && tonumber(td.memory) % 1024 == 0)
+        || (tonumber(td.cpu) == 4096 && tonumber(td.memory) >= 8192 && tonumber(td.memory) <= 30720 && tonumber(td.memory) % 1024 == 0)
+      )
+    ])
+    error_message = "task cpu/memory must be a valid Fargate combination (256-4096 cpu units)"
+  }
+
+  # --- container names ---
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : can(regex("^[A-Za-z0-9_-]{1,255}$", c.name))])
+    error_message = "container name: up to 255 letters, numbers, hyphens and underscores"
+  }
+
+  assert {
+    condition     = alltrue([for cs in values(local.decoded_tasks) : length(distinct([for c in cs : c.name])) == length(cs)])
+    error_message = "container names must be unique within a task definition"
+  }
+
+  # --- health checks (HealthCheck) ---
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : !can(c.healthCheck) || (contains(["CMD", "CMD-SHELL"], c.healthCheck.command[0]) && length(c.healthCheck.command) > 1)])
+    error_message = "healthCheck.command must start with CMD or CMD-SHELL and have a command"
+  }
+
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : !can(c.healthCheck) || (try(c.healthCheck.interval, 30) >= 5 && try(c.healthCheck.interval, 30) <= 300)])
+    error_message = "healthCheck.interval must be 5-300 seconds"
+  }
+
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : !can(c.healthCheck) || (try(c.healthCheck.timeout, 5) >= 2 && try(c.healthCheck.timeout, 5) <= 60)])
+    error_message = "healthCheck.timeout must be 2-60 seconds (the API reference says 60, not 120)"
+  }
+
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : !can(c.healthCheck) || (try(c.healthCheck.retries, 3) >= 1 && try(c.healthCheck.retries, 3) <= 10)])
+    error_message = "healthCheck.retries must be 1-10"
+  }
+
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : !can(c.healthCheck) || (try(c.healthCheck.startPeriod, 0) >= 0 && try(c.healthCheck.startPeriod, 0) <= 300)])
+    error_message = "healthCheck.startPeriod must be 0-300 seconds"
+  }
+
+  # --- start/stop timeouts, memory, restart policy, ports ---
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : (!can(c.startTimeout) || (c.startTimeout >= 2 && c.startTimeout <= 120)) && (!can(c.stopTimeout) || (c.stopTimeout >= 2 && c.stopTimeout <= 120))])
+    error_message = "startTimeout and stopTimeout must be 2-120 seconds on Fargate"
+  }
+
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : c.memory >= 6 && (!can(c.memoryReservation) || c.memoryReservation < c.memory)])
+    error_message = "container memory must be at least 6 MiB, and memoryReservation (if any) below memory"
+  }
+
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : !can(c.restartPolicy) || (c.restartPolicy.enabled == true || c.restartPolicy.enabled == false) && try(c.restartPolicy.restartAttemptPeriod, 300) >= 60 && try(c.restartPolicy.restartAttemptPeriod, 300) <= 1800])
+    error_message = "restartPolicy.restartAttemptPeriod must be 60-1800 seconds"
+  }
+
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : !can(c.portMappings) || alltrue([for p in c.portMappings : p.containerPort >= 1 && p.containerPort <= 65535 && (!can(p.hostPort) || p.hostPort == p.containerPort)])])
+    error_message = "awsvpc port mappings: containerPort 1-65535 and hostPort absent or equal"
+  }
+
+  # --- dependencies (ContainerDependency) ---
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : alltrue([for d in c.dependsOn : contains(["START", "COMPLETE", "SUCCESS", "HEALTHY"], d.condition)])])
+    error_message = "a dependency condition must be START, COMPLETE, SUCCESS or HEALTHY"
+  }
+
+  assert {
+    condition = alltrue([
+      for cs in values(local.decoded_tasks) :
+      alltrue([for c in cs : alltrue([for d in c.dependsOn : d.containerName != c.name && contains([for x in cs : x.name], d.containerName)])])
+    ])
+    error_message = "a dependency must name another container of the same task definition"
+  }
+
+  assert {
+    condition = alltrue([
+      for cs in values(local.decoded_tasks) :
+      alltrue([for c in cs : alltrue([for d in c.dependsOn : d.condition != "HEALTHY" || try([for x in cs : can(x.healthCheck) if x.name == d.containerName][0], false)])])
+    ])
+    error_message = "HEALTHY may only target a container that has a health check"
+  }
+
+  assert {
+    condition = alltrue([
+      for t, g in local.dep_reach4 : alltrue([for n, reach in g : !contains(reach, n)])
+    ])
+    error_message = "circular container dependency"
+  }
+
+  # --- volumes and mounts ---
+  assert {
+    condition = alltrue([
+      for t, td in { main = aws_ecs_task_definition.main, init = aws_ecs_task_definition.init } :
+      alltrue([for c in local.decoded_tasks[t] : alltrue([for m in c.mountPoints : contains([for v in td.volume : v.name], m.sourceVolume) && startswith(m.containerPath, "/")])])
+    ])
+    error_message = "a mount point must name a volume of its own task definition and use an absolute path"
+  }
+
+  # --- environment and secrets ---
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : length(distinct(concat([for e in c.environment : e.name], [for s in c.secrets : s.name]))) == length(c.environment) + length(c.secrets)])
+    error_message = "environment and secret names must be unique within a container (and not appear in both)"
+  }
+
+  # --- logging and images ---
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : alltrue([for k in ["awslogs-group", "awslogs-region", "awslogs-stream-prefix"] : contains(keys(c.logConfiguration.options), k)])])
+    error_message = "the awslogs driver needs awslogs-group, awslogs-region and awslogs-stream-prefix"
+  }
+
+  assert {
+    condition     = alltrue([for c in local.all_decoded_containers : length(split("@", c.image)[0]) <= 255])
+    error_message = "an image reference (without its digest) is at most 255 characters"
+  }
+}
+
 run "work_is_split_as_designed" {
   # Master and owner secrets live only in the init task; apps, kafka, redis and the collector only in the stack.
   assert {

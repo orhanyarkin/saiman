@@ -152,3 +152,14 @@ locals {
   }
   all_decoded_containers = concat(local.decoded_tasks.init, local.decoded_tasks.main)
 }
+
+locals {
+  # Container dependency graph of each task definition, closed under reachability by path doubling (paths of up to 16
+  # edges after four rounds, far above the 10 containers a task may have). tests/task.tftest.hcl asserts that no
+  # container reaches itself: ECS refuses circular container dependencies.
+  dep_graph  = { for t, cs in local.decoded_tasks : t => { for c in cs : c.name => [for d in c.dependsOn : d.containerName] } }
+  dep_reach1 = { for t, g in local.dep_graph : t => { for n, ds in g : n => distinct(flatten([ds, [for d in ds : try(g[d], [])]])) } }
+  dep_reach2 = { for t, g in local.dep_reach1 : t => { for n, ds in g : n => distinct(flatten([ds, [for d in ds : try(g[d], [])]])) } }
+  dep_reach3 = { for t, g in local.dep_reach2 : t => { for n, ds in g : n => distinct(flatten([ds, [for d in ds : try(g[d], [])]])) } }
+  dep_reach4 = { for t, g in local.dep_reach3 : t => { for n, ds in g : n => distinct(flatten([ds, [for d in ds : try(g[d], [])]])) } }
+}

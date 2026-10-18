@@ -115,8 +115,10 @@ locals {
   # --- one-shots -----------------------------------------------------------------------------------
 
   oneshot = {
-    essential    = false
-    startTimeout = 300
+    essential = false
+    # How long a dependent container waits for this one to finish. Fargate allows 2-120 seconds (ContainerDefinition
+    # reference), so a one-shot that must run longer cannot be a SUCCESS dependency of anything; see init_done below.
+    startTimeout = 120
   }
 
   migrate_specs = { for name, a in local.apps : "${name}-migrate" => merge(local.oneshot, {
@@ -297,12 +299,16 @@ locals {
         KAFKA_LOG_DIRS                                 = "/var/lib/kafka/data"
         KAFKA_HEAP_OPTS                                = "-Xms256m -Xmx512m"
       }
+      # ECS allows at most 10 retries and a 300 s startPeriod. Failures during startPeriod do not count and the first
+      # success makes the container HEALTHY, so a slow broker start is covered by the 120 s grace period, then
+      # 10 retries x 20 s. The apps wait for HEALTHY for at most startTimeout (120 s on Fargate).
+      startTimeout = 120
       healthCheck = {
         command     = ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --list >/dev/null || exit 1"]
-        interval    = 10
-        timeout     = 15
-        retries     = 20
-        startPeriod = 20
+        interval    = 20
+        timeout     = 20
+        retries     = 10
+        startPeriod = 120
       }
     }
 
@@ -316,12 +322,13 @@ locals {
       entryPoint    = ["sh", "-c"]
       command       = ["exec redis-server --bind 127.0.0.1 --save '' --appendonly no --maxmemory 96mb --maxmemory-policy noeviction --requirepass \"$REDIS_PASSWORD\""]
       secrets       = { REDIS_PASSWORD = "redis_password" }
+      startTimeout  = 120
       healthCheck = {
         command     = ["CMD-SHELL", "REDISCLI_AUTH=\"$REDIS_PASSWORD\" redis-cli -h 127.0.0.1 ping | grep -q PONG"]
         interval    = 5
         timeout     = 5
-        retries     = 20
-        startPeriod = 5
+        retries     = 10
+        startPeriod = 10
       }
     }
 
