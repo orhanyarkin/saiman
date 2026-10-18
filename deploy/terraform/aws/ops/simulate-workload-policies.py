@@ -43,6 +43,7 @@ REQUESTS = [
     ("task", "s3:PutObject", "arn:aws:s3:::{b}/demo/assets/zz-session/x", {}, "deny"),
     ("task", "ssm:GetParameters", "arn:aws:ssm:" + REGION + ":{a}:parameter/saiman/demo/pg_master_password", {}, "deny"),
     ("execution", "ssm:GetParameters", "arn:aws:ssm:" + REGION + ":{a}:parameter/saiman/demo/pg_master_password", {}, "allow"),
+    ("execution", "ssm:GetParameters", "arn:aws:ssm:" + REGION + ":{a}:parameter/saiman/demo/redis_password", {}, "allow"),  # SPRING_DATA_REDIS_PASSWORD, REDIS_PASSWORD
     ("execution", "kms:Decrypt", "arn:aws:kms:" + REGION + ":{a}:key/00000000-0000-0000-0000-000000000000", {"kms:ViaService": "ssm." + REGION + ".amazonaws.com"}, "allow"),
     ("execution", "ssm:GetParameters", "arn:aws:ssm:" + REGION + ":{a}:parameter/saiman/other/x", {}, "deny"),
     ("execution", "s3:GetObject", "arn:aws:s3:::{b}/demo/assets/zz-session/x", {}, "deny"),
