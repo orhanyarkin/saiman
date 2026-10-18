@@ -60,7 +60,7 @@ The repository stays free of state, `.tfvars` and `backend.hcl` (all gitignored)
 | --- | --- | --- |
 | `saiman-gha-plan` | `repo:orhanyarkin@44910233/saiman@1390957366:pull_request`, `repo:orhanyarkin@44910233/saiman@1390957366:ref:refs/heads/main` | read/describe, read the demo-lite state. No S3 write at all, so plan workflows must run `terraform plan -lock=false`. Explicit Deny: `ssm:GetParameter*` on `/saiman/*`, `s3:GetObject` on `artifacts/*` and `demo/*` (PR code runs during plan) |
 | `saiman-gha-apply` | `repo:orhanyarkin@44910233/saiman@1390957366:environment:demo-apply` | session up to 2 h (the others 1 h). Create/update/delete `saiman-demo*` resources and start the init task (`ecs:RunTask` only for `saiman-demo*` task definitions in the `saiman-demo*` cluster). IAM: `iam:PassRole`, split by target (the task and execution roles to `ecs-tasks` only, the scheduler role to `scheduler` only) and nothing else: it cannot create, edit or re-trust a role. `s3:DeleteObject` only on the state lock object |
-| `saiman-gha-destroy` | `repo:orhanyarkin@44910233/saiman@1390957366:environment:demo-destroy` | delete, stop and modify existing `saiman-demo*` resources (including `rds:ModifyDBInstance`); no create/register/run/put action and no IAM write. Residual: it can still alter what exists (cost denial of service, not escalation). Teardown relies on `ecs delete-service --force` (so demo-lite's `aws_ecs_service` needs `force_delete = true`); scale-to-zero is the Scheduler role's job |
+| `saiman-gha-destroy` | `repo:orhanyarkin@44910233/saiman@1390957366:environment:demo-destroy` | delete, stop and modify existing `saiman-demo*` resources (including `rds:ModifyDBInstance`); no create/register/run/put action and no IAM write (the one exception is deregistering task definitions, `ecs:DeregisterTaskDefinition` on `*`, see Known limits). Residual: it can still alter what exists (cost denial of service, not escalation). Teardown relies on `ecs delete-service --force` (so demo-lite's `aws_ecs_service` needs `force_delete = true`); scale-to-zero is the Scheduler role's job |
 
 The `sub` values use the repository's **immutable subject claim** (owner and repository IDs, GitHub's default for newer
 repositories; it also stops a renamed or re-created repository from inheriting the trust). Read the value for your
@@ -81,6 +81,11 @@ Known limits:
 - The boundary bounds what the demo roles can do, not who can use them: a malicious approved apply can
   still deploy a workload that runs as them and reads `/saiman/demo/*` (inherent; those secrets are testnet
   keys and a capped OpenAI key only).
+- `ecs:DeregisterTaskDefinition` supports only `Resource: "*"` (AWS Service Authorization Reference: no resource
+  type), so the apply role (replacing a task definition deregisters the old revision) and the destroy role (`terraform
+  destroy` and the teardown) hold it in a separate `EcsDeregisterTaskDefinition` statement on `*`. It cannot be scoped
+  to `saiman-demo*`; the region lock still applies. `ecs:DeleteTaskDefinitions` (removing the INACTIVE revisions
+  afterwards, `ops/demo-cleanup.sh`) is task-definition scoped and stays limited to `saiman-demo*`.
 - EC2 write actions (VPC, subnets, security groups) are allowed on `*`, limited by the region lock only.
   Tag-based scoping (`aws:ResourceTag/project`, `aws:RequestTag/project` on Create via `ec2:CreateAction`)
   is a documented follow-up: it cannot be verified offline and makes destroy fragile for untagged
@@ -93,11 +98,34 @@ cd deploy/terraform/aws/bootstrap
 terraform fmt -check -recursive
 terraform init -backend=false
 terraform validate
-terraform test                       # mock_provider assertions on trust, denies, fixed roles, boundary, bucket
+terraform test                       # mock_provider assertions on trust, denies, fixed roles, boundary, bucket, IAM action coverage
 tests/check-prevent-destroy.sh       # lifecycle is invisible to terraform test
+tests/check-iam-coverage.sh          # every demo-lite resource type is listed in tests/required-actions.json
 ```
 The same four commands plus `tests/check-foundation.sh` run in `demo-lite/`.
 `.github/workflows/terraform.yml` runs the same on pull requests and on `main`.
+
+### IAM action coverage
+
+A role that lacks an API action fails only on the real `demo-up`/`demo-down`, so the bootstrap tests check it offline:
+
+- `tests/required-actions.json` lists, per demo-lite resource type (and per shell operation the workflows run), the API
+  actions the AWS provider calls on apply and on destroy/replace. `tests/check-iam-coverage.sh` fails when a
+  `resource "aws_*"` type in `demo-lite/` is missing from the list (or the list has a stale entry), so adding a resource
+  forces the author to say which actions it needs.
+- `terraform test` (`demo_lite_resources_have_their_api_actions`) then requires every listed action to be granted by the
+  apply or destroy role policy (wildcards expanded against `tests/iam-action-facts.json`).
+- The same facts file backs `iam_action_names_exist` (no invented action names, no wildcard that matches nothing) and
+  `star_only_actions_are_never_in_scoped_statements` (an action that supports only `Resource: "*"` must not sit in a
+  statement that names ARNs: it would silently never match).
+- `tests/iam-action-facts.json` is generated from AWS's Service Reference by `ops/refresh-iam-facts.py` (needs network;
+  re-run it when a new service or action is needed). `ops/audit-iam-policies.py` is an on-demand extra check against
+  a `terraform show -json` plan (resource types versus ARN formats); it is not part of CI.
+- `make tf-mutation-check` proves the tests bite: it breaks the policies one way at a time (in a copy) and requires a
+  red run with the expected message.
+
+Generating the required list is manual: derive it from the provider's delete/update paths (the AWS provider source and
+CloudTrail from a real run) when you add a resource type.
 
 ## demo-lite (foundation)
 

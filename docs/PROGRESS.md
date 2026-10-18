@@ -7,6 +7,18 @@ M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-10-18 — Fix: IAM actions the roles were missing, and a test that finds them offline
+
+**What changed**
+- The destroy role lacked `ecs:DeregisterTaskDefinition` (real `demo-down` failed on `saiman-demo-init:1`). The action supports only `Resource: "*"` (Service Authorization Reference), so it now sits in its own `EcsDeregisterTaskDefinition` statement on `*` shared by the apply role (replacing a task definition deregisters the old revision) and the destroy role. It had been in scoped statements in both roles, where it never matched.
+- Same class of bug found by the new checks and fixed: `scheduler:TagResource/UntagResource` (schedule-group scoped, never matched `schedule/...`), invalid `budgets:*` actions and the unused Budgets statements (demo-lite has no budget resource), and actions the provider needs that were missing from apply (`ec2:ModifySecurityGroupRules`, `ec2:ReplaceRoute`, `ecs:UpdateClusterSettings`).
+- New offline checks (`bootstrap/tests/`): `iam-action-facts.json` (generated from AWS's Service Reference by `ops/refresh-iam-facts.py`), `required-actions.json` (the API actions each demo-lite resource type and each workflow shell step needs), `check-iam-coverage.sh` (every demo-lite resource type is listed) and three `terraform test` runs (action names exist, star-only actions never in scoped statements, every required action is granted). `ops/tf_mutation.py` is now shared by the demo-lite and the new bootstrap mutation check (10 IAM mutations, all caught). `ops/audit-iam-policies.py` is an on-demand plan audit (0 findings now; 9 on the pre-fix policies).
+- INACTIVE task definitions are deleted by `ops/demo-cleanup.sh` (`ecs:DeleteTaskDefinitions`, scoped to `saiman-demo*`), already merged.
+
+**How verified**: `terraform test` in bootstrap (20 tests) and demo-lite, `make tf-check`, `make tf-mutation-check`, `ops/test-ops-scripts.sh`; the pre-fix `iam.tf` fails 3 of the new tests; `terraform plan` against the real bootstrap state (read-only, `-lock=false`) shows 2 policy updates. Nothing applied.
+
+**Next**: the human re-applies `bootstrap` after merge; PR for `check-demo-down.sh` (confirm Tagging API hits with the service's own describe call, report stale index entries and INACTIVE task definitions separately).
+
 ### 2026-10-06 — M6b: migrate one-shot, demo-lite Terraform and demo workflows (ADR-0027, ADR-0028)
 
 **What changed**
