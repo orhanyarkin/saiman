@@ -185,6 +185,13 @@ startPeriod 0-300, start/stop timeouts 2-120, `dependsOn` targets and conditions
 check, no cycles), mount points naming a declared volume, unique names, valid Fargate cpu/memory and the 64 KiB size quota. Each
 rule is mutation-checked (`make tf-mutation-check`: it breaks the module once per rule in a temporary copy and requires the
 rule's own message). demo-up #3 failed at `RegisterTaskDefinition` on `retries = 20` before these existed.
+
+A mock provider echoes what it is given, the real one does not: after apply the AWS provider holds the task definition **as ECS
+returned it**, without empty lists such as `dependsOn` (demo-up #5 failed at `c.dependsOn` in a local that decoded the provider's
+`container_definitions`). So the JSON is built once (`local.container_json`), registered from there, and every check decodes
+that string, never the resource attribute (`tests/check-task.sh` fails on any `aws_ecs_task_definition.*.container_definitions`
+read in `*.tf` and the tests). The tests also run every rule over a second copy of each task with all null and empty values
+dropped (`main_as_returned`, `init_as_returned`), so a rule that assumes an optional key fails offline.
 `containers.tf` mirrors `deploy/compose/docker-compose.yml`, all stack containers on localhost:
 
 | Container | Task / kind | Notes |
@@ -251,7 +258,7 @@ service's own describe call before it counts:
 | --- | --- | --- |
 | `LEFTOVER` | the direct call says it exists (or the type has no direct check, or the call was denied: fail closed) | yes |
 | `STALE       (tagging index)` | the direct call says it is gone; only the index is behind | no, not even with `--strict` |
-| `INACTIVE    ecs task definition` | a deregistered revision (also listed from `ecs list-task-definitions --status INACTIVE`); history that costs nothing, `ops/demo-cleanup.sh` deletes it | no |
+| `INACTIVE    ecs task definition` | a deregistered revision, INACTIVE or already DELETE_IN_PROGRESS (also listed with `ecs list-task-definitions --status INACTIVE`, filtered by name: `--family-prefix` is an exact family); history that costs nothing, `ops/demo-cleanup.sh` deletes it | no |
 | `ERROR` | a direct call failed for another reason (exit 2): never read as STALE | exit 2 |
 
 The sweep covers EC2 (VPC, subnet, internet gateway, route table, security group and rule, network interface,
