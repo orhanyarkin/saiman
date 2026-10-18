@@ -1,8 +1,16 @@
-# Container definitions of the single demo task. docker-compose.yml is the source of truth for each
-# service's image, port, environment and secret split; this file mirrors it with three differences:
-#   - every hostname is 127.0.0.1 (one task, one network namespace),
+# Container definitions of the two demo task definitions (ADR-0028). docker-compose.yml is the source of
+# truth for each service's image, port, environment and secret split; this file mirrors it with differences:
+#   - every hostname is 127.0.0.1 (the stack task is one network namespace),
 #   - secrets are ECS `secrets[].valueFrom` SSM SecureString ARNs (env vars), because ECS cannot mount files,
 #   - ordering is `dependsOn` (SUCCESS for one-shots, HEALTHY for kafka/redis) instead of depends_on.
+#
+# ECS allows at most 10 containers per task definition, so the work is split in two (ecs.tf):
+#   init   run-to-completion (demo-up runs it once with ecs:RunTask): assets, db-init, the four *-migrate and
+#          corpus-restore. It is the only task that holds the master and owner passwords (ADR-0027).
+#   stack  the long-running service: assets, kafka, redis, otel-collector, web, the four apps, readiness.
+# `dependsOn` cannot cross task definitions: demo-up starts the service (desired_count 1) only after the init
+# task has stopped with every container at exit code 0, which replaces the old `<svc>-migrate = SUCCESS`
+# dependency. tests/task.tftest.hcl pins both container sets and their sizes (<= 10 each).
 #
 # Secret split (ADR-0009, ADR-0024, ADR-0027), enforced by tests/task.tftest.hcl and tests/check-task.sh:
 #   *-migrate     owner password only (SPRING_FLYWAY_PASSWORD), no app password, no provider or wallet key
@@ -29,12 +37,13 @@ locals {
     busybox  = "public.ecr.aws/docker/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
   }
 
-  # Shared ephemeral volumes. The `assets` container syncs s3://<state bucket>/demo/assets/<session>/ into
-  # `assets` (layout from deploy/terraform/aws/assets/build-assets.sh: web/dist, nginx/default.conf,
-  # otel/{config,grafana}.yaml, postgres/*, plus scripts/readiness.sh), then copies the nginx root and
-  # config into `web-html` / `web-conf` (ECS cannot mount single files). `corpus` receives the private
-  # dump (artifacts/, read by the task role).
-  volume_names = ["assets", "web-html", "web-conf", "corpus"]
+  # Task-scoped (ephemeral) volumes. In both tasks the `assets` container syncs
+  # s3://<state bucket>/demo/assets/<session>/ into `assets` (layout from deploy/terraform/aws/assets/
+  # build-assets.sh: web/dist, nginx/default.conf, otel/{config,grafana}.yaml, postgres/*, scripts/readiness.sh)
+  # and verifies the manifest digest. The init task also fetches the private corpus dump into `corpus`; the stack
+  # task copies the nginx root and config into `web-html` / `web-conf` (ECS cannot mount single files).
+  volume_names_init  = ["assets", "corpus"]
+  volume_names_stack = ["assets", "web-html", "web-conf"]
 
   jdbc_url = "jdbc:postgresql://${aws_db_instance.main.address}:5432/saiman?sslmode=require"
 
@@ -145,46 +154,44 @@ locals {
       SPRING_DATASOURCE_PASSWORD = "pg_${a.schema}_app_password"
       SPRING_DATA_REDIS_PASSWORD = "redis_password" # spring.data.redis.password
     }, local.app_secrets[name])
-    depends = merge(
-      {
-        "${name}-migrate" = "SUCCESS"
-        kafka             = "HEALTHY"
-        redis             = "HEALTHY"
-      },
-      name == "ingest" ? { "corpus-restore" = "SUCCESS" } : {},
-    )
+    # Migrations (and, for ingest, the corpus restore) already finished in the init task before the service starts.
+    depends = {
+      kafka = "HEALTHY"
+      redis = "HEALTHY"
+    }
   } }
 
   # --- fixed containers ----------------------------------------------------------------------------
 
-  fixed_specs = {
-    # Downloads the per-session assets and the corpus dump from the state bucket (task role: read-only
-    # on demo/* and artifacts/*).
+  # First half of both `assets` containers: sync the per-session prefix and verify it BEFORE anything is copied
+  # or executed. The digest is the sha256 over the sorted `sha256  path` manifest of the synced prefix (what
+  # build-assets.sh printed as `manifest-sha256`); the task role is read-only on demo/assets/* and artifacts/*.
+  assets_verify = [
+    "set -eu;",
+    "aws s3 sync --only-show-errors \"${local.assets_prefix}/\" /assets/;",
+    "agg=$(cd /assets && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sed 's|  \\./|  |' | sha256sum | cut -d' ' -f1);",
+    "[ \"$agg\" = \"${var.assets_manifest_sha256}\" ] || { echo 'assets: manifest digest mismatch' >&2; exit 1; };",
+  ]
+
+  # --- init task ----------------------------------------------------------------------------------
+
+  init_fixed = {
+    # Fetches the verified assets (the postgres scripts) and the private corpus dump for corpus-restore.
     assets = merge(local.oneshot, {
       image      = local.images.awscli
       memory     = 384
       entryPoint = ["sh", "-c"]
-      command = [join(" ", [
-        "set -eu;",
-        "aws s3 sync --only-show-errors \"${local.assets_prefix}/\" /assets/;",
-        # Integrity first (nothing is copied before it passes): sha256 over the sorted `sha256  path`
-        # manifest of the synced prefix must equal assets_manifest_sha256 (what build-assets.sh printed).
-        "agg=$(cd /assets && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sed 's|  \\./|  |' | sha256sum | cut -d' ' -f1);",
-        "[ \"$agg\" = \"${var.assets_manifest_sha256}\" ] || { echo 'assets: manifest digest mismatch' >&2; exit 1; };",
+      command = [join(" ", concat(local.assets_verify, [
         "aws s3 cp --only-show-errors \"s3://${var.state_bucket_name}/${var.corpus_object_key}\" /corpus/ingest-corpus.dump;",
         "echo \"${var.corpus_sha256}  /corpus/ingest-corpus.dump\" | sha256sum -c - >/dev/null || { echo 'assets: corpus digest mismatch' >&2; exit 1; };",
-        "aws s3 cp --only-show-errors \"s3://${var.state_bucket_name}/${local.corpus_meta}\" /corpus/ingest-corpus.meta.json;",
-        "cp -R /assets/web/dist/. /web-html/;",
-        "cp /assets/nginx/default.conf /web-conf/default.conf",
-      ])]
+        "aws s3 cp --only-show-errors \"s3://${var.state_bucket_name}/${local.corpus_meta}\" /corpus/ingest-corpus.meta.json",
+      ]))]
       env = {
         AWS_DEFAULT_REGION = local.region
         AWS_PAGER          = ""
       }
       mounts = [
         { volume = "assets", path = "/assets", ro = false },
-        { volume = "web-html", path = "/web-html", ro = false },
-        { volume = "web-conf", path = "/web-conf", ro = false },
         { volume = "corpus", path = "/corpus", ro = false },
       ]
     })
@@ -239,6 +246,31 @@ locals {
         { volume = "corpus", path = "/corpus", ro = true },
       ]
       depends = { assets = "SUCCESS", "ingest-migrate" = "SUCCESS" }
+    })
+
+  }
+
+  # --- stack task ---------------------------------------------------------------------------------
+
+  stack_fixed = {
+    # Serves the verified web dist and the nginx config to `web` (ECS cannot mount single files).
+    assets = merge(local.oneshot, {
+      image      = local.images.awscli
+      memory     = 384
+      entryPoint = ["sh", "-c"]
+      command = [join(" ", concat(local.assets_verify, [
+        "cp -R /assets/web/dist/. /web-html/;",
+        "cp /assets/nginx/default.conf /web-conf/default.conf",
+      ]))]
+      env = {
+        AWS_DEFAULT_REGION = local.region
+        AWS_PAGER          = ""
+      }
+      mounts = [
+        { volume = "assets", path = "/assets", ro = false },
+        { volume = "web-html", path = "/web-html", ro = false },
+        { volume = "web-conf", path = "/web-conf", ro = false },
+      ]
     })
 
     # Single-node KRaft broker on loopback only (ADR-0020). One listener: clients are in the same task.
@@ -343,10 +375,24 @@ locals {
     }
   }
 
-  specs = merge(local.fixed_specs, local.migrate_specs, local.app_specs)
+  # An ECS task definition needs at least one essential container, and every init container is a one-shot. `done`
+  # is that container: it does nothing, starts only once every other init container exited 0 (SUCCESS), and its
+  # exit ends the task. If any one-shot fails, `done` never starts and demo-up stops the task (run-init-task.sh).
+  init_done = {
+    done = {
+      image      = local.images.busybox
+      essential  = true
+      memory     = 32
+      entryPoint = ["true"]
+      depends    = { for name in keys(merge(local.init_fixed, local.migrate_specs)) : name => "SUCCESS" }
+    }
+  }
+
+  init_specs  = merge(local.init_fixed, local.migrate_specs, local.init_done)
+  stack_specs = merge(local.stack_fixed, local.app_specs)
 
   # Spec -> ECS container definition. env/secrets/depends/mounts are the readable spellings.
-  container_definitions = [for name, c in local.specs : merge(
+  rendered_containers = { for task, specs in { init = local.init_specs, main = local.stack_specs } : task => [for name, c in specs : merge(
     { for k, v in c : k => v if !contains(["env", "secrets", "depends", "mounts"], k) },
     {
       name        = name
@@ -363,5 +409,8 @@ locals {
         }
       }
     },
-  )]
+  )] }
+
+  container_definitions_init = local.rendered_containers.init
+  container_definitions_main = local.rendered_containers.main
 }

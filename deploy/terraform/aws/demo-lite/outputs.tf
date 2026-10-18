@@ -10,6 +10,11 @@ output "service_name" {
   value       = local.service_name
 }
 
+output "init_task_definition_arn" {
+  description = "Run-to-completion init task (roles, migrations, corpus restore); demo-up runs it before starting the service."
+  value       = aws_ecs_task_definition.init.arn
+}
+
 output "log_group" {
   description = "CloudWatch log group of every container."
   value       = aws_cloudwatch_log_group.main.name

@@ -59,7 +59,7 @@ The repository stays free of state, `.tfvars` and `backend.hcl` (all gitignored)
 | Role | Trust (`sub`) | Can |
 | --- | --- | --- |
 | `saiman-gha-plan` | `repo:orhanyarkin@44910233/saiman@1390957366:pull_request`, `repo:orhanyarkin@44910233/saiman@1390957366:ref:refs/heads/main` | read/describe, read the demo-lite state. No S3 write at all, so plan workflows must run `terraform plan -lock=false`. Explicit Deny: `ssm:GetParameter*` on `/saiman/*`, `s3:GetObject` on `artifacts/*` and `demo/*` (PR code runs during plan) |
-| `saiman-gha-apply` | `repo:orhanyarkin@44910233/saiman@1390957366:environment:demo-apply` | create/update/delete `saiman-demo*` resources. IAM: `iam:PassRole` of the three fixed demo roles (path `/saiman/demo/`, ecs-tasks and scheduler only) and nothing else: it cannot create, edit or re-trust a role. `s3:DeleteObject` only on the state lock object |
+| `saiman-gha-apply` | `repo:orhanyarkin@44910233/saiman@1390957366:environment:demo-apply` | create/update/delete `saiman-demo*` resources and start the init task (`ecs:RunTask` only for `saiman-demo*` task definitions in the `saiman-demo*` cluster). IAM: `iam:PassRole`, split by target (the task and execution roles to `ecs-tasks` only, the scheduler role to `scheduler` only) and nothing else: it cannot create, edit or re-trust a role. `s3:DeleteObject` only on the state lock object |
 | `saiman-gha-destroy` | `repo:orhanyarkin@44910233/saiman@1390957366:environment:demo-destroy` | delete, stop and modify existing `saiman-demo*` resources (including `rds:ModifyDBInstance`); no create/register/run/put action and no IAM write. Residual: it can still alter what exists (cost denial of service, not escalation). Teardown relies on `ecs delete-service --force` (so demo-lite's `aws_ecs_service` needs `force_delete = true`); scale-to-zero is the Scheduler role's job |
 
 The `sub` values use the repository's **immutable subject claim** (owner and repository IDs, GitHub's default for newer
@@ -139,22 +139,33 @@ tests/check-foundation.sh      # default tags, single ingress rule, write-only p
 
 ## demo-lite (ECS task)
 
-`ecs.tf` declares the cluster `saiman-demo`, the single Fargate ARM64 task definition (family
-`saiman-demo-lite`, roles = the fixed bootstrap ARNs) and the service `saiman-demo-lite`
-(`desired_count = 1`, public IP, `enable_execute_command`, `force_delete`, no steady-state wait).
-`containers.tf` mirrors `deploy/compose/docker-compose.yml` for one task, all containers on localhost:
+`ecs.tf` declares the cluster `saiman-demo`, two Fargate ARM64 task definitions (roles = the fixed bootstrap ARNs) and the
+service `saiman-demo-lite`. ECS allows at most **10 containers per task definition**, so the work is split:
 
-| Container | Kind | Notes |
+- `saiman-demo-lite` (the stack, 2 vCPU / 8 GB): the long-running service, ten containers.
+- `saiman-demo-init` (1 vCPU / 4 GB): run once per session, eight containers. It is the only task that holds the master and owner
+  passwords. Its essential `done` container starts only when every other container exited 0.
+
+The service is created at **zero tasks** (`desired_count = 0`, ignored afterwards, public IP, `enable_execute_command`,
+`force_delete`, no steady-state wait). `demo-up` runs the init task (`ops/run-init-task.sh`: `ecs run-task`, fail fast on a failed
+container, stop a stuck task, every container must exit 0) and only then sets the desired count to 1, because `dependsOn`
+cannot cross task definitions. `demo-destroy` stops a leftover init task (`ops/stop-init-tasks.sh`) before it deletes the cluster.
+`terraform test` asserts both container sets and that each stays at 10 containers or fewer (the mock provider does not apply
+that ECS rule), has an essential container and has no `dependsOn` target outside its own task definition.
+`containers.tf` mirrors `deploy/compose/docker-compose.yml`, all stack containers on localhost:
+
+| Container | Task / kind | Notes |
 | --- | --- | --- |
-| `assets` | one-shot | `aws s3 sync` of `s3://<state bucket>/demo/assets/<session_id>/` into the `assets` volume (layout of `aws/assets/build-assets.sh`), copies `web/dist` and `nginx/default.conf` into `web-html` / `web-conf`, fetches the corpus dump + `.meta.json` (`corpus_object_key`) into `corpus` |
-| `db-init` | one-shot | creates the `vector` extension, then `postgres/bootstrap-roles.sh` (`BOOTSTRAP_SECRET_SOURCE=env`, `BOOTSTRAP_RDS=1`); master password and `PW_*` via `secrets` only |
-| `<svc>-migrate` x4 | one-shot | `SAIMAN_RUN_MODE=migrate`, owner user, `SPRING_FLYWAY_PASSWORD` via `secrets` only |
-| `corpus-restore` | one-shot | `postgres/corpus-restore.sh /corpus` as `ingest_owner` (after `ingest-migrate`) |
-| `kafka`, `redis` | essential | loopback only, health checks |
-| `orchestrator`, `seller-api`, `ledger`, `ingest` | essential | app password only, `SPRING_FLYWAY_ENABLED=false`, 768 MiB hard limit |
-| `otel-collector` | non-essential | `assets/otel/config.yaml`; `grafana.yaml` overlay only when `grafana_otlp_endpoint` is set |
-| `web` | essential | nginx on port 80, the conventional SSM port-forward target (not a control: a forward reaches every loopback port) |
-| `readiness` | one-shot | runs `/assets/scripts/readiness.sh` (the assets prefix must contain `scripts/readiness.sh`), exits 0 when all four services are UP |
+| `assets` | init and stack, one-shot | `aws s3 sync` of `s3://<state bucket>/demo/assets/<session_id>/` into the `assets` volume (layout of `aws/assets/build-assets.sh`), copies `web/dist` and `nginx/default.conf` into `web-html` / `web-conf`, fetches the corpus dump + `.meta.json` (`corpus_object_key`) into `corpus` |
+| `db-init` | init, one-shot | creates the `vector` extension, then `postgres/bootstrap-roles.sh` (`BOOTSTRAP_SECRET_SOURCE=env`, `BOOTSTRAP_RDS=1`); master password and `PW_*` via `secrets` only |
+| `<svc>-migrate` x4 | init, one-shot | `SAIMAN_RUN_MODE=migrate`, owner user, `SPRING_FLYWAY_PASSWORD` via `secrets` only |
+| `corpus-restore` | init, one-shot | `postgres/corpus-restore.sh /corpus` as `ingest_owner` (after `ingest-migrate`) |
+| `done` | init, essential | busybox `true`; waits for every other init container (SUCCESS), its exit ends the task |
+| `kafka`, `redis` | stack, essential | loopback only, health checks |
+| `orchestrator`, `seller-api`, `ledger`, `ingest` | stack, essential | app password only, `SPRING_FLYWAY_ENABLED=false`, 768 MiB hard limit |
+| `otel-collector` | stack, non-essential | `assets/otel/config.yaml`; `grafana.yaml` overlay only when `grafana_otlp_endpoint` is set |
+| `web` | stack, essential | nginx on port 80, the conventional SSM port-forward target (not a control: a forward reaches every loopback port) |
+| `readiness` | stack, one-shot | runs `/assets/scripts/readiness.sh` (the assets prefix must contain `scripts/readiness.sh`), exits 0 when all four services are UP |
 
 SSM parameters the `demo-up` workflow must create under `/saiman/demo/` (SecureString):
 `pg_master_password`, `pg_<schema>_{owner,app}_password` for `orchestrator`, `ledger`, `seller_api`, `ingest`,
@@ -180,7 +191,7 @@ key), `X402_SELLER_PAYTO_ADDRESS`, optional `GRAFANA_OTLP_AUTH`. Repository secr
 
 | Workflow | Trigger | Does |
 | --- | --- | --- |
-| `demo-up` | you, `workflow_dispatch` on `main`; inputs `ttl_hours` 1..8 (default 4), `image_sha` | checks the five GHCR `sha-<12>` manifests for arm64+amd64, generates the DB passwords/tokens (`scripts/ensure-secret-files.sh`, masked), writes the SSM parameters and `/saiman/demo/expires-at`, builds and uploads the assets, `terraform plan` + secret scan + `apply`, waits for the `readiness` container, prints the tunnel command. A failure after `apply` destroys nothing: run `demo-down` or let the reaper do it |
+| `demo-up` | you, `workflow_dispatch` on `main`; inputs `ttl_hours` 1..8 (default 4), `image_sha` | checks the five GHCR `sha-<12>` manifests for arm64+amd64, generates the DB passwords/tokens (`scripts/ensure-secret-files.sh`, masked), writes the SSM parameters and `/saiman/demo/expires-at`, builds and uploads the assets, `terraform plan` + secret scan + `apply` (the service is created at zero tasks), runs the init task (roles, migrations, corpus restore; every container must exit 0), starts the service, waits for the `readiness` container, prints the tunnel command. A failure after `apply` destroys nothing: run `demo-down` or let the reaper do it |
 | `demo-down` | you | calls `demo-destroy` |
 | `demo-destroy` | called | `terraform destroy`, deletes `/saiman/demo/*`, the `demo/` S3 prefix (all versions) and task definitions, then `ops/check-demo-down.sh` |
 | `demo-reaper` | cron every 30 min | destroys the demo only when `/saiman/demo/expires-at` is in the past (re-checked under the `demo-lite` lock). The only automation allowed to destroy (ADR-0028, rule 7) |

@@ -198,6 +198,17 @@ resource "aws_iam_role_policy" "apply" {
         ]
       },
       {
+        # demo-up runs the init task (roles, migrations, corpus restore) once per session. RunTask is limited to the
+        # saiman-demo* task definitions AND the saiman-demo* cluster; the condition key is what ties it to the cluster.
+        Sid      = "EcsRunInitTask"
+        Effect   = "Allow"
+        Action   = ["ecs:RunTask"]
+        Resource = "arn:aws:ecs:${var.region}:${local.account_id}:task-definition/saiman-demo*:*"
+        Condition = {
+          ArnLike = { "ecs:cluster" = "arn:aws:ecs:${var.region}:${local.account_id}:cluster/saiman-demo*" }
+        }
+      },
+      {
         # RegisterTaskDefinition does not support resource-level permissions.
         Sid      = "EcsRegisterTaskDefinition"
         Effect   = "Allow"
@@ -294,13 +305,27 @@ resource "aws_iam_role_policy" "apply" {
       },
       {
         # The only IAM write. The roles are fixed in bootstrap (demo_roles.tf), carry the boundary and
-        # trust service principals only; this role cannot create, edit or re-trust any role.
-        Sid      = "PassDemoRoles"
+        # trust service principals only; this role cannot create, edit or re-trust any role. Each role may be
+        # passed to exactly one service: the task and execution roles to ECS tasks (the service and the init
+        # task started with ecs:RunTask), the scheduler role to EventBridge Scheduler.
+        Sid    = "PassTaskRolesToEcsTasks"
+        Effect = "Allow"
+        Action = ["iam:PassRole"]
+        Resource = [
+          "arn:aws:iam::${local.account_id}:role/saiman/demo/${local.demo_name_prefix}-task",
+          "arn:aws:iam::${local.account_id}:role/saiman/demo/${local.demo_name_prefix}-task-execution",
+        ]
+        Condition = {
+          StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
+        }
+      },
+      {
+        Sid      = "PassSchedulerRoleToScheduler"
         Effect   = "Allow"
         Action   = ["iam:PassRole"]
-        Resource = local.iam_demo_role_arn
+        Resource = "arn:aws:iam::${local.account_id}:role/saiman/demo/${local.demo_name_prefix}-scheduler"
         Condition = {
-          StringEquals = { "iam:PassedToService" = ["ecs-tasks.amazonaws.com", "scheduler.amazonaws.com"] }
+          StringEquals = { "iam:PassedToService" = "scheduler.amazonaws.com" }
         }
       },
       {

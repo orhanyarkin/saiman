@@ -3,7 +3,8 @@
 #   1. the only data source is aws_caller_identity: SSM values are never read (secrets are ARN strings),
 #   2. no IAM, random_password, aws_ssm_parameter or Secrets Manager resources anywhere,
 #   3. the buyer key parameter appears exactly once, inside app_secrets.orchestrator,
-#   4. the ECS service and task keep the flags the destroy role and the human depend on.
+#   4. the ECS service and task keep the flags the destroy role and the human depend on, the init task exists, the
+#      service starts at zero tasks (demo-up scales it after the init task) and the 10-container guard is intact.
 # (Which environment names and secrets reach which container is asserted by task.tftest.hcl.)
 set -euo pipefail
 
@@ -27,7 +28,7 @@ elif ! awk '/^  app_secrets = \{/{s=1} s&&/^    orchestrator = \{/{o=1} o&&/x402
   err "the buyer key must be in app_secrets.orchestrator"
 fi
 
-for needle in 'cpu_architecture        = "ARM64"' 'force_delete = true' 'enable_execute_command = true' 'wait_for_steady_state = false'; do
+for needle in 'cpu_architecture        = "ARM64"' 'force_delete = true' 'enable_execute_command = true' 'wait_for_steady_state = false' 'resource "aws_ecs_task_definition" "init"' 'desired_count = 0' 'ignore_changes = [desired_count]' 'max_containers_per_task = 10'; do
   grep -qF "$needle" "$dir/ecs.tf" || err "ecs.tf is missing: $needle"
 done
 

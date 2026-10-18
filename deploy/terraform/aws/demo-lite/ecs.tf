@@ -1,6 +1,17 @@
-# One Fargate task (ARM64) that runs every container on localhost (ADR-0028), behind one ECS service.
+# Two Fargate task definitions (ARM64, ADR-0028): a long-running `stack` (every service on localhost, behind
+# one ECS service) and a run-to-completion `init` (roles, migrations, corpus restore). ECS allows at most 10
+# containers per task definition, which is why the work is split; containers.tf explains the split.
 # The task and execution roles are the fixed ones from the bootstrap stack (locals.tf): this module
-# declares no IAM resources. The container list lives in containers.tf.
+# declares no IAM resources. The container lists live in containers.tf.
+
+locals {
+  # Hard ECS limit; a task definition above it is rejected at RegisterTaskDefinition ("Too many containers").
+  max_containers_per_task = 10
+
+  # The init task is short-lived (a few minutes) and runs four JVM migrators next to psql/aws-cli containers.
+  init_task_cpu    = 1024
+  init_task_memory = 4096
+}
 
 resource "aws_ecs_cluster" "main" {
   name = local.cluster_name
@@ -33,9 +44,9 @@ resource "aws_ecs_task_definition" "main" {
     cpu_architecture        = "ARM64"
   }
 
-  # Task-scoped (ephemeral) volumes shared by the init containers and the long-running ones.
+  # Task-scoped (ephemeral) volumes shared by the containers of this task.
   dynamic "volume" {
-    for_each = local.volume_names
+    for_each = local.volume_names_stack
     content {
       name = volume.value
     }
@@ -43,12 +54,55 @@ resource "aws_ecs_task_definition" "main" {
 
   # Secrets appear only as secrets[].valueFrom (an SSM ARN string), never as environment values, so
   # nothing sensitive is in this JSON or in state. tests/task.tftest.hcl and tests/check-task.sh pin it.
-  container_definitions = jsonencode(local.container_definitions)
+  container_definitions = jsonencode(local.container_definitions_main)
 
   lifecycle {
     precondition {
-      condition     = sum([for c in local.container_definitions : c.memory]) <= var.task_memory
+      condition     = sum([for c in local.container_definitions_main : c.memory]) <= var.task_memory
       error_message = "The hard memory limits of all containers must not exceed task_memory."
+    }
+
+    precondition {
+      condition     = length(local.container_definitions_main) <= local.max_containers_per_task
+      error_message = "ECS allows at most 10 containers per task definition; move work to the init task."
+    }
+  }
+}
+
+# Run once per session by demo-up (`aws ecs run-task`, ops/run-init-task.sh) before the service is started. It
+# holds the RDS master password and the schema owner passwords, which the long-running task never sees.
+resource "aws_ecs_task_definition" "init" {
+  family                   = "${local.name_prefix}-init"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = local.init_task_cpu
+  memory                   = local.init_task_memory
+  execution_role_arn       = local.task_execution_role_arn
+  task_role_arn            = local.task_role_arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
+
+  dynamic "volume" {
+    for_each = local.volume_names_init
+    content {
+      name = volume.value
+    }
+  }
+
+  container_definitions = jsonencode(local.container_definitions_init)
+
+  lifecycle {
+    precondition {
+      condition     = sum([for c in local.container_definitions_init : c.memory]) <= local.init_task_memory
+      error_message = "The hard memory limits of all init containers must not exceed the init task memory."
+    }
+
+    precondition {
+      condition     = length(local.container_definitions_init) <= local.max_containers_per_task
+      error_message = "ECS allows at most 10 containers per task definition."
     }
   }
 }
@@ -57,8 +111,11 @@ resource "aws_ecs_service" "main" {
   name            = local.service_name
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.main.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  # Created at 0: demo-up runs the init task first and scales to 1 only when every init container exited 0
+  # (the replacement of the old `<svc>-migrate` dependsOn, which cannot cross task definitions). The Scheduler
+  # backstop also sets 0, so Terraform must not fight the count.
+  desired_count = 0
+  launch_type   = "FARGATE"
 
   # The task is the whole stack: never run two at once (two would double the RDS connections and
   # the paid-call budget), so a deployment replaces it in place.
@@ -81,4 +138,17 @@ resource "aws_ecs_service" "main" {
 
   # demo-up waits for the readiness container itself; a slow first pull must not fail the apply.
   wait_for_steady_state = false
+
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+}
+
+locals {
+  # The JSON of both task definitions decoded again: exactly what ECS receives. Only tests/task.tftest.hcl reads these.
+  decoded_tasks = {
+    main = jsondecode(aws_ecs_task_definition.main.container_definitions)
+    init = jsondecode(aws_ecs_task_definition.init.container_definitions)
+  }
+  all_decoded_containers = concat(local.decoded_tasks.init, local.decoded_tasks.main)
 }

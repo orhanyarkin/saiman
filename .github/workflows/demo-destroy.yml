@@ -94,6 +94,12 @@ jobs:
           STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
         run: deploy/terraform/aws/ops/tf-init-demo-lite.sh "$STATE_BUCKET"
 
+      # demo-up starts the init task with `ecs run-task`, so Terraform does not know it. ECS refuses to delete a cluster
+      # with active tasks: stop a leftover init task (a cancelled demo-up, a one-shot that failed) before destroying.
+      - name: Stop a leftover init task
+        if: steps.gate.outputs.proceed == 'true'
+        run: deploy/terraform/aws/ops/stop-init-tasks.sh --region "$AWS_REGION"
+
       - name: terraform destroy
         if: steps.gate.outputs.proceed == 'true'
         run: terraform -chdir=deploy/terraform/aws/demo-lite destroy -input=false -auto-approve
