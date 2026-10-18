@@ -193,6 +193,50 @@ run "apply_role_runs_only_saiman_demo_tasks" {
   }
 }
 
+run "session_durations" {
+  # Only the apply role may hold a two-hour session (demo-up: apply + init task + readiness wait); the plan role runs on pull
+  # requests and the destroy role is used by the reaper, so both stay at one hour.
+  assert {
+    condition     = aws_iam_role.apply.max_session_duration == 7200 && aws_iam_role.plan.max_session_duration == 3600 && aws_iam_role.destroy.max_session_duration == 3600
+    error_message = "apply 7200 s, plan and destroy 3600 s"
+  }
+}
+
+run "init_task_flow_permissions" {
+  # demo-up waits for the init task (ecs:DescribeTasks), demo-destroy lists and stops a leftover one (ecs:ListTasks,
+  # ecs:StopTask). They come from the shared read statement and the delete/resource statements; pin them so that narrowing
+  # either statement cannot silently break the flow.
+  assert {
+    condition = alltrue([
+      for pol in [aws_iam_role_policy.apply.policy, aws_iam_role_policy.destroy.policy] :
+      anytrue([
+        for s in jsondecode(pol).Statement :
+        try(s.Sid == "ReadDemoLiteServices" && s.Effect == "Allow" && s.Resource == "*" && contains(s.Action, "ecs:Describe*") && contains(s.Action, "ecs:List*"), false)
+      ])
+    ])
+    error_message = "apply and destroy need ecs:Describe* (DescribeTasks) and ecs:List* (ListTasks) on *"
+  }
+
+  assert {
+    condition = alltrue([
+      for pol in [aws_iam_role_policy.apply.policy, aws_iam_role_policy.destroy.policy] :
+      anytrue([
+        for s in jsondecode(pol).Statement :
+        try(s.Effect == "Allow" && contains(s.Action, "ecs:StopTask") && contains(s.Resource, "arn:aws:ecs:eu-central-1:123456789012:task/saiman-demo*/*"), false)
+      ])
+    ])
+    error_message = "apply and destroy need ecs:StopTask on saiman-demo* tasks"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+      try(s.Effect == "Allow" && contains(s.Action, "ecs:UpdateService") && contains(s.Resource, "arn:aws:ecs:eu-central-1:123456789012:service/saiman-demo*/*"), false)
+    ])
+    error_message = "apply needs ecs:UpdateService on the saiman-demo* service (demo-up scales it to 1)"
+  }
+}
+
 run "inline_policies_fit_the_iam_limit" {
   # IAM caps the inline policies of a role at 10,240 characters in total; a bootstrap re-apply that exceeds it fails late.
   assert {

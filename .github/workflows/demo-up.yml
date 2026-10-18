@@ -179,7 +179,7 @@ jobs:
           role-to-assume: ${{ vars.APPLY_ROLE_ARN }}
           aws-region: eu-central-1
           role-session-name: demo-up
-          role-duration-seconds: 3600
+          role-duration-seconds: 7200
 
       - name: Preflight (credentials and settings)
         env:

@@ -412,6 +412,22 @@ expect "stop init tasks: a task that stays active fails after the timeout" 1 "st
 
 expect "stop init tasks: a foreign cluster name is a usage error" 2 "usage:" "${ops}/stop-init-tasks.sh" --region eu-central-1 --cluster other
 
+# --- a workflow may not ask for a longer role session than the bootstrap role allows (AssumeRole would be refused) ---------------
+iam_tf="${here}/../bootstrap/iam.tf"
+workflows="${here}/../../../../.github/workflows"
+role_max() { # role_max <terraform role resource name>
+  awk -v r="resource \"aws_iam_role\" \"$1\"" 'index($0, r) {f=1} f && /max_session_duration/ {print $3; exit}' "${iam_tf}"
+}
+check_duration() { # check_duration <workflow> <role resource>
+  local want have
+  want="$(grep -hoE 'role-duration-seconds: [0-9]+' "${workflows}/$1" | head -1 | awk '{print $2}')"
+  have="$(role_max "$2")"
+  if [[ "${want}" =~ ^[0-9]+$ && "${have}" =~ ^[0-9]+$ && "${want}" -le "${have}" ]]; then ok "$1 asks for ${want}s, the $2 role allows ${have}s"; else bad "$1 role-duration-seconds (${want:-none}) exceeds or cannot be compared with the $2 role maximum (${have:-none})"; fi
+}
+check_duration demo-up.yml apply
+check_duration demo-destroy.yml destroy
+check_duration demo-reaper.yml destroy
+
 if [[ "${fails}" -gt 0 ]]; then
   echo "test-ops-scripts: ${fails} failure(s)" >&2
   exit 1

@@ -148,10 +148,12 @@ resource "aws_iam_role_policy" "plan" {
 # --- apply ---------------------------------------------------------------------------------------
 
 resource "aws_iam_role" "apply" {
-  name                 = "saiman-gha-apply"
-  path                 = local.role_path
-  description          = "demo-up: creates and updates saiman-demo* resources"
-  max_session_duration = 3600
+  name        = "saiman-gha-apply"
+  path        = local.role_path
+  description = "demo-up: creates and updates saiman-demo* resources"
+  # demo-up holds one session for plan + apply (RDS takes minutes), the init task (up to 15 min) and the readiness wait
+  # (up to 20 min): that fits 3600 s with little slack. The plan and destroy roles stay at 3600 s.
+  max_session_duration = 7200
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
