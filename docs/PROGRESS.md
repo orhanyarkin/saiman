@@ -7,6 +7,18 @@ M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-10-18 — Fix: the task role could not list the assets prefix (demo-up #6), and a test for the whole class
+
+**What changed**
+- demo-up #6: the `assets` container died with `AccessDenied ... s3:ListBucket`. `aws s3 sync s3://<bucket>/demo/assets/<session>/` is a ListObjectsV2 call with that prefix (observed with `--debug`), and the task role only had `s3:GetObject`. The task role now has `ListDemoAssets`: `s3:ListBucket` on the bucket ARN, condition `StringLike s3:prefix = demo/assets/*`. `aws s3 cp` of the corpus dump is HeadObject + GetObject (no listing), so `artifacts/corpus/` is not listable. The state keys (`bootstrap/`, `demo-lite/`) match no prefix and a list without a prefix matches nothing. The boundary ceiling `CeilingList` (whole bucket, no condition) got the same condition. `saiman-demo-boundary` did allow the action before; the role was the gap.
+- Same class, found by scanning every AWS CLI command the init and stack containers run (`aws s3 sync`, `aws s3 cp`; `corpus-restore`, `db-init`, `readiness` call no `aws`): `tests/required-actions.json` has a `workload` section, `tests/check-workload-actions.sh` fails on any `aws <service> <command>` in `containers.tf` or the bundled scripts without an entry (and on stale entries, on ECS Exec / `secrets[].valueFrom` / awslogs without theirs), and `bootstrap.tftest.hcl` requires every listed action from the role AND the boundary plus the shape of every `s3:ListBucket` grant. Eight new IAM mutations (listing removed, prefix condition dropped, prefix widened to `*` or to `demo-lite/*`, grant on objects instead of the bucket, boundary unconditioned or without the action, execution role without `ssm:GetParameters`), all caught; scanner negative cases in `ops/test-ops-scripts.sh`.
+- `ops/simulate-workload-policies.py` (on demand, read-only): IAM's own simulator on the planned policies and on the live roles. Live today: `ListBucket` under `demo/assets/` is `implicitDeny` (reproduces #6); planned: allowed, while `bootstrap/`, `demo-lite/`, `artifacts/corpus/`, no prefix, `PutObject`, state `GetObject` and `ssm:GetParameters` for the task role are all denied. The simulator cannot evaluate the execution role's log group (a name starting with `/` is always `implicitDeny`, even for a policy whose Resource equals the request), so logs are covered by the offline tests only.
+- `check-demo-down.sh` shows `INACTIVE` and `DELETE_IN_PROGRESS` task definitions on separate rows (listing and tagged-ARN path), with two counts in the summary line.
+
+**How verified**: `terraform test` bootstrap (22) and demo-lite (36), `make tf-check`, `make tf-mutation-check`, pinned shellcheck, the simulator; read-only bootstrap `terraform plan` shows 2 updates (`aws_iam_role_policy.demo_task` + `ListDemoAssets`, `aws_iam_policy.demo_boundary` + a condition on `CeilingList`). Nothing applied.
+
+**Next**: the human re-applies `bootstrap` before the next `demo-up`.
+
 ### 2026-10-18 — Fix: demo-lite locals no longer read the provider's container_definitions; cleanup finds INACTIVE task definitions
 
 **What changed**

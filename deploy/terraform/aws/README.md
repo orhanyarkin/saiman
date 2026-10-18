@@ -75,7 +75,11 @@ and all three carry explicit Denies for secret values (`ssm:GetParameter*` on `/
 The workload roles (`saiman-demo-task-execution`, `saiman-demo-task`, `saiman-demo-scheduler`, path
 `/saiman/demo/`) are fixed in `bootstrap/demo_roles.tf`: service-principal trust plus `aws:SourceAccount`,
 the `saiman-demo-boundary`, inline policies. Only the execution role may read `/saiman/demo/*` (ECS
-`secrets[].valueFrom`); the task role has no SSM permissions and is read-only on `artifacts/`.
+`secrets[].valueFrom`); the task role has no SSM permissions and is read-only on `artifacts/corpus/*` and `demo/assets/*`. It
+may also list the state bucket, but only with an `s3:prefix` of `demo/assets/*` (`aws s3 sync` of the per-session assets is a
+ListObjectsV2 call; `aws s3 cp` of the corpus dump is HeadObject + GetObject and needs no listing). The Terraform state
+(`bootstrap/`, `demo-lite/`) and `artifacts/` match no prefix, and a list without a prefix matches nothing. The boundary's
+`CeilingList` carries the same condition.
 
 Known limits:
 - The boundary bounds what the demo roles can do, not who can use them: a malicious approved apply can
@@ -101,9 +105,24 @@ terraform validate
 terraform test                       # mock_provider assertions on trust, denies, fixed roles, boundary, bucket, IAM action coverage
 tests/check-prevent-destroy.sh       # lifecycle is invisible to terraform test
 tests/check-iam-coverage.sh          # every demo-lite resource type is listed in tests/required-actions.json
+tests/check-workload-actions.sh      # every AWS CLI command a container runs is listed in tests/required-actions.json
 ```
 The same four commands plus `tests/check-foundation.sh` run in `demo-lite/`.
 `.github/workflows/terraform.yml` runs the same on pull requests and on `main`.
+
+### Workload actions (what the containers call)
+
+The CI roles are not the only ones that can miss an action: demo-up #6 failed because `aws s3 sync` in the `assets` container
+lists the bucket and the task role could only read objects. `tests/required-actions.json` has a `workload` section for the
+roles the containers run as (the AWS CLI commands and what the ECS agent does for ECS Exec, `secrets[].valueFrom` and the
+`awslogs` driver). `tests/check-workload-actions.sh` finds every `aws <service> <command>` in `demo-lite/containers.tf` and in
+the scripts the assets bundle ships (`build-assets.sh` `install` lines) and fails on one without an entry (or an entry nobody
+runs any more); `bootstrap.tftest.hcl` then requires each action from the task or execution role **and** from the boundary,
+and checks the shape of the `s3:ListBucket` grants (bucket ARN, `s3:prefix` condition, nothing but `demo/assets/`).
+`ops/simulate-workload-policies.py` asks IAM itself (`iam:SimulateCustomPolicy` on the planned policies from
+`terraform show -json`, `iam:SimulatePrincipalPolicy` on the live roles, read-only) about the requests the containers make and
+the ones that must stay impossible; the simulator cannot evaluate the execution role's log group (`/saiman-demo-lite` starts
+with a slash), so that one is covered by the offline tests only.
 
 ### IAM action coverage
 
@@ -258,7 +277,8 @@ service's own describe call before it counts:
 | --- | --- | --- |
 | `LEFTOVER` | the direct call says it exists (or the type has no direct check, or the call was denied: fail closed) | yes |
 | `STALE       (tagging index)` | the direct call says it is gone; only the index is behind | no, not even with `--strict` |
-| `INACTIVE    ecs task definition` | a deregistered revision, INACTIVE or already DELETE_IN_PROGRESS (also listed with `ecs list-task-definitions --status INACTIVE`, filtered by name: `--family-prefix` is an exact family); history that costs nothing, `ops/demo-cleanup.sh` deletes it | no |
+| `INACTIVE    ecs task definition` | a deregistered revision (also listed with `ecs list-task-definitions --status INACTIVE`, filtered by name: `--family-prefix` is an exact family); history that costs nothing, `ops/demo-cleanup.sh` asks ECS to delete it | no |
+| `DELETE_IN_PROGRESS ecs task definition` | the step after INACTIVE: ECS is deleting the revision | no |
 | `ERROR` | a direct call failed for another reason (exit 2): never read as STALE | exit 2 |
 
 The sweep covers EC2 (VPC, subnet, internet gateway, route table, security group and rule, network interface,
