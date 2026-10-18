@@ -342,6 +342,76 @@ else
   ok "demo-up.yml does not use the dummy env"
 fi
 
+# --- run-init-task: the run-to-completion task that replaces the dependsOn gate (ECS: <= 10 containers per task) -------------
+init_names=(assets db-init orchestrator-migrate seller-api-migrate ledger-migrate ingest-migrate corpus-restore "done")
+# task_json <lastStatus> <exit code of every container, or "none"> [<name> <exit code> <status>]  -> describe-tasks response
+task_json() {
+  local status="$1" code="$2" over_name="${3:-}" over_code="${4:-}" over_status="${5:-}"
+  jq -n --arg status "${status}" --arg code "${code}" --arg on "${over_name}" --arg oc "${over_code}" --arg os "${over_status}" \
+    --args '{tasks: [{lastStatus: $status, stoppedReason: "Essential container in task exited", containers: [$ARGS.positional[] |
+      . as $n | {name: $n, lastStatus: (if $status == "STOPPED" then "STOPPED" else "RUNNING" end)}
+      | (if $code != "none" then .exitCode = ($code | tonumber) else . end)
+      | (if $n == $on then (if $oc == "" or $oc == "none" then del(.exitCode) else .exitCode = ($oc | tonumber) end) | .lastStatus = $os else . end)]}]}' \
+    "${init_names[@]}"
+}
+init_args=(--region eu-central-1 --cluster saiman-demo --task-definition arn:aws:ecs:eu-central-1:123456789012:task-definition/saiman-demo-init:3
+  --subnets "subnet-0a1,subnet-0b2" --security-group sg-0abc123 --timeout-seconds 3 --interval-seconds 1)
+run_task_ok='{"tasks":[{"taskArn":"arn:aws:ecs:eu-central-1:123456789012:task/saiman-demo/0123456789abcdef"}],"failures":[]}'
+
+reset
+echo "${run_task_ok}" >"${fx}/ecs_run-task.json"
+task_json RUNNING none >"${fx}/ecs_describe-tasks.once.json"
+task_json STOPPED 0 >"${fx}/ecs_describe-tasks.json"
+expect "init task: every container exited 0 -> success" 0 "all 8 init containers exited 0" "${ops}/run-init-task.sh" "${init_args[@]}"
+if grep -q 'ecs run-task .*--launch-type FARGATE.*assignPublicIp=ENABLED' "${fx}/calls.log" && ! grep -qE -- '--overrides|stop-task' "${fx}/calls.log"; then ok "init task: Fargate with a public IP, no overrides, nothing stopped"; else bad "init task: unexpected run-task arguments or a stop-task call"; fi
+if grep -q 'securityGroups=\[sg-0abc123\]' "${fx}/calls.log" && grep -q 'subnets=\[subnet-0a1,subnet-0b2\]' "${fx}/calls.log" && grep -q -- '--task-definition arn:aws:ecs:eu-central-1:123456789012:task-definition/saiman-demo-init:3' "${fx}/calls.log"; then ok "init task: the exact task definition revision, subnets and security group"; else bad "init task: wrong network or task definition arguments"; fi
+
+reset
+echo "${run_task_ok}" >"${fx}/ecs_run-task.json"
+task_json STOPPED 0 ledger-migrate 1 STOPPED >"${fx}/ecs_describe-tasks.json"
+expect "init task: a failed migrator fails the run and is named" 1 "ledger-migrate (exit 1)" "${ops}/run-init-task.sh" "${init_args[@]}"
+
+reset
+echo "${run_task_ok}" >"${fx}/ecs_run-task.json"
+task_json RUNNING none db-init 3 STOPPED >"${fx}/ecs_describe-tasks.json"
+expect "init task: fail fast on a stopped container while the task still runs" 1 "db-init (exit 3)" "${ops}/run-init-task.sh" "${init_args[@]}"
+if grep -q 'ecs stop-task' "${fx}/calls.log"; then ok "init task: the still-running task is stopped after a failure"; else bad "init task: stop-task not called after a failure"; fi
+
+reset
+echo "${run_task_ok}" >"${fx}/ecs_run-task.json"
+task_json STOPPED 0 "done" none PENDING >"${fx}/ecs_describe-tasks.json"
+expect "init task: a container that never ran (no exit code) fails the run" 1 "did not run to completion" "${ops}/run-init-task.sh" "${init_args[@]}"
+
+reset
+echo '{"tasks":[],"failures":[{"arn":"arn:aws:ecs:eu-central-1:123456789012:container-instance/x","reason":"RESOURCE:CPU","detail":"no capacity"}]}' >"${fx}/ecs_run-task.json"
+expect "init task: run-task failures are reported" 1 "RESOURCE:CPU" "${ops}/run-init-task.sh" "${init_args[@]}"
+
+reset
+echo "${run_task_ok}" >"${fx}/ecs_run-task.json"
+task_json RUNNING none >"${fx}/ecs_describe-tasks.json"
+expect "init task: a task that never finishes is stopped at the timeout" 1 "did not finish within 3s" "${ops}/run-init-task.sh" "${init_args[@]}"
+if grep -q 'ecs stop-task' "${fx}/calls.log"; then ok "init task: timeout stops the task"; else bad "init task: stop-task not called on timeout"; fi
+
+expect "init task: a foreign cluster name is a usage error" 2 "usage:" "${ops}/run-init-task.sh" --region eu-central-1 --cluster other --task-definition arn:aws:ecs:eu-central-1:123456789012:task-definition/saiman-demo-init:3 --subnets subnet-0a1 --security-group sg-0abc123
+expect "init task: a non-demo task definition is a usage error" 2 "usage:" "${ops}/run-init-task.sh" --region eu-central-1 --cluster saiman-demo --task-definition arn:aws:ecs:eu-central-1:123456789012:task-definition/other:3 --subnets subnet-0a1 --security-group sg-0abc123
+expect "init task: a malformed subnet list is a usage error" 2 "usage:" "${ops}/run-init-task.sh" --region eu-central-1 --cluster saiman-demo --task-definition arn:aws:ecs:eu-central-1:123456789012:task-definition/saiman-demo-init:3 --subnets "subnet-0a1;rm" --security-group sg-0abc123
+
+# --- stop-init-tasks: a stuck init task would block deleting the cluster ------------------------------------------------------
+reset
+expect "stop init tasks: nothing active -> nothing stopped" 0 "no init task is active" "${ops}/stop-init-tasks.sh" --region eu-central-1 --timeout-seconds 5
+if ! grep -q 'stop-task' "${fx}/calls.log" && grep -q 'ecs list-tasks --cluster saiman-demo --started-by demo-up' "${fx}/calls.log"; then ok "stop init tasks: only tasks started by demo-up are listed (service tasks are left to Terraform)"; else bad "stop init tasks: unexpected calls"; fi
+
+reset
+echo '{"taskArns":["arn:aws:ecs:eu-central-1:123456789012:task/saiman-demo/aaa"]}' >"${fx}/ecs_list-tasks.once.json"
+expect "stop init tasks: an active init task is stopped and then gone" 0 "1 init task(s) stopped" "${ops}/stop-init-tasks.sh" --region eu-central-1 --timeout-seconds 30
+if grep -q 'ecs stop-task --cluster saiman-demo --task arn:aws:ecs:eu-central-1:123456789012:task/saiman-demo/aaa' "${fx}/calls.log"; then ok "stop init tasks: stop-task called for exactly that task"; else bad "stop init tasks: stop-task call missing"; fi
+
+reset
+echo '{"taskArns":["arn:aws:ecs:eu-central-1:123456789012:task/saiman-demo/bbb"]}' >"${fx}/ecs_list-tasks.json"
+expect "stop init tasks: a task that stays active fails after the timeout" 1 "still active after 2s" "${ops}/stop-init-tasks.sh" --region eu-central-1 --timeout-seconds 2
+
+expect "stop init tasks: a foreign cluster name is a usage error" 2 "usage:" "${ops}/stop-init-tasks.sh" --region eu-central-1 --cluster other
+
 if [[ "${fails}" -gt 0 ]]; then
   echo "test-ops-scripts: ${fails} failure(s)" >&2
   exit 1

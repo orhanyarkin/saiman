@@ -252,7 +252,7 @@ Status of the evidence this README is supposed to carry (PLAN M6 acceptance):
 
 Each item is tied to a limit that is already documented; none of it is built.
 
-- **One task becomes per-service tasks (ADR-0028).** `demo-lite` runs everything on localhost in one Fargate task, so all containers share one task role. The `enterprise` profile (EKS, Helm, Service Connect between separate workloads) restores per-service identity and scaling; it is a stretch goal in [docs/PLAN.md](docs/PLAN.md).
+- **One task becomes per-service tasks (ADR-0028).** `demo-lite` runs every service on localhost in one long-running Fargate task (plus a run-to-completion init task for migrations), so all service containers share one task role. The `enterprise` profile (EKS, Helm, Service Connect between separate workloads) restores per-service identity and scaling; it is a stretch goal in [docs/PLAN.md](docs/PLAN.md).
 - **Managed Kafka (ADR-0020).** One KRaft node is fine for a handful of events per run; MSK is the named option when partitions, replication and retention matter, together with Kafka ACLs, which are not set today ([docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), "Not done in M6").
 - **Real identity instead of static tokens (ADR-0023).** Tokens have no expiry and no per-user identity, and any READER can read any run's stream. JWT/OIDC with per-run ownership is the documented upgrade path.
 - **Redis auth and ACLs.** Redis holds the nonce store and the LLM cost counters and is unauthenticated on the compose network, reachable from every app container; per-service ACL users and network scoping are the listed remediation.

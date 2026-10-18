@@ -79,7 +79,7 @@ jobs:
     needs: web
     if: github.ref == 'refs/heads/main' && github.repository == 'orhanyarkin/saiman'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     environment: demo-apply
     permissions:
       id-token: write
@@ -269,6 +269,28 @@ jobs:
           deploy/terraform/aws/ops/scan-tf-state.sh "$SECRETS_DIR" "${RUNNER_TEMP}/state.json"
           rm -f "$plan" "${RUNNER_TEMP}/plan.json" "${RUNNER_TEMP}/state.json"
 
+      # ECS allows 10 containers per task definition, so roles, migrations and the corpus restore run in a separate
+      # run-to-completion task (ADR-0028). The service was created at zero tasks; it starts only after this step.
+      - name: Run the init task (roles, migrations, corpus restore); every container must exit 0
+        run: |
+          set -euo pipefail
+          out="$(terraform -chdir=deploy/terraform/aws/demo-lite output -json)"
+          deploy/terraform/aws/ops/run-init-task.sh --region "$AWS_REGION" \
+            --cluster "$(jq -r .cluster_name.value <<<"$out")" \
+            --task-definition "$(jq -r .init_task_definition_arn.value <<<"$out")" \
+            --subnets "$(jq -r '.subnet_ids.value | join(",")' <<<"$out")" \
+            --security-group "$(jq -r .task_security_group_id.value <<<"$out")" \
+            --timeout-seconds 900
+
+      - name: Start the stack service (the init task succeeded)
+        run: |
+          set -euo pipefail
+          out="$(terraform -chdir=deploy/terraform/aws/demo-lite output -json)"
+          aws --region "$AWS_REGION" ecs update-service \
+            --cluster "$(jq -r .cluster_name.value <<<"$out")" \
+            --service "$(jq -r .service_name.value <<<"$out")" \
+            --desired-count 1 --query 'service.desiredCount' --output text
+
       - name: Wait for the readiness container (all services UP)
         run: deploy/terraform/aws/ops/wait-demo-ready.sh --region "$AWS_REGION" --timeout-seconds 1200
 
@@ -293,7 +315,8 @@ jobs:
             echo "### demo-up failed"
             echo ""
             echo "Resources may exist. Nothing is destroyed automatically by this workflow. Options:"
-            echo "- inspect logs in CloudWatch group \`/saiman-demo-lite\` (stream prefix = container name);"
+            echo "- inspect logs in CloudWatch group \`/saiman-demo-lite\` (stream prefix = container name; the init task's containers are assets, db-init, *-migrate and corpus-restore);"
+            echo "- if the init task failed, the service was never started (desired count 0): no application container ran;"
             echo "- fix and re-run **demo-up**, or run **demo-down** now;"
             echo "- otherwise the reaper destroys the demo after expiry (\`${EXPIRES_AT:-unknown}\`) and the Scheduler stops compute 30 min later."
             echo "- verify with \`make demo-down-check\` (admin SSO profile) after teardown."

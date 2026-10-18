@@ -133,13 +133,71 @@ run "apply_role_cannot_mint_or_retrust_roles" {
     error_message = "the only IAM writes left are PassRole and service-linked roles"
   }
 
+  # Each fixed role may be passed to exactly one service: task + execution roles to ECS tasks, the scheduler role to
+  # EventBridge Scheduler. No wildcard resource, no role passable to both.
+  assert {
+    condition = (
+      length([for s in jsondecode(aws_iam_role_policy.apply.policy).Statement : s if s.Effect == "Allow" && try(s.Action == ["iam:PassRole"], false)]) == 2
+      && anytrue([
+        for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+        try(s.Effect == "Allow" && s.Action == ["iam:PassRole"]
+          && s.Resource == ["arn:aws:iam::123456789012:role/saiman/demo/saiman-demo-task", "arn:aws:iam::123456789012:role/saiman/demo/saiman-demo-task-execution"]
+        && s.Condition.StringEquals["iam:PassedToService"] == "ecs-tasks.amazonaws.com", false)
+      ])
+      && anytrue([
+        for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+        try(s.Effect == "Allow" && s.Action == ["iam:PassRole"]
+          && s.Resource == "arn:aws:iam::123456789012:role/saiman/demo/saiman-demo-scheduler"
+        && s.Condition.StringEquals["iam:PassedToService"] == "scheduler.amazonaws.com", false)
+      ])
+    )
+    error_message = "PassRole: task and execution roles only to ecs-tasks, the scheduler role only to scheduler, nothing wildcard"
+  }
+}
+
+run "apply_role_runs_only_saiman_demo_tasks" {
+  # demo-up starts the init task with ecs:RunTask. Only the apply role may, only for saiman-demo* task definitions in
+  # the saiman-demo* cluster, never with a wildcard resource, and ecs:StartTask / ecs:* stay out of every CI role.
+  assert {
+    condition = length([
+      for s in jsondecode(aws_iam_role_policy.apply.policy).Statement : s
+      if s.Effect == "Allow" && contains(try(tolist(s.Action), [s.Action]), "ecs:RunTask")
+    ]) == 1
+    error_message = "exactly one apply statement allows ecs:RunTask"
+  }
+
   assert {
     condition = anytrue([
       for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
-      try(s.Effect == "Allow" && s.Action == ["iam:PassRole"] && s.Resource == "arn:aws:iam::123456789012:role/saiman/demo/*"
-      && s.Condition.StringEquals["iam:PassedToService"] == ["ecs-tasks.amazonaws.com", "scheduler.amazonaws.com"], false)
+      try(s.Effect == "Allow" && s.Action == ["ecs:RunTask"]
+        && s.Resource == "arn:aws:ecs:eu-central-1:123456789012:task-definition/saiman-demo*:*"
+      && s.Condition.ArnLike["ecs:cluster"] == "arn:aws:ecs:eu-central-1:123456789012:cluster/saiman-demo*", false)
     ])
-    error_message = "PassRole only for /saiman/demo/ and ecs-tasks + scheduler"
+    error_message = "ecs:RunTask only for saiman-demo* task definitions, conditioned on the saiman-demo* cluster"
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for pol in [aws_iam_role_policy.plan.policy, aws_iam_role_policy.destroy.policy] :
+      [for s in jsondecode(pol).Statement : !anytrue([for a in try(tolist(s.Action), [s.Action]) : a == "ecs:RunTask" || a == "ecs:StartTask" || a == "ecs:*"]) if s.Effect == "Allow"]
+    ]))
+    error_message = "plan and destroy must not be able to start tasks"
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.apply.policy).Statement :
+      [for a in try(tolist(s.Action), [s.Action]) : a != "ecs:StartTask" && a != "ecs:*"] if s.Effect == "Allow"
+    ]))
+    error_message = "the apply role has neither ecs:StartTask nor ecs:*"
+  }
+}
+
+run "inline_policies_fit_the_iam_limit" {
+  # IAM caps the inline policies of a role at 10,240 characters in total; a bootstrap re-apply that exceeds it fails late.
+  assert {
+    condition     = length(aws_iam_role_policy.apply.policy) < 10240 && length(aws_iam_role_policy.plan.policy) < 10240 && length(aws_iam_role_policy.destroy.policy) < 10240
+    error_message = "a CI role's inline policy exceeds the 10,240 character IAM limit"
   }
 }
 
