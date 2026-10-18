@@ -118,6 +118,9 @@ Notes:
   Terraform; the module only references their ARN pattern.
 - The RDS master password is `var.db_master_password` (ephemeral, sensitive) passed as `password_wo`
   with `password_wo_version = 1`: it never lands in plan or state. Pass it as `TF_VAR_db_master_password`.
+  The provider requires `password_wo` and `password_wo_version` together, so `terraform destroy` and the PR `plan` job
+  (which run on `ops/tf-dummy-env.sh`) pass a constant non-secret placeholder; a null password fails validation with
+  "all of `password_wo,password_wo_version` must be specified". `demo-up` never uses the dummy env and sets the real password.
 - `expires_at` must be UTC (`2026-10-06T18:00:00Z`). The backstop stops compute only; RDS storage and
   the VPC remain until `demo-down` destroys the stack, and AWS restarts a stopped RDS after 7 days.
 - RDS `storage_encrypted` uses the default `aws/rds` key; it is assumed to work with the apply role (no KMS grants) and is the first thing to check on the first `demo-up`.

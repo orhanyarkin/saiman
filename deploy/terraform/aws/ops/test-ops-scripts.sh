@@ -314,8 +314,33 @@ expect "env protection: unreadable settings fail with ENV_AUDIT_TOKEN" 1 "cannot
 rm -f "${fx}/gh_api_deny"
 
 # --- tf-dummy-env -------------------------------------------------------------------------------------------------------------
-expect "dummy env: valid placeholders, no password" 0 "TF_VAR_image_tag=sha-000000000000" "${ops}/tf-dummy-env.sh" saiman-1-tfstate
-if "${ops}/tf-dummy-env.sh" saiman-1-tfstate | grep -qi 'db_master_password'; then bad "dummy env sets the master password"; else ok "dummy env never sets the master password"; fi
+expect "dummy env: valid placeholders" 0 "TF_VAR_image_tag=sha-000000000000" "${ops}/tf-dummy-env.sh" saiman-1-tfstate
+
+# The RDS master password is write-only and must be given together with password_wo_version. Destroy and plan run on the
+# dummy env, so it carries a constant NON-SECRET placeholder that satisfies the RDS rules (8-128 printable ASCII,
+# none of / ' " @ or a space) and says so.
+dummy_pw="$("${ops}/tf-dummy-env.sh" saiman-1-tfstate | sed -n 's/^TF_VAR_db_master_password=//p')"
+if [[ "${dummy_pw}" =~ ^[A-Za-z0-9._-]{8,128}$ && "${dummy_pw}" == *placeholder* ]]; then
+  ok "dummy env: the master password is a recognisable placeholder that meets the RDS rules"
+else
+  bad "dummy env: db_master_password missing, not marked as a placeholder, or not a valid RDS password"
+fi
+
+# Every demo-lite variable that feeds a write-only (_wo) argument needs a placeholder, or destroy and plan fail provider
+# validation with "all of `x_wo,x_wo_version` must be specified". The mock-provider terraform tests cannot catch this.
+dummy_env="$("${ops}/tf-dummy-env.sh" saiman-1-tfstate)"
+wo_vars="$(grep -hoE '[a-z_]+_wo[[:space:]]*=[[:space:]]*var\.[a-z_]+' "${here}"/../demo-lite/*.tf | sed -E 's/.*var\.//' | sort -u)"
+[[ -n "${wo_vars}" ]] || bad "no write-only argument found in demo-lite (the placeholder check below would be vacuous)"
+for v in ${wo_vars}; do
+  if grep -q "^TF_VAR_${v}=" <<<"${dummy_env}"; then ok "dummy env: a placeholder for write-only variable ${v}"; else bad "dummy env has no placeholder for write-only variable ${v}"; fi
+done
+
+# demo-up sets the real password itself. Using the dummy env there would create the RDS instance with a public password.
+if grep -q 'tf-dummy-env' "${here}/../../../../.github/workflows/demo-up.yml"; then
+  bad "demo-up.yml uses tf-dummy-env.sh (it would give the RDS instance the public placeholder password)"
+else
+  ok "demo-up.yml does not use the dummy env"
+fi
 
 if [[ "${fails}" -gt 0 ]]; then
   echo "test-ops-scripts: ${fails} failure(s)" >&2
