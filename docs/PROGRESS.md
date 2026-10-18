@@ -7,6 +7,18 @@ M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4 
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-10-18 — Fix: demo-lite locals no longer read the provider's container_definitions; cleanup finds INACTIVE task definitions
+
+**What changed**
+- demo-up #5 created everything and then failed at `c.dependsOn` (`ecs.tf` `dep_graph`): the local decoded `aws_ecs_task_definition.*.container_definitions`, which after apply is what ECS returned (it omits empty lists such as `dependsOn`; a mock provider echoes the input). The JSON is now built once (`local.container_json`), registered from there, and all checks decode that string. `dep_graph` and the test rules guard the optional keys (`dependsOn`, `environment`, `secrets`, `mountPoints`) with `try`.
+- New class guard: the tests run every rule over `main_as_returned` / `init_as_returned` (all null and empty values dropped, a superset of ECS's omissions); `tests/check-task.sh` fails on any read of `aws_ecs_task_definition.*.container_definitions` in `*.tf` or the tests. Reproduced first: with the as-returned copies and no guards the tests die with the exact `This object does not have an attribute named "dependsOn"`.
+- Scan of all of demo-lite for values only evaluated after apply: this was the only local, output, check or precondition built on a provider-rewritten attribute. Everything else that touches a resource attribute is a pass-through id, ARN, address or name (`aws_db_instance.main.address` in `jdbc_url`/`PGHOST`, subnet and security group ids, log group name, `cidrsubnet(aws_vpc.main.cidr_block, ...)`); the four preconditions already read `local.container_definitions_*` (configuration). The only tests that look at such values compare references or check structure (`startswith(..., "jdbc:postgresql://")`), not mock noise.
+- Real bug found while answering "why are `saiman-demo-init:1`, `:2` and `saiman-demo-lite:1` still INACTIVE": `ecs list-task-definitions --family-prefix` is an EXACT family name (checked against the real API: `saiman-demo` lists 0, `saiman-demo-lite` 1), so `ops/demo-cleanup.sh` never saw any revision and deleted nothing (deletion itself is asynchronous: INACTIVE, DELETE_IN_PROGRESS, gone). Fixed in `demo-cleanup.sh` and in the INACTIVE listing of `check-demo-down.sh` (added in #45, same mistake): both list by status and filter on the `saiman-demo` name prefix. `delete-task-definitions` answers 200 with per-ARN `failures`, which are now counted and named. `check-demo-down.sh` also shows DELETE_IN_PROGRESS revisions as INACTIVE rows. Both fakes in the self-tests now model the exact-family semantics.
+
+**How verified**: `terraform test` in demo-lite (36 tests), `tests/check-task.sh` with three negative cases in `ops/test-ops-scripts.sh`, five new mutations in `make tf-mutation-check` (all caught), the new cleanup and teardown-check cases fail against the old scripts, pinned shellcheck, `make tf-check`. No AWS resource was changed; the real API was only described and listed.
+
+**Next**: the three INACTIVE revisions are deleted by the next `demo-down` or by hand (`aws ecs delete-task-definitions --task-definitions saiman-demo-init:1 saiman-demo-init:2 saiman-demo-lite:1`); the next `demo-up` is the real test of the dependsOn fix.
+
 ### 2026-10-18 — Fix: the teardown check no longer calls Tagging API lag a leftover
 
 **What changed**
