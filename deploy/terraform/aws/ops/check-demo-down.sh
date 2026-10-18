@@ -14,6 +14,7 @@
 #   STALE (tagging index)  the Tagging API still lists the ARN (it lags behind deletes by minutes to an hour) but
 #                          the owning service's own describe call says it is gone.
 #   INACTIVE               a deregistered ECS task definition: history that costs nothing (demo-cleanup.sh deletes it).
+#   DELETE_IN_PROGRESS     a task definition ECS is deleting (the step after INACTIVE).
 #
 # Exit codes: 0 clean, 1 leftovers (or UNVERIFIED in --strict mode), 2 usage, credentials or AWS error.
 set -euo pipefail
@@ -107,6 +108,7 @@ errors=()
 clean=()
 stale=()    # tagged ARNs the owning service says are gone (Tagging API lag): reported, never a failure
 inactive=() # deregistered ECS task definitions: history, reported, never a failure
+deleting=() # task definitions ECS is deleting (DELETE_IN_PROGRESS): reported, never a failure
 notes=()    # informational checks that could not run: reported, never a failure
 
 # fetch <label> <aws args...>: JSON result in ${out}. Returns 1 (after recording why) when the call failed.
@@ -186,7 +188,7 @@ direct() {
   fi
 }
 
-# confirm_tagged <arn>: sets verdict to exists, gone, inactive, denied, failed or unknown (no direct check known).
+# confirm_tagged <arn>: sets verdict to exists, gone, inactive, deleting, denied, failed or unknown (no direct check known).
 confirm_tagged() {
   local arn="$1" svc="" rest="" name=""
   IFS=: read -r _ _ svc _ _ rest <<<"${arn}"
@@ -204,8 +206,12 @@ confirm_tagged() {
     ecs:task-definition/*)
       # A deregistered revision is still described (status INACTIVE, later DELETE_IN_PROGRESS); a deleted one is not.
       direct '.taskDefinition // empty' ecs describe-task-definition --task-definition "${arn}"
-      if [[ "${verdict}" == exists && "$(jq -r '.taskDefinition.status // empty' "${out}")" != "ACTIVE" ]]; then
-        verdict=inactive
+      if [[ "${verdict}" == exists ]]; then
+        case "$(jq -r '.taskDefinition.status // empty' "${out}")" in
+          ACTIVE) ;;
+          DELETE_IN_PROGRESS) verdict=deleting ;;
+          *) verdict=inactive ;;
+        esac
       fi
       ;;
     ecs:cluster/*) direct '.clusters[]? | select(.status != "INACTIVE")' ecs describe-clusters --clusters "${arn}" ;;
@@ -240,11 +246,12 @@ if fetch "${tag_label}" resourcegroupstaggingapi get-resources --tag-filters "Ke
         exists) leftovers+=("${tag_label}: ${arn}") ;;
         gone) stale+=("${arn}") ;;
         inactive) inactive+=("${arn}") ;;
+        deleting) deleting+=("${arn}") ;;
         denied) leftovers+=("${tag_label}: ${arn} (tagging index only: this role may not describe it)") ;;
         unknown) leftovers+=("${tag_label}: ${arn} (unverified: no direct check for this resource type)") ;;
         *) errors+=("${tag_label}: could not confirm ${arn}") ;;
       esac
-      [[ "${verdict}" == gone || "${verdict}" == inactive ]] || tag_problem=1
+      [[ "${verdict}" == gone || "${verdict}" == inactive || "${verdict}" == deleting ]] || tag_problem=1
     done <"${work}/tagged.txt"
     [[ "${tag_problem}" -eq 0 ]] && clean+=("${tag_label}")
   else
@@ -279,7 +286,8 @@ for status in INACTIVE DELETE_IN_PROGRESS; do
   if aws --region "${region}" --output json ecs list-task-definitions --status "${status}" >"${out}" 2>"${err}" </dev/null; then
     if jq -r '.taskDefinitionArns[]? | select((split("/") | last) | startswith("'"${NAME_PREFIX}"'"))' "${out}" >"${work}/inactive.txt" 2>/dev/null; then
       while IFS= read -r arn; do
-        [[ -n "${arn}" ]] && inactive+=("${arn}")
+        [[ -n "${arn}" ]] || continue
+        if [[ "${status}" == DELETE_IN_PROGRESS ]]; then deleting+=("${arn}"); else inactive+=("${arn}"); fi
       done <"${work}/inactive.txt"
     else
       notes+=("${status} task definitions: unparseable response")
@@ -385,16 +393,22 @@ inactive_count=0
 while IFS= read -r item; do
   [[ -n "${item}" ]] || continue
   inactive_count=$((inactive_count + 1))
-  echo "INACTIVE    ecs task definition: ${item} (history or being deleted, not a leftover; demo-cleanup.sh deletes it)"
+  echo "INACTIVE    ecs task definition: ${item} (deregistered, not a leftover; demo-cleanup.sh asks ECS to delete it)"
 done < <(printf '%s\n' "${inactive[@]}" | sort -u)
+deleting_count=0
+while IFS= read -r item; do
+  [[ -n "${item}" ]] || continue
+  deleting_count=$((deleting_count + 1))
+  echo "DELETE_IN_PROGRESS ecs task definition: ${item} (ECS is deleting it, not a leftover)"
+done < <(printf '%s\n' "${deleting[@]}" | sort -u)
 for item in "${notes[@]}"; do
   echo "NOTE        ${item}"
 done
 for item in "${leftovers[@]}"; do
   echo "LEFTOVER    ${item}"
 done
-if [[ ${#stale[@]} -gt 0 || "${inactive_count}" -gt 0 ]]; then
-  echo "check-demo-down: ${#stale[@]} stale tagging-index entr(ies) and ${inactive_count} INACTIVE task definition(s) are not counted as leftovers"
+if [[ ${#stale[@]} -gt 0 || "${inactive_count}" -gt 0 || "${deleting_count}" -gt 0 ]]; then
+  echo "check-demo-down: ${#stale[@]} stale tagging-index entr(ies), ${inactive_count} INACTIVE and ${deleting_count} DELETE_IN_PROGRESS task definition(s) are not counted as leftovers"
 fi
 
 if [[ ${#errors[@]} -gt 0 ]]; then

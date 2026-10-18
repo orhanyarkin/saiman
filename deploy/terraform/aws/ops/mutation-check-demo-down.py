@@ -25,6 +25,8 @@ muts = [
  ("inactive-listing-uses-family-prefix", 'ecs list-task-definitions --status "${status}"', 'ecs list-task-definitions --family-prefix "${NAME_PREFIX}" --status "${status}"'),
  ("inactive-listing-keeps-foreign-families", '.taskDefinitionArns[]? | select((split("/") | last) | startswith("\'"${NAME_PREFIX}"\'"))', '.taskDefinitionArns[]?'),
  ("delete-in-progress-not-listed", 'for status in INACTIVE DELETE_IN_PROGRESS; do', 'for status in INACTIVE; do'),
+ ("delete-in-progress-shown-as-inactive", 'if [[ "${status}" == DELETE_IN_PROGRESS ]]; then deleting+=("${arn}"); else inactive+=("${arn}"); fi', 'inactive+=("${arn}")'),
+ ("tagged-delete-in-progress-shown-as-inactive", 'DELETE_IN_PROGRESS) verdict=deleting ;;', 'DELETE_IN_PROGRESS) verdict=inactive ;;'),
 ]
 bad = 0
 for name, old, new in muts:

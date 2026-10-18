@@ -230,7 +230,7 @@ grep -q "LEFTOVER" "${work}/out.txt" && bad "INACTIVE task definition was report
 reset
 tagged "${td_init}" >"${fx}/resourcegroupstaggingapi_get-resources.json"
 echo '{"taskDefinition":{"status":"DELETE_IN_PROGRESS"}}' >"${fx}/ecs_describe-task-definition--task-definition.json"
-run_case "a DELETE_IN_PROGRESS task definition is shown as INACTIVE, not a failure" 0 "INACTIVE    ecs task definition: ${td_init}" "${common[@]}" --strict
+run_case "a tagged DELETE_IN_PROGRESS task definition gets its own row, not a failure" 0 "DELETE_IN_PROGRESS ecs task definition: ${td_init}" "${common[@]}" --strict
 
 reset
 tagged "${td_init}" >"${fx}/resourcegroupstaggingapi_get-resources.json"
@@ -250,7 +250,13 @@ grep -q "other-app" "${work}/out.txt" && bad "a foreign INACTIVE task definition
 grep -q -- "--family-prefix" "${fx}/calls.log" && bad "the listing must not use --family-prefix (exact family name)" || ok "no --family-prefix in the listing"
 reset
 echo '{"taskDefinitionArns":["'"${td_init}"'"]}' >"${fx}/ecs_list-task-definitions--status=DELETE_IN_PROGRESS.json"
-run_case "DELETE_IN_PROGRESS task definitions are shown as INACTIVE rows and do not fail" 0 "INACTIVE    ecs task definition: ${td_init}" "${common[@]}" --strict
+run_case "DELETE_IN_PROGRESS task definitions get their own row and do not fail" 0 "DELETE_IN_PROGRESS ecs task definition: ${td_init}" "${common[@]}" --strict
+grep -q "INACTIVE    ecs task definition" "${work}/out.txt" && bad "a DELETE_IN_PROGRESS revision was also shown as INACTIVE" || ok "DELETE_IN_PROGRESS is not shown as INACTIVE"
+reset
+echo '{"taskDefinitionArns":["'"${td_init}"'"]}' >"${fx}/ecs_list-task-definitions--status=INACTIVE.json"
+echo '{"taskDefinitionArns":["'"${td_stack}"'"]}' >"${fx}/ecs_list-task-definitions--status=DELETE_IN_PROGRESS.json"
+run_case "INACTIVE and DELETE_IN_PROGRESS revisions are listed on separate rows" 0 "1 INACTIVE and 1 DELETE_IN_PROGRESS task definition(s)" "${common[@]}" --strict
+grep -qF "INACTIVE    ecs task definition: ${td_init}" "${work}/out.txt" && grep -qF "DELETE_IN_PROGRESS ecs task definition: ${td_stack}" "${work}/out.txt" && ok "each status keeps its own revision" || bad "statuses were mixed up"
 touch "${fx}/ecs_list-task-definitions--status=INACTIVE.fail"
 run_case "failing to list INACTIVE task definitions is a NOTE, not a failure" 0 "NOTE        INACTIVE task definitions could not be listed" "${common[@]}" --strict
 
