@@ -16,6 +16,7 @@ The demo runs on AWS for a few hours, is captured as JSON for the static replay,
 - **Teardown check**: `check-demo-down.sh` fails if anything but the bootstrap stack remains.
 
 ## Consequences
+- The apply role's sessions may last two hours (`max_session_duration` 7200 s, `demo-up` asks for it) because one `demo-up` holds a session through apply, the init task and the readiness wait; the plan and destroy roles stay at one hour, so a leaked apply credential is valid for up to two hours instead of one, behind the same `demo-apply` environment gate and the 75-minute job timeout.
 - The master and owner passwords now exist only in the init task definition; the long-running task never sees them (a security gain over the single task). The apply role gains `ecs:RunTask`, limited to `saiman-demo*` task definitions and the `saiman-demo*` cluster (condition `ecs:cluster`), and each fixed role may be passed to one service only (task and execution roles to `ecs-tasks`, the scheduler role to `scheduler`). `demo-destroy` stops a leftover init task before deleting the cluster, because Terraform does not know it.
 - The long-running task still shares loopback: Redis is password-protected (`redis_password`), but ingest `/internal/**` stays unauthenticated by design until `libs/api-security` covers ingest (documented follow-up), so any container of the task can reach it. Runtime assets and the corpus dump are verified against digests passed to Terraform (`assets_manifest_sha256`, `corpus_sha256`).
 + About $0.55-0.80 per 4-hour session; about $0.003/month idle.
