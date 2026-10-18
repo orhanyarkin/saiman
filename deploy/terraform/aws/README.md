@@ -143,15 +143,20 @@ tests/check-foundation.sh      # default tags, single ingress rule, write-only p
 service `saiman-demo-lite`. ECS allows at most **10 containers per task definition**, so the work is split:
 
 - `saiman-demo-lite` (the stack, 2 vCPU / 8 GB): the long-running service, ten containers.
-- `saiman-demo-init` (1 vCPU / 4 GB): run once per session, eight containers. It is the only task that holds the master and owner
-  passwords. Its essential `done` container starts only when every other container exited 0.
+- `saiman-demo-init` (2 vCPU / 4 GB): run once per session, seven containers. It is the only task that holds the master and owner
+  passwords. `corpus-restore` is its only essential container and starts last, when every other container exited 0; nothing waits
+  for it, so the 120 s Fargate limit on a dependency wait (`startTimeout`) does not cap the restore.
 
 The service is created at **zero tasks** (`desired_count = 0`, ignored afterwards, public IP, `enable_execute_command`,
 `force_delete`, no steady-state wait). `demo-up` runs the init task (`ops/run-init-task.sh`: `ecs run-task`, fail fast on a failed
 container, stop a stuck task, every container must exit 0) and only then sets the desired count to 1, because `dependsOn`
 cannot cross task definitions. `demo-destroy` stops a leftover init task (`ops/stop-init-tasks.sh`) before it deletes the cluster.
-`terraform test` asserts both container sets and that each stays at 10 containers or fewer (the mock provider does not apply
-that ECS rule), has an essential container and has no `dependsOn` target outside its own task definition.
+`terraform test` asserts both container sets and applies the `RegisterTaskDefinition` rules a mock provider does not enforce, to
+both definitions: at most 10 containers, an essential container, health check interval 5-300, timeout 2-60, retries 1-10 and
+startPeriod 0-300, start/stop timeouts 2-120, `dependsOn` targets and conditions (HEALTHY only on a container with a health
+check, no cycles), mount points naming a declared volume, unique names, valid Fargate cpu/memory and the 64 KiB size quota. Each
+rule is mutation-checked (`make tf-mutation-check`: it breaks the module once per rule in a temporary copy and requires the
+rule's own message). demo-up #3 failed at `RegisterTaskDefinition` on `retries = 20` before these existed.
 `containers.tf` mirrors `deploy/compose/docker-compose.yml`, all stack containers on localhost:
 
 | Container | Task / kind | Notes |
@@ -159,8 +164,7 @@ that ECS rule), has an essential container and has no `dependsOn` target outside
 | `assets` | init and stack, one-shot | `aws s3 sync` of `s3://<state bucket>/demo/assets/<session_id>/` into the `assets` volume (layout of `aws/assets/build-assets.sh`), copies `web/dist` and `nginx/default.conf` into `web-html` / `web-conf`, fetches the corpus dump + `.meta.json` (`corpus_object_key`) into `corpus` |
 | `db-init` | init, one-shot | creates the `vector` extension, then `postgres/bootstrap-roles.sh` (`BOOTSTRAP_SECRET_SOURCE=env`, `BOOTSTRAP_RDS=1`); master password and `PW_*` via `secrets` only |
 | `<svc>-migrate` x4 | init, one-shot | `SAIMAN_RUN_MODE=migrate`, owner user, `SPRING_FLYWAY_PASSWORD` via `secrets` only |
-| `corpus-restore` | init, one-shot | `postgres/corpus-restore.sh /corpus` as `ingest_owner` (after `ingest-migrate`) |
-| `done` | init, essential | busybox `true`; waits for every other init container (SUCCESS), its exit ends the task |
+| `corpus-restore` | init, essential, last | `postgres/corpus-restore.sh /corpus` as `ingest_owner`, after every other init container exited 0; its exit ends the task |
 | `kafka`, `redis` | stack, essential | loopback only, health checks |
 | `orchestrator`, `seller-api`, `ledger`, `ingest` | stack, essential | app password only, `SPRING_FLYWAY_ENABLED=false`, 768 MiB hard limit |
 | `otel-collector` | stack, non-essential | `assets/otel/config.yaml`; `grafana.yaml` overlay only when `grafana_otlp_endpoint` is set |

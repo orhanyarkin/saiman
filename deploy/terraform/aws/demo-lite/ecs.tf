@@ -8,8 +8,9 @@ locals {
   # Hard ECS limit; a task definition above it is rejected at RegisterTaskDefinition ("Too many containers").
   max_containers_per_task = 10
 
-  # The init task is short-lived (a few minutes) and runs four JVM migrators next to psql/aws-cli containers.
-  init_task_cpu    = 1024
+  # The init task is short-lived (a few minutes) and runs four JVM migrators in parallel next to psql/aws-cli containers.
+  # A dependent waits at most 120 s (Fargate startTimeout limit) for each of them, so give the JVMs two vCPUs.
+  init_task_cpu    = 2048
   init_task_memory = 4096
 }
 

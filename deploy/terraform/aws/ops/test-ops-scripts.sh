@@ -343,7 +343,7 @@ else
 fi
 
 # --- run-init-task: the run-to-completion task that replaces the dependsOn gate (ECS: <= 10 containers per task) -------------
-init_names=(assets db-init orchestrator-migrate seller-api-migrate ledger-migrate ingest-migrate corpus-restore "done")
+init_names=(assets db-init orchestrator-migrate seller-api-migrate ledger-migrate ingest-migrate corpus-restore)
 # task_json <lastStatus> <exit code of every container, or "none"> [<name> <exit code> <status>]  -> describe-tasks response
 task_json() {
   local status="$1" code="$2" over_name="${3:-}" over_code="${4:-}" over_status="${5:-}"
@@ -362,7 +362,7 @@ reset
 echo "${run_task_ok}" >"${fx}/ecs_run-task.json"
 task_json RUNNING none >"${fx}/ecs_describe-tasks.once.json"
 task_json STOPPED 0 >"${fx}/ecs_describe-tasks.json"
-expect "init task: every container exited 0 -> success" 0 "all 8 init containers exited 0" "${ops}/run-init-task.sh" "${init_args[@]}"
+expect "init task: every container exited 0 -> success" 0 "all 7 init containers exited 0" "${ops}/run-init-task.sh" "${init_args[@]}"
 if grep -q 'ecs run-task .*--launch-type FARGATE.*assignPublicIp=ENABLED' "${fx}/calls.log" && ! grep -qE -- '--overrides|stop-task' "${fx}/calls.log"; then ok "init task: Fargate with a public IP, no overrides, nothing stopped"; else bad "init task: unexpected run-task arguments or a stop-task call"; fi
 if grep -q 'securityGroups=\[sg-0abc123\]' "${fx}/calls.log" && grep -q 'subnets=\[subnet-0a1,subnet-0b2\]' "${fx}/calls.log" && grep -q -- '--task-definition arn:aws:ecs:eu-central-1:123456789012:task-definition/saiman-demo-init:3' "${fx}/calls.log"; then ok "init task: the exact task definition revision, subnets and security group"; else bad "init task: wrong network or task definition arguments"; fi
 
@@ -379,7 +379,7 @@ if grep -q 'ecs stop-task' "${fx}/calls.log"; then ok "init task: the still-runn
 
 reset
 echo "${run_task_ok}" >"${fx}/ecs_run-task.json"
-task_json STOPPED 0 "done" none PENDING >"${fx}/ecs_describe-tasks.json"
+task_json STOPPED 0 corpus-restore none PENDING >"${fx}/ecs_describe-tasks.json"
 expect "init task: a container that never ran (no exit code) fails the run" 1 "did not run to completion" "${ops}/run-init-task.sh" "${init_args[@]}"
 
 reset
