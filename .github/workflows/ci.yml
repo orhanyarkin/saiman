@@ -25,7 +25,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Temurin JDK 25
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "25"
@@ -42,7 +42,7 @@ jobs:
         run: ./gradlew -p libs/x402-spring-boot-starter/samples/console-buyer build
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-reports
           path: "**/build/reports/tests"
@@ -65,7 +65,7 @@ jobs:
         with:
           package_json_file: web/package.json
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: web/.nvmrc
           cache: pnpm
@@ -98,7 +98,7 @@ jobs:
           timeout 600 pnpm lighthouse
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report
           path: |
@@ -174,7 +174,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Temurin JDK 25
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "25"
@@ -233,7 +233,7 @@ jobs:
           # digests.json: what demo-up must find again on GHCR (service -> index digest, plus the commit).
           jq -n --arg commit "$GITHUB_SHA" --argjson digests "$digests" '{commit: $commit, digests: $digests}' >"${RUNNER_TEMP}/digests.json"
       - name: Upload image digests (provenance for demo-up)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-digests
           path: ${{ runner.temp }}/digests.json
