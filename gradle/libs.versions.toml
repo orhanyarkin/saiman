@@ -1,7 +1,7 @@
 [versions]
 spring-boot = "4.1.1"
 spring-ai = "2.0.1"                # BOM applied per module (ingest, model-router, seller-api); no Boot starters: the router builds the OpenAI models by hand (ADR-0011)
-spotless = "8.10.3"
+spotless = "8.10.4"
 palantir-java-format = "2.99.0"    # >= 2.71 required on JDK 25
 errorprone = "2.50.0"
 errorprone-plugin = "5.1.1"
