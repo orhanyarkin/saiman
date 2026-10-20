@@ -267,6 +267,9 @@ as many as keep a sub-cent figure honest (the rest of the app already uses four,
   are tree-shaken and the total comes out about 22 KB lower, which looks like an improvement and is
   only a different build.
 - `pnpm --dir web test`, `lint`, `typecheck`, plus `./gradlew check` for PR 2.
+- `pnpm --dir web e2e`. It is acceptance, not optional: PR 2 moved the connection status out of
+  the `Main` nav landmark, which no unit test, type check or lint could notice, and two auth
+  specs failed on it. Nothing ships as finished without this run.
 - `@axe-core/playwright` run on the touched routes.
 - Reduced-motion verified by emulating `prefers-reduced-motion: reduce` and confirming the end state
   is correct, not merely that the animation is shorter.
