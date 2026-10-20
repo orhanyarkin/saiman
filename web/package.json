@@ -19,6 +19,8 @@
     "gen:api": "node scripts/gen-api.mjs",
     "demo:sample": "node scripts/make-sample-capture.ts",
     "e2e:live": "playwright test -c playwright.live.config.ts",
+    "ui:shots": "playwright test -c playwright.shots.config.ts",
+    "ui:bundle": "node scripts/bundle-size.mjs",
     "lighthouse": "pnpm build && node scripts/lighthouse.mjs"
   },
   "dependencies": {

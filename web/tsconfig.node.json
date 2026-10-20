@@ -22,6 +22,7 @@
     "proxy.test.ts",
     "playwright.config.ts",
     "playwright.live.config.ts",
+    "playwright.shots.config.ts",
     "e2e",
     "scripts/*.ts"
   ]

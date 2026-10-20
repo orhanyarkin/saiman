@@ -15,7 +15,9 @@ const REPLAY_PORT = Number(process.env.SAIMAN_E2E_REPLAY_PORT ?? 5175);
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.spec.ts",
-  testIgnore: "**/live/**", // the live acceptance spec runs via `pnpm e2e:live` against a real stack
+  // The live acceptance spec runs via `pnpm e2e:live` and the screenshot capture via `pnpm ui:shots`,
+  // both against a real stack.
+  testIgnore: ["**/live/**", "**/shots/**"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -57,7 +59,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: ["**/live/**", "**/replay*.spec.ts"],
+      testIgnore: ["**/live/**", "**/shots/**", "**/replay*.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
     },
     {
