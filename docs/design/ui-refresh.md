@@ -146,6 +146,12 @@ Bundle baseline, `make ui-bundle` on `main` before any UI change, 2026-10-20: **
 JS and CSS, **0 KB** of fonts. Largest chunks: `index-*.js` 94.7 KB, `link-*.js` 20.7 KB,
 `hooks-*.js` 18.0 KB, `utils-*.js` 8.4 KB, `index-*.css` 5.2 KB, `runs._runId-*.js` 4.5 KB.
 
+Measured after PR 1, same build flags: **186.2 KB gzip** of JS and CSS, so **+1.4 KB**, all of it
+CSS (5.2 to 6.3 KB) plus a small chunk for the font import. Fonts go from 0 to **251.8 KB raw** in
+`dist`, but that is every Inter subset on disk; a page fetches only what its text needs, so the home
+page costs Inter latin (47 KB) plus Instrument Serif latin (20.5 KB), and latin-ext (83 KB) arrives
+only when Turkish text appears.
+
 ### PR 2: environment banner and app shell
 
 Files: `web/src/routes/__root.tsx`, `web/src/lib/banner-text.ts`, `web/src/lib/api/ping.ts`,
@@ -223,7 +229,11 @@ as many as keep a sub-cent figure honest (the rest of the app already uses four,
 - Before and after screenshots at both viewports, light theme.
 - The 14 point visual self-critique checklist scored pass/fail, with the fix named for every fail.
   No merge with a fail in items 1 to 9. The self-critique happens before the PR is shown, not after.
-- Bundle delta against the T0 baseline, per chunk, gzipped, fonts listed separately.
+- Bundle delta against the T0 baseline, per chunk, gzipped, fonts listed separately. Measure it with
+  `make ui-bundle`, never a bare `pnpm build`. `ui-bundle` depends on `web-build`, which sets
+  `VITE_OTEL_ENABLED=true`; without that flag the OpenTelemetry imports in `src/lib/telemetry.ts`
+  are tree-shaken and the total comes out about 22 KB lower, which looks like an improvement and is
+  only a different build.
 - `pnpm --dir web test`, `lint`, `typecheck`, plus `./gradlew check` for PR 2.
 - `@axe-core/playwright` run on the touched routes.
 - Reduced-motion verified by emulating `prefers-reduced-motion: reduce` and confirming the end state
