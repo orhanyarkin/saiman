@@ -10,7 +10,7 @@
     "agent-engineer": { "model": "sonnet", "effort": "medium", "maxTurns": 80 },
     "ai-engineer": { "model": "sonnet", "effort": "medium", "maxTurns": 80 },
     "payments-engineer": { "model": "sonnet", "effort": "medium", "maxTurns": 80 },
-    "frontend": { "model": "opus", "effort": "high", "maxTurns": 80 },
+    "frontend": { "model": "opus", "effort": "high", "maxTurns": 120 },
     "infra": { "model": "sonnet", "effort": "medium", "maxTurns": 60 },
     "test-runner": { "model": "sonnet", "effort": "low", "maxTurns": 15 }
   },
