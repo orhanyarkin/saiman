@@ -46,9 +46,26 @@ bookkeeping. The claim is worth keeping.
    already takes as a parameter (`PaymentBook.entryId`), so reruns stay idempotent.
 
 5. **The reconciliation report sums every suspense account**, not `platform:suspense:usdc` alone,
-   and reports the figure per book. `ReconciliationRepository.suspenseBalance` changes accordingly.
+   and reports the figure per book. `ReconciliationRepository.suspenseBalance` changes accordingly,
+   and so do `ReconciliationReport`, the `/api/v1/ledger/reconciliation` responses, the generated
+   OpenAPI document in `docs/api/` and the web types generated from it. Those belong in the
+   implementation PR; the ledger UI that renders them is PR 5 of the UI refresh and comes after.
 
-6. **The history is corrected by appending, never by editing, in two migrations.**
+6. **A finding keeps pointing at the entry its run actually posted.** `reconciliation_mismatch` has
+   no immutability trigger, but it is already append-only in practice: the only write is an
+   `INSERT ... ON CONFLICT (payment_id, kind) DO NOTHING` and nothing updates it. That stays.
+   `adjustment_entry_id` therefore keeps naming the original cross-book entry, which is the
+   historical truth about that run, and no column is added.
+
+   The replacement is reached through the payment rather than through a new pointer. Every entry
+   carries `payment_id`, and a REVERSAL names what it reverses through `reverses_entry_id`, so the
+   chain original -> REVERSAL -> replacement is already expressible from existing columns. The
+   payment detail's "Reconciliation findings" keeps its `ADJUSTED` status, and the implementation
+   makes it show that the named entry was reversed and which entry replaced it, instead of a bare
+   link to an entry that has since been undone. A reader sees the correction rather than a stale
+   pointer, and the ledger stays append-only.
+
+7. **The history is corrected by appending, never by editing, in two migrations.**
 
    `V9__per_book_suspense_data.sql` corrects the data, under the old rule:
 
@@ -57,7 +74,13 @@ bookkeeping. The claim is worth keeping.
       itself cross-book, which only the old rule permits.
 
    b. Insert the replacement ADJUSTMENT in the book whose wallet was adjusted, against that book's
-      new suspense account.
+      new suspense account. **Its id comes from the same formula the new code will use**, so a later
+      reconciliation run recognises it as already posted and writes nothing:
+      `UUID.nameUUIDFromBytes("saiman-ledger:entry:" + paymentKey + ":" + book + ":ADJUSTMENT:" +
+      runId)`, which is a version-3 (MD5) UUID. The migration computes it with `md5()` plus the
+      version and variant bits, taking `run_id` from the `reconciliation_mismatch` row that points
+      at the original entry. If the two formulas ever drift, the tamper demo reruns and posts a
+      duplicate, which is exactly what test 5 below catches.
 
    `V10__per_book_balance.sql` then tightens the rule: it creates the new suspense account rows if
    they are not there yet and replaces the trigger function with the single-book condition.
@@ -122,6 +145,11 @@ Flyway the way the service does:
    no REVERSAL or ADJUSTMENT was created, and that a normal ENCUMBER/SETTLE pair still posts.
 4. **The whole-ledger sum stays zero** in both cases, so the weaker invariant is never traded away
    for the stronger one.
+5. **Reconciliation is idempotent across the migration.** On the migrated tampered database, run a
+   reconciliation pass and assert that it creates no new `reconciliation_mismatch` row and no new
+   ADJUSTMENT entry, and that the seller's suspense balance is still 5000 atomic units. This is the
+   test that proves the id derived by V9 matches the one the new code derives for
+   `(payment, run, SELLER)`; a drift between them shows up here as a duplicate adjustment.
 
 The existing `LedgerSchemaTests` balance and immutability cases must keep passing unchanged, and
 `make ledger-tamper-demo` followed by a reconciliation run must still produce a finding, now with
