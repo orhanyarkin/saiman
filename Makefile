@@ -23,7 +23,7 @@ export X402_SELLER_PAYTO_ADDRESS
 .PHONY: help images check-x402-env infra-up up down clean ps logs test lint format web-dev verify-trace \
 	x402-publish-local x402-sample x402-new-wallet x402-buy x402-replay x402-testnet-check \
 	secrets-check secrets-from-dotenv ingest-backfill ingest-status ingest-retry-dlq rag-ask \
-	research-run research-approve research-status web-build e2e e2e-live lighthouse gen-api \
+	research-run research-approve research-status web-build e2e e2e-live ui-shots ui-bundle lighthouse gen-api \
 	shellcheck recon-run recon-report ledger-balance ledger-tamper-demo db-roles db-migrate psql auth-tokens auth-token-copy auth-token-show eval capture-demo capture-demo-selftest test-aws-assets tf-check demo-tunnel demo-capture demo-down-check
 
 help: ## Show this help.
@@ -155,6 +155,13 @@ e2e: web/node_modules ## Playwright e2e against the fixture server (no stack nee
 
 e2e-live: web/node_modules ## Playwright e2e against the running stack at http://localhost:8088 (needs `make up`).
 	SAIMAN_E2E_TOKEN_FILE=secrets/api_operator_token SAIMAN_E2E_BASE_URL=http://localhost:8088 pnpm --dir web e2e:live
+
+ui-shots: web/node_modules ## Before/after UI screenshots against the running stack (needs `make up`). Usage: make ui-shots TAG=before
+	SAIMAN_E2E_TOKEN_FILE=secrets/api_operator_token SAIMAN_E2E_BASE_URL=http://localhost:8088 \
+	SAIMAN_UI_SHOTS_DIR=$(CURDIR)/build/ui-shots/$(or $(TAG),before) pnpm --dir web ui:shots
+
+ui-bundle: web-build ## Gzipped size of every built JS/CSS chunk, fonts listed separately (builds first, same flags as web-build).
+	pnpm --dir web ui:bundle
 
 lighthouse: web/node_modules ## Lighthouse accessibility audit of the dashboard routes (needs Chromium).
 	pnpm --dir web lighthouse
