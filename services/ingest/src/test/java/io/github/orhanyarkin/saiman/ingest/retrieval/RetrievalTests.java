@@ -71,6 +71,15 @@ class RetrievalTests extends IngestIntegrationTests {
         });
     }
 
+    /** The exact nearest neighbours: index scans off inside the transaction, so the planner can only seq-scan. */
+    private List<String> exactVectorLeg(float[] embedding, List<String> tickers) {
+        return new TransactionTemplate(transactionManager).execute(status -> {
+            jdbc.sql("SET LOCAL enable_indexscan = off").update();
+            jdbc.sql("SET LOCAL enable_bitmapscan = off").update();
+            return repository.vectorLeg(embedding, tickers);
+        });
+    }
+
     private String textOf(String chunkId) {
         return jdbc.sql("SELECT content FROM chunk WHERE id = :id")
                 .param("id", chunkId)
@@ -123,12 +132,32 @@ class RetrievalTests extends IngestIntegrationTests {
 
     @Test
     void identicalTextRanksFirstInBothLegs() {
-        String text = textOf("kap:1101500:0000");
+        String own = "kap:1101500:0000";
+        String text = textOf(own);
+        float[] embedding = RecordingEmbeddingModel.vector(text);
+
+        // Ground truth, independent of the plan: an exact scan puts the chunk's own text first in both legs.
+        assertThat(exactVectorLeg(embedding, List.of())).first().isEqualTo(own);
+        assertThat(repository.lexicalLeg(text, List.of())).first().isEqualTo(own);
+        // What production computes (one transaction, relaxed iterative HNSW scan) and what the endpoint returns.
+        List<String> vector = vectorLeg(embedding, List.of());
+        List<String> lexical = repository.lexicalLeg(text, List.of());
+        List<String> expected = RrfFusion.fuse(vector, lexical, RrfFusion.DEFAULT_K, 5).stream()
+                .map(RrfFusion.Fused::id)
+                .toList();
 
         RetrieveResponse response = retrieve(text, List.of(), 5);
 
+        assertThat(response.chunks())
+                .as(
+                        "endpoint equals the fusion of the legs as production runs them; vector=%s lexical=%s",
+                        vector, lexical)
+                .extracting(RetrievedChunk::chunkId)
+                .containsExactlyElementsOf(expected);
         RetrievedChunk top = response.chunks().get(0);
-        assertThat(top.chunkId()).isEqualTo("kap:1101500:0000");
+        assertThat(top.chunkId())
+                .as("own chunk first; vector=%s lexical=%s", vector, lexical)
+                .isEqualTo(own);
         assertThat(top.vectorRank()).isEqualTo(1);
         assertThat(top.lexicalRank()).isNotNull();
         assertThat(top.rrfScore()).isGreaterThan(1.0 / 61);
