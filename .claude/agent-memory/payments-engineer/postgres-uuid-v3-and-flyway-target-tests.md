@@ -40,4 +40,24 @@ Deferred constraint triggers (`DEFERRABLE INITIALLY DEFERRED`) fire at COMMIT an
 keeps the OID, so a migration cannot both write rows the old rule allows and tighten that rule: split it into
 two migrations (Flyway gives each its own transaction unless `group` is set).
 
+# Writing the plpgsql of such a migration
+
+A non-STRICT `SELECT ... INTO v` nulls the target on zero rows, but reset the variable explicitly at the top of
+each loop iteration: a stale value from iteration N silently changes derived ids in N+1. In a `WHERE NOT (...)`
+prefer `NOT EXISTS (...)` over `x IN (subquery)` — `IN` yields NULL for a NULL left side and `NOT NULL` drops
+the row instead of keeping it. A data migration should post a best-effort correction rather than `RAISE` on an
+ordinary-but-unexpected state: an aborted migration leaves Flyway's history failed and the service unable to
+start.
+
+# Forcing saturated figures in a test
+
+CHECK constraints are *not* disabled by `session_replication_role = replica` (only triggers are), so the ledger's
+2^53-1 per-posting cap still applies: passing `Long.MAX_VALUE` in one account needs ≥1025 postings, best written
+as one `INSERT ... SELECT FROM generate_series` inside a replica-mode superuser transaction (the deferred balance
+trigger would otherwise walk every posting once per row). Tests that move global figures (suspense totals,
+tampered postings) need their own `saiman.test.context`; siblings assert absolute values.
+
+Error Prone's `ReturnValueIgnored` rejects a bare `optional.orElseThrow();` in a test; use
+`assertThat(x.method()).isPresent()`.
+
 See also [[spring7-scheduling-and-sandbox-quirks]], [[worktree-bash-and-kafka-gotchas]].
