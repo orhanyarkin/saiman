@@ -79,7 +79,10 @@ page is captured twice, viewport and full page.
 
 ### How `make ui-shots` keeps the token out of every artefact
 
-- The target passes `SAIMAN_E2E_TOKEN_FILE=secrets/api_operator_token`, exactly like `e2e-live`.
+- The target passes `SAIMAN_E2E_TOKEN_FILE=$(CURDIR)/secrets/api_operator_token`, exactly like
+  `e2e-live`. The path is absolute on purpose: `pnpm --dir web` runs Playwright in `web/`, so a
+  relative path resolves to `web/secrets/...` and fails with ENOENT. Both targets first test that
+  the file exists (existence only, the file is never read) and point at `make auth-tokens` if not.
   The file is read by `web/e2e/live/live-test.ts`, which already existed for the live acceptance
   run, and the capture spec reuses that fixture rather than reading `secrets/` again. No new code in
   this repository opens a file under `secrets/`.

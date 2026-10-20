@@ -3,6 +3,15 @@
 
 COMPOSE := docker compose -f deploy/compose/docker-compose.yml
 
+# The operator token file, as an absolute path. `pnpm --dir web` runs the Playwright process in
+# web/, so a relative `secrets/...` would resolve to web/secrets/... and fail with ENOENT.
+OPERATOR_TOKEN_FILE := $(CURDIR)/secrets/api_operator_token
+
+# Fails early, naming the target, when the token file is missing. Tests existence only, never reads it.
+define require-operator-token
+@test -f "$(OPERATOR_TOKEN_FILE)" || { echo "$(1): $(OPERATOR_TOKEN_FILE) not found. Run 'make auth-tokens' to see which token files exist ('make up' creates them)." >&2; exit 1; }
+endef
+
 # Default target for the x402 console buyer's `buy`/`replay`/`testnet-check` commands:
 # seller-api's paid disclosure summary endpoint (M1).
 X402_URL ?= http://localhost:8081/v1/disclosures/THYAO/summary
@@ -154,10 +163,12 @@ e2e: web/node_modules ## Playwright e2e against the fixture server (no stack nee
 	pnpm --dir web e2e
 
 e2e-live: web/node_modules ## Playwright e2e against the running stack at http://localhost:8088 (needs `make up`).
-	SAIMAN_E2E_TOKEN_FILE=secrets/api_operator_token SAIMAN_E2E_BASE_URL=http://localhost:8088 pnpm --dir web e2e:live
+	$(call require-operator-token,e2e-live)
+	SAIMAN_E2E_TOKEN_FILE=$(OPERATOR_TOKEN_FILE) SAIMAN_E2E_BASE_URL=http://localhost:8088 pnpm --dir web e2e:live
 
 ui-shots: web/node_modules ## Before/after UI screenshots against the running stack (needs `make up`). Usage: make ui-shots TAG=before
-	SAIMAN_E2E_TOKEN_FILE=secrets/api_operator_token SAIMAN_E2E_BASE_URL=http://localhost:8088 \
+	$(call require-operator-token,ui-shots)
+	SAIMAN_E2E_TOKEN_FILE=$(OPERATOR_TOKEN_FILE) SAIMAN_E2E_BASE_URL=http://localhost:8088 \
 	SAIMAN_UI_SHOTS_DIR=$(CURDIR)/build/ui-shots/$(or $(TAG),before) pnpm --dir web ui:shots
 
 ui-bundle: web-build ## Gzipped size of every built JS/CSS chunk, fonts listed separately (builds first, same flags as web-build).
