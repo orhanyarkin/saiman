@@ -8,6 +8,7 @@ import {
   shortId,
   shortState,
 } from "@/lib/ledger-model";
+import { formatDateTime } from "@/lib/day";
 import { formatMoney, moneyTitle } from "@/lib/money";
 
 /** Ledger payments: one row per authorization with the three states side by side. */
@@ -72,8 +73,8 @@ export function PaymentsTable({
                 )}
               </td>
               <td className="py-2 pr-4 whitespace-nowrap">
-                <time dateTime={payment.updatedAt}>
-                  {new Date(payment.updatedAt).toLocaleString()}
+                <time dateTime={payment.updatedAt} title={payment.updatedAt}>
+                  {formatDateTime(payment.updatedAt)}
                 </time>
               </td>
             </tr>

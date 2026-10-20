@@ -1,5 +1,37 @@
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+const DATE_TIME = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  timeZone: "UTC",
+});
+
+const TIME_ONLY = new Intl.DateTimeFormat("en-GB", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  timeZone: "UTC",
+});
+
+/**
+ * "5 Oct 2026, 19:36 UTC": en-GB, UTC, 24-hour, no seconds, with the zone spelled out so it is
+ * never implied. Null when the instant is invalid.
+ */
+export function formatDateTime(iso: string): string | null {
+  const time = Date.parse(iso);
+  return Number.isNaN(time) ? null : `${DATE_TIME.format(new Date(time))} UTC`;
+}
+
+/** "19:36 UTC", for places that already sit inside an obvious day. Null when invalid. */
+export function formatTime(iso: string): string | null {
+  const time = Date.parse(iso);
+  return Number.isNaN(time) ? null : `${TIME_ONLY.format(new Date(time))} UTC`;
+}
+
 /** Today's date in UTC as `YYYY-MM-DD` (the spend day boundary is UTC). */
 export function todayUtc(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);

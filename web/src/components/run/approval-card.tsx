@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { formatTime } from "@/lib/day";
 import { useNow } from "@/lib/hooks";
 import { formatMoney, moneyTitle } from "@/lib/money";
 import { useApprovalDecision } from "@/lib/use-approval-decision";
@@ -43,7 +44,7 @@ export function ApprovalCard({ runId, approval, onSettled }: Props) {
   const { decision, conflict } = useApprovalDecision(runId, approval.approvalId, onSettled);
   const { canOperate } = useCapabilities();
   const locked = expired || decision.isPending || decision.isSuccess || conflict;
-  const expiresText = new Date(expiresAt).toLocaleTimeString();
+  const expiresText = formatTime(approval.expiresAt);
 
   return (
     <Card role="region" aria-labelledby="approval-title" className="border-2 border-amber-600">

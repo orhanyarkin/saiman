@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isValidDay, todayUtc } from "@/lib/day";
+import { formatDateTime, formatTime, isValidDay, todayUtc } from "@/lib/day";
 import { remainingMoney, usdc } from "@/lib/money";
 
 describe("day", () => {
@@ -19,6 +19,24 @@ describe("day", () => {
       expect(isValidDay(day)).toBe(false);
     },
   );
+});
+
+describe("formatDateTime / formatTime", () => {
+  it("formats an instant as en-GB UTC with the zone spelled out", () => {
+    expect(formatDateTime("2026-10-05T19:36:03Z")).toBe("5 Oct 2026, 19:36 UTC");
+    expect(formatDateTime("2026-10-05T21:36:03+02:00")).toBe("5 Oct 2026, 19:36 UTC");
+    expect(formatDateTime("2026-10-06T00:05:00Z")).toBe("6 Oct 2026, 00:05 UTC");
+  });
+
+  it("formats the time only", () => {
+    expect(formatTime("2026-10-05T19:36:03Z")).toBe("19:36 UTC");
+    expect(formatTime("2026-10-06T00:05:00Z")).toBe("00:05 UTC");
+  });
+
+  it("returns null for an unparseable instant", () => {
+    expect(formatDateTime("not a date")).toBeNull();
+    expect(formatTime("")).toBeNull();
+  });
 });
 
 describe("remainingMoney", () => {

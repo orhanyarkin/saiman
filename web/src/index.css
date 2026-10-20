@@ -158,6 +158,38 @@
   }
 }
 
+/*
+ * Budget bars are native <meter> elements (they carry the accessible value). Chrome/Safari and
+ * Firefox style them through different pseudo-elements, so both sets are needed; the three
+ * WebKit value states (optimum / suboptimum / even-less-good) are all pinned to the same fill so
+ * a bar never falls back to the browser's green, amber or red. Consumed budget is neutral
+ * information, hence ink (--primary) on --surface-2, not --success.
+ */
+@layer base {
+  meter {
+    appearance: none;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    overflow: hidden;
+  }
+  meter::-webkit-meter-bar {
+    background: var(--surface-2);
+    border: 0;
+    border-radius: 9999px;
+  }
+  meter::-webkit-meter-optimum-value,
+  meter::-webkit-meter-suboptimum-value,
+  meter::-webkit-meter-even-less-good-value {
+    background: var(--primary);
+    border-radius: 9999px;
+  }
+  meter::-moz-meter-bar {
+    background: var(--primary);
+    border-radius: 9999px;
+  }
+}
+
 @layer base {
   :focus-visible {
     outline: 2px solid var(--ring);
