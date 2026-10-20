@@ -1,3 +1,4 @@
+import "@fontsource-variable/inter";
 import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
 
 import { AuthStatus } from "@/components/auth/auth-status";

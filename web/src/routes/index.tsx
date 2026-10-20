@@ -1,3 +1,4 @@
+import "@fontsource/instrument-serif/latin-400.css";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
@@ -53,7 +54,10 @@ function Index() {
   return (
     <div className="space-y-8">
       <section aria-labelledby="intro-title" className="space-y-4">
-        <h1 id="intro-title" className="text-3xl font-semibold">
+        <h1
+          id="intro-title"
+          className="font-display text-3xl leading-[1.05] font-normal tracking-[-0.015em]"
+        >
           Saiman, the AI treasurer for research agents
         </h1>
         <p className="max-w-prose">
