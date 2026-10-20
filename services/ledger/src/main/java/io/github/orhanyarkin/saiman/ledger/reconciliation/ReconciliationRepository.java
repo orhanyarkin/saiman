@@ -524,7 +524,11 @@ public class ReconciliationRepository {
         return value == null ? 0 : value.longValueExact();
     }
 
-    private static long saturated(@Nullable BigDecimal value) {
+    /**
+     * {@code value} clamped to {@code ±Long.MAX_VALUE} (null is zero), so an unbounded {@code numeric} sum always
+     * fits a {@code long}. Shared with {@link ReconciliationReports}, which sums the clamped per-book figures again.
+     */
+    static long saturated(@Nullable BigDecimal value) {
         if (value == null) {
             return 0;
         }

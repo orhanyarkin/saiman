@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.ledger.reconciliation;
 
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -43,9 +44,12 @@ public class ReconciliationReports {
 
     private ReconciliationReport toReport(ReconciliationRepository.Run run) {
         List<ReconciliationRepository.BookSuspense> balances = repository.suspenseBalances(USDC_ZERO);
-        long suspense = balances.stream()
-                .mapToLong(ReconciliationRepository.BookSuspense::signedAtomic)
-                .reduce(0, Math::addExact);
+        // The per-book figures are already clamped to ±Long.MAX_VALUE, so two saturated books would overflow a long
+        // sum. Summed as BigDecimal and clamped once: a flood of forged mismatches must not turn the report into a
+        // 500 (which is exactly what suspenseBalances' javadoc promises).
+        long suspense = ReconciliationRepository.saturated(balances.stream()
+                .map(book -> BigDecimal.valueOf(book.signedAtomic()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
         List<ReconciliationReport.BookSuspense> byBook = balances.stream()
                 .map(b -> new ReconciliationReport.BookSuspense(
                         b.book(), Money.usdc(Math.absExact(b.signedAtomic())), side(b.signedAtomic())))
