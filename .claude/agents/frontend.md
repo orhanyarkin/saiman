@@ -4,7 +4,7 @@ description: Builds the React 19 + Vite + TypeScript dashboard in web/ — live 
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch
 model: opus
 effort: high
-maxTurns: 80
+maxTurns: 120
 isolation: worktree
 memory: project
 color: cyan
@@ -26,4 +26,4 @@ Screens, in priority order:
 
 Rules: amounts arrive as integer atomic units plus decimals — format only at the edge, never do float math on money. Every API call goes through a typed client generated from the backends' OpenAPI specs (`openapi-typescript`). Handle loading, empty and error states on every view. Accessible by keyboard; test with Vitest + Testing Library, and one Playwright smoke test per screen.
 
-Workflow: implement, run `pnpm test && pnpm lint && pnpm build`, then summarise changes and screenshots/notes on anything visual. Save UI conventions you settle on to your memory.
+Workflow: implement, then run `pnpm test`, `pnpm lint`, `pnpm typecheck`, `pnpm build` and `pnpm e2e`, each as its own command. **`pnpm e2e` is acceptance, not optional.** A change to the shell, a landmark, a role or a visible string can break a spec that nothing else catches, so never report a task finished without it; if you run out of turns, say that it did not run rather than reporting done. Then summarise changes and screenshots/notes on anything visual. Save UI conventions you settle on to your memory.

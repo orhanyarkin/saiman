@@ -214,6 +214,18 @@ payment status transition (`signed` to `settled`), approval card resolving, repo
 only on state change, never on arrival. Every animation needs a reduced-motion branch that lands in
 the correct end state.
 
+**The fixture's completed run shows all four steps as "waiting".** Two separate problems, both in
+scope here. The fixture has no step events for that run, so the screenshots mislead: give it step
+events so a completed run looks completed. Then look at the status logic itself, because a run that
+is terminal and has no step events should not render "waiting" either. Terminal plus no evidence is
+not the same as in progress; pick a defensible fallback for a terminal run and test it.
+
+**One shared `Address` component**, built here and reused by PR 5. The payee address in the run
+detail Payments table currently breaks across nine lines. It should render `0x1111…1111` in mono,
+unbreakable, with the full value in `title` and a copy button. Ledger and reconciliation use the
+same component in PR 5 rather than a second truncation rule. Size the table columns to their
+content while you are there.
+
 The budget bars are ink from PR 1, which is right for ordinary consumption. Past 80 percent of the
 budget they switch to `--warning`, and colour must not be the only signal: the bar gets a word or an
 icon beside it saying the budget is nearly spent. The threshold is presentation only and never
@@ -242,9 +254,31 @@ status badges from the fixed set, designed empty states.
   while the control query matched 28 of 28 buyer-booked payments, so the join is sound. They came
   from a client that paid seller-api directly, almost certainly the console buyer. Label them
   "Direct client, not from a run", not "Nothing booked yet", which implies something is pending.
-- **Long ids break mid-word.** The ledger account code wraps as `wallet:av/ailable` and the
-  reconciliation payer breaks arbitrarily. Shorten addresses to `0xdd54...4795` with the full value
-  in a `title` and a copy affordance, and stop mid-word breaking on identifier columns.
+- **Long ids break mid-word.** The reconciliation payer breaks arbitrarily; use the shared
+  `Address` component PR 4 builds rather than a second truncation rule.
+- **A ledger account code is not an address**, so it does not get truncated whole. Two options were
+  mocked with the real codes and the ink tokens, in `build/ui-shots/pr5-account-options/`
+  (`desktop/option-a.png`, `desktop/option-b.png` and the same two under `mobile/`):
+
+  **(a) Keep the structure, shorten the address segment:** `buyer:0xdd54…4795:wallet:available`,
+  breaking only on the colons, full code in `title` and a copy button.
+
+  **(b) Group by counterparty inside the book:** the header names it once, `Buyer 0xdd54…4795`
+  through the `Address` component with its copy button, and each row carries only the leaf
+  (`wallet:available`, `wallet:encumbered`, `expense:data`).
+
+  Desktop shows the trade clearly: (a) repeats the same twenty characters on every row and the
+  Account column stays wide; (b) collapses it, and the eye compares leaves directly. **Mobile
+  decides it.** At 390px (a) needs four to five lines per account, and the longest leaf
+  (`liability:customer-credits`) does not fit a line at all. One honest caveat about the mock: it
+  used `overflow-wrap: anywhere`, so it broke mid-word rather than only at the colons as (a)
+  specifies. Implemented faithfully (a) would still need about three lines per row at that width,
+  because the prefix plus the longest segment exceeds it; the mock overstates how ugly it is, not
+  whether it fits.
+
+  Open question for (b): a book with more than one counterparty needs one group per counterparty,
+  which is fine and arguably clearer, and a group with no counterparty (the retired `platform` book)
+  needs a header without an address.
 
 ### PR 6: consistency pass
 
@@ -267,6 +301,9 @@ as many as keep a sub-cent figure honest (the rest of the app already uses four,
   are tree-shaken and the total comes out about 22 KB lower, which looks like an improvement and is
   only a different build.
 - `pnpm --dir web test`, `lint`, `typecheck`, plus `./gradlew check` for PR 2.
+- `pnpm --dir web e2e`. It is acceptance, not optional: PR 2 moved the connection status out of
+  the `Main` nav landmark, which no unit test, type check or lint could notice, and two auth
+  specs failed on it. Nothing ships as finished without this run.
 - `@axe-core/playwright` run on the touched routes.
 - Reduced-motion verified by emulating `prefers-reduced-motion: reduce` and confirming the end state
   is correct, not merely that the animation is shorter.

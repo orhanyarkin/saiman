@@ -2,6 +2,7 @@ import "@fontsource-variable/inter";
 import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
 
 import { AuthStatus } from "@/components/auth/auth-status";
+import { EnvironmentBanner } from "@/components/environment-banner";
 import { ReplayBanner } from "@/components/replay/replay-banner";
 import { usePendingApprovalCount } from "@/lib/hooks";
 import { isReplayMode } from "@/lib/mode";
@@ -11,8 +12,13 @@ export const Route = createRootRoute({
   component: RootComponent,
 });
 
+/**
+ * One nav item. `whitespace-nowrap` keeps an item on one line inside the scrolling row at 390px;
+ * the active item is marked by weight and a background as well as `aria-current`, so the state
+ * does not rest on colour.
+ */
 const navLink =
-  "rounded-md px-2 py-1 text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2";
+  "block rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap underline-offset-4 transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 hover:underline data-[status=active]:bg-surface-2 data-[status=active]:font-semibold";
 
 function RootComponent() {
   const pending = usePendingApprovalCount();
@@ -26,59 +32,92 @@ function RootComponent() {
         Skip to main content
       </a>
       <header>
-        {isReplayMode ? (
-          <ReplayBanner />
-        ) : (
-          <div
-            role="note"
-            className="bg-amber-100 px-4 py-2 text-center text-sm font-medium text-amber-950"
-          >
-            Testnet only {"—"} local demo. No real money moves.
-          </div>
-        )}
-        <nav
-          aria-label="Main"
-          className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-4 py-3"
-        >
-          <Link to="/" className="font-semibold">
+        {isReplayMode ? <ReplayBanner /> : <EnvironmentBanner />}
+        {/*
+         * One row on a wide screen. At 390px the brand and the auth control keep the first line and
+         * the links wrap below it as a single horizontally scrolling line: every item stays in the
+         * DOM, in tab order and in the accessibility tree (focus scrolls its item into view), which
+         * a hamburger would not. `py-1` inside the scroller leaves room for the focus ring, which
+         * an `overflow-x` container would otherwise clip.
+         */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-4 py-3">
+          <Link to="/" className="order-1 font-semibold">
             Saiman
           </Link>
-          <Link
-            to="/runs"
-            activeOptions={{ exact: true }}
-            className={navLink}
-            activeProps={{ "aria-current": "page" }}
+          <nav
+            aria-label="Main"
+            className="order-3 w-full overflow-x-auto sm:order-2 sm:w-auto sm:overflow-x-visible"
           >
-            Runs
-          </Link>
-          {canOperate ? (
-            <Link to="/runs/new" className={navLink} activeProps={{ "aria-current": "page" }}>
-              New run
-            </Link>
-          ) : null}
-          <Link to="/approvals" className={navLink} activeProps={{ "aria-current": "page" }}>
-            Approvals
-            {pending !== null && pending > 0 ? (
-              <span className="ml-1 rounded-full border border-amber-600 bg-amber-100 px-2 text-xs font-semibold text-amber-950">
-                {pending}
-                <span className="sr-only"> pending</span>
-              </span>
-            ) : null}
-          </Link>
-          <Link to="/spend" className={navLink} activeProps={{ "aria-current": "page" }}>
-            Spend
-          </Link>
-          <Link to="/ledger" className={navLink} activeProps={{ "aria-current": "page" }}>
-            Ledger
-          </Link>
-          <Link to="/reconciliation" className={navLink} activeProps={{ "aria-current": "page" }}>
-            Reconciliation
-          </Link>
-          <Link to="/revenue" className={navLink} activeProps={{ "aria-current": "page" }}>
-            Revenue
-          </Link>
-          <AuthStatus />
-        </nav>
+            <ul
+              className="flex items-center gap-1 py-1"
+              // Chromium leaves a partly visible item where it is when it takes focus, so the last
+              // items of the scrolling row would be focused half off-screen. "nearest" does
+              // nothing when the item is already fully visible and never scrolls the page itself.
+              onFocus={(event) => {
+                event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
+              }}
+            >
+              <li>
+                <Link
+                  to="/runs"
+                  activeOptions={{ exact: true }}
+                  className={navLink}
+                  activeProps={{ "aria-current": "page" }}
+                >
+                  Runs
+                </Link>
+              </li>
+              {canOperate ? (
+                <li>
+                  <Link to="/runs/new" className={navLink} activeProps={{ "aria-current": "page" }}>
+                    New run
+                  </Link>
+                </li>
+              ) : null}
+              <li>
+                <Link to="/approvals" className={navLink} activeProps={{ "aria-current": "page" }}>
+                  Approvals
+                  {pending !== null && pending > 0 ? (
+                    <span
+                      data-tone="warning"
+                      className="tone-tint t-num ml-1 rounded-full border px-2 text-xs font-semibold"
+                    >
+                      {pending}
+                      <span className="sr-only"> pending</span>
+                    </span>
+                  ) : null}
+                </Link>
+              </li>
+              <li>
+                <Link to="/spend" className={navLink} activeProps={{ "aria-current": "page" }}>
+                  Spend
+                </Link>
+              </li>
+              <li>
+                <Link to="/ledger" className={navLink} activeProps={{ "aria-current": "page" }}>
+                  Ledger
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/reconciliation"
+                  className={navLink}
+                  activeProps={{ "aria-current": "page" }}
+                >
+                  Reconciliation
+                </Link>
+              </li>
+              <li>
+                <Link to="/revenue" className={navLink} activeProps={{ "aria-current": "page" }}>
+                  Revenue
+                </Link>
+              </li>
+            </ul>
+          </nav>
+          <div className="order-2 ml-auto sm:order-3">
+            <AuthStatus />
+          </div>
+        </div>
       </header>
       <main id="main" tabIndex={-1} className="mx-auto max-w-4xl p-4 outline-none sm:p-8">
         <Outlet />

@@ -9,7 +9,7 @@ import {
   sellerStateText,
 } from "@/lib/ledger-model";
 import { formatDateTime } from "@/lib/day";
-import { formatMoney, moneyTitle } from "@/lib/money";
+import { formatMoney, moneyTitle, UNAVAILABLE } from "@/lib/money";
 import { basescanTxUrl } from "@/lib/run-view-model";
 
 function TxLink({ label, hash }: { label: string; hash: string | null | undefined }) {
@@ -162,8 +162,8 @@ export function PaymentDetailView({ detail }: { detail: PaymentDetail }) {
                 </p>
                 <p>{mismatchText(finding.kind)}</p>
                 <p className="text-muted-foreground">
-                  Books: {finding.ledgerValue ? formatMoney(finding.ledgerValue) : "—"}
-                  {" · "}Chain: {finding.chainValue ? formatMoney(finding.chainValue) : "—"}
+                  Books: {finding.ledgerValue ? formatMoney(finding.ledgerValue) : UNAVAILABLE}
+                  {" · "}Chain: {finding.chainValue ? formatMoney(finding.chainValue) : UNAVAILABLE}
                   {finding.adjustmentEntryId
                     ? ` · adjustment entry ${finding.adjustmentEntryId}`
                     : ""}

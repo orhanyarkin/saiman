@@ -79,8 +79,22 @@ bookkeeping. The claim is worth keeping.
       `UUID.nameUUIDFromBytes("saiman-ledger:entry:" + paymentKey + ":" + book + ":ADJUSTMENT:" +
       runId)`, which is a version-3 (MD5) UUID. The migration computes it with `md5()` plus the
       version and variant bits, taking `run_id` from the `reconciliation_mismatch` row that points
-      at the original entry. If the two formulas ever drift, the tamper demo reruns and posts a
-      duplicate, which is exactly what test 5 below catches.
+      at the original entry. A drift between the two derivations is caught by the equality assertion
+      in test 1 below, which compares the id V9 wrote with the value the Java formula produces.
+
+      The id comes from the same formula the new code uses so that a human comparing the two can see
+      they agree. It is **not** what keeps a rerun from duplicating: `runId` is generated per run, so
+      no later run re-derives this id. Idempotency comes from `payment_id` being set on both the
+      REVERSAL and the replacement, so `nets` counts them and the recomputed difference is zero.
+
+      **An adjustment with no `reconciliation_mismatch` row pointing at it is normal, not an error.**
+      `insertMismatch` is `ON CONFLICT (payment_id, kind) DO NOTHING`, so a second adjustment for the
+      same payment and kind is never linked: running the tamper demo twice produces one, and so does
+      a genuine split settlement whose seller event arrives after the first run. Where the run id is
+      unknown the migration derives the replacement id from the original entry instead
+      (`...':<BOOK>:ADJUSTMENT:replaces:' || <original entry id>`) and posts anyway. It must never
+      abort: a failed migration leaves Flyway's schema history broken and the ledger service unable
+      to start, to protect an idempotency property that does not exist.
 
    `V10__per_book_balance.sql` then tightens the rule: it creates the new suspense account rows if
    they are not there yet and replaces the trigger function with the single-book condition.
@@ -121,6 +135,9 @@ bookkeeping. The claim is worth keeping.
   has to be carried through the report and the API.
 − One migration posts entries, which no previous ledger migration does. It is the only way to
   correct history without editing it.
+− A migrated database keeps the original cross-book ADJUSTMENT and its REVERSAL forever. They cancel
+  per book, so per-book balance holds, but "an entry belongs to exactly one book" is enforced only
+  for rows committed after V10; any future check must exempt that pair.
 
 `make ledger-tamper-demo` keeps working unchanged: it still raises a SALE and reconciliation still
 catches it. What changes is where the difference lands. The seller book keeps balancing, and the
@@ -138,18 +155,33 @@ Flyway the way the service does:
    run produces. Migrate to head, then assert: every book balances per asset; the net of
    `seller:<payTo>:wallet` is unchanged from before the migration; `platform:suspense:usdc` nets to
    zero; `seller:<payTo>:suspense:usdc` holds the 5000 debit; the original ADJUSTMENT row is
-   untouched and now has exactly one REVERSAL naming it.
+   untouched and now has exactly one REVERSAL naming it. **It also asserts that the replacement
+   ADJUSTMENT's id equals `PaymentBook.entryId(paymentKey, SELLER, "ADJUSTMENT:" + runId)`.** That
+   equality is the check that catches a drift in V9's SQL reimplementation of
+   `UUID.nameUUIDFromBytes`: the MD5, the version and variant bits, and the string being hashed.
 2. **The new rule bites.** On that migrated database, inserting a cross-book entry fails at commit
    with the trigger's error, and a single-book entry still succeeds.
-3. **Migration on a clean database.** Migrate an empty database to head and assert it succeeds, that
+3. **Migration with an unlinked adjustment.** Seed the shape the tamper demo produces when it is run
+   twice: two cross-book ADJUSTMENTs for the same payment and kind, the first with its
+   `reconciliation_mismatch` row and the second with none. Migrate to head and assert it succeeds,
+   that both are reversed and replaced in the right book, that every book balances per asset and
+   that the whole ledger sums to zero. A case with neither a mismatch nor a `reconciliation_item`
+   row must also succeed, on the fallback id.
+4. **Migration on a clean database.** Migrate an empty database to head and assert it succeeds, that
    no REVERSAL or ADJUSTMENT was created, and that a normal ENCUMBER/SETTLE pair still posts.
-4. **The whole-ledger sum stays zero** in both cases, so the weaker invariant is never traded away
-   for the stronger one.
-5. **Reconciliation is idempotent across the migration.** On the migrated tampered database, run a
+5. **The whole-ledger sum stays zero** in every case above, so the weaker invariant is never traded
+   away for the stronger one.
+6. **Reconciliation is idempotent across the migration.** On the migrated tampered database, run a
    reconciliation pass and assert that it creates no new `reconciliation_mismatch` row and no new
-   ADJUSTMENT entry, and that the seller's suspense balance is still 5000 atomic units. This is the
-   test that proves the id derived by V9 matches the one the new code derives for
-   `(payment, run, SELLER)`; a drift between them shows up here as a duplicate adjustment.
+   ADJUSTMENT entry, and that the seller's suspense balance is still 5000 atomic units.
+
+   What this proves is that the correction leaves the books in a state reconciliation agrees with,
+   so a rerun writes nothing. It does **not** discriminate the id derivation, and an earlier draft
+   of this ADR wrongly claimed it did. After V9 the seller wallet's net matches the chain again
+   (SALE +25000, the original adjustment -5000, its reversal +5000, the replacement -5000), so the
+   rerun computes a difference of zero and posts nothing whatever id V9 wrote; a later run also
+   carries a different `runId` and would derive a different id anyway. The discriminating check is
+   the equality assertion in test 1.
 
 The existing `LedgerSchemaTests` balance and immutability cases must keep passing unchanged, and
 `make ledger-tamper-demo` followed by a reconciliation run must still produce a finding, now with

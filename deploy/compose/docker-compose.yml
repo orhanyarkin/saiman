@@ -291,6 +291,8 @@ services:
       SPRING_DATASOURCE_USERNAME: orchestrator_app
       # Migrations run in orchestrator-migrate (ADR-0027); the server holds no owner credential.
       SPRING_FLYWAY_ENABLED: "false"
+      # Reported by /api/v1/ping for the dashboard's environment banner; the AWS demo says "aws-demo".
+      SAIMAN_ENVIRONMENT: local
       # SHA-256 digests (not secrets) of the human role tokens, computed from secrets/api_*_token by
       # scripts/with-auth-digests.sh (`make up`). The raw tokens are never mounted (ADR-0023).
       SAIMAN_AUTH_READER_TOKEN_SHA256: ${SAIMAN_AUTH_READER_TOKEN_SHA256:-}

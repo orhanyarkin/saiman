@@ -14,7 +14,8 @@ export function ReplayBanner() {
     <div
       role="note"
       data-testid="replay-banner"
-      className="flex flex-wrap items-center justify-center gap-3 bg-sky-100 px-4 py-2 text-center text-sm font-medium text-sky-950"
+      data-tone="info"
+      className="tone-tint flex flex-wrap items-center justify-center gap-3 px-4 py-2 text-center text-sm font-medium"
     >
       <span>{bannerText(capture)}</span>
       {corpus ? <span data-testid="replay-corpus">{corpus}</span> : null}
