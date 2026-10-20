@@ -170,7 +170,12 @@ Files: `web/src/routes/__root.tsx`, `web/src/lib/banner-text.ts`, `web/src/lib/a
   The skill's "period or comma" replacement does not apply to a table placeholder, so what stands in
   for "no value" (`n/a`, `none`, or an empty cell with screen-reader text) is a design decision made
   once, in `UNAVAILABLE`, not six separate deletions.
-- One date and time helper (decision above), replacing the `toLocaleString()` calls in
+- **Status badges do not differentiate.** In the after-screenshots `Completed` and `Failed` are the
+  same neutral bordered pill; only the glyph and the word tell them apart. Give each status its
+  token (`--success`, `--danger`, `--warning`, `--info`) through the skill's `oklab` tint recipe.
+  The glyph and the word stay: colour is never the only carrier (`StatusBadge` already does this
+  and must keep doing it).
+- One date and time helper, moved into PR 1 and already done there. The remaining call sites in
   `components/run/runs-table.tsx`, `components/ledger/payments-table.tsx`,
   `components/ledger/payment-detail.tsx` and `components/ledger/reconciliation.tsx`.
 - Tests: the orchestrator's ping test gains an assertion for the empty default; a `web` unit test
@@ -181,6 +186,21 @@ Files: `web/src/routes/__root.tsx`, `web/src/lib/banner-text.ts`, `web/src/lib/a
 Hero with the Instrument Serif `h1`, lede at 60 to 75ch, one primary CTA, system status card,
 recent runs table, designed empty state. At most one calm signature element, and if nothing earns
 it, none. No shader, no 3D, no glass.
+
+Three findings from the after-screenshots, all for this PR:
+
+- **The hero is too small for the face.** Instrument Serif at `text-3xl` reads thinner and weaker
+  than the bold Inter heading it replaced; the display face is currently a downgrade. Size it like
+  a display line, for example `clamp(2.5rem, 5vw, 4.5rem)`, and retune `letter-spacing` at that
+  size (a face set large needs tighter tracking than the same face at 30px). The skill's
+  "The one editorial moment" section gives 1.05 line-height and -0.015em as the starting point, not
+  the finishing point.
+- **Two primary buttons compete.** "Start a research run" and "Check again" are both solid ink.
+  "Check again" becomes secondary (outline or ghost). One primary action per screen.
+- **Wire the shadow tokens.** `--shadow-xs/sm/md` exist in `:root` but `shadow-sm` still compiles
+  to Tailwind's own default, because a shadow value has to be composed with its colour. Either map
+  them through `@theme` properly or use `shadow-[var(--shadow-xs)]`, and make resting cards, hover
+  and overlays use the three steps the skill defines.
 
 The system status card currently shows a trace id and the database time. That is useful to the
 person who built it and noise to anyone else. Reduce it to a plain "Services reachable" state with
@@ -212,7 +232,14 @@ status badges from the fixed set, designed empty states.
   it checks (`ReconciliationRepository.java:256`). Show `created_at`, or label the column
   "Last checked".
 - "Nothing booked yet" in the Buyer column and an empty Run column describe a payment that only
-  the seller reported. Say so ("Seller only") rather than implying something is pending.
+  the seller reported. **Confirmed by SQL on 2026-10-20:** none of the 45 seller-only payments
+  (38 SETTLED, 6 SETTLE_FAILED, 1 CREDITED) has a matching row in `orchestrator.payment_intent`,
+  while the control query matched 28 of 28 buyer-booked payments, so the join is sound. They came
+  from a client that paid seller-api directly, almost certainly the console buyer. Label them
+  "Direct client, not from a run", not "Nothing booked yet", which implies something is pending.
+- **Long ids break mid-word.** The ledger account code wraps as `wallet:av/ailable` and the
+  reconciliation payer breaks arbitrarily. Shorten addresses to `0xdd54...4795` with the full value
+  in a `title` and a copy affordance, and stop mid-word breaking on identifier columns.
 
 ### PR 6: consistency pass
 
