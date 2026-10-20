@@ -119,6 +119,44 @@ jobs:
         if: steps.changes.outputs.terraform == 'true'
         run: deploy/terraform/aws/ops/check-workflow-run-blocks.sh
 
+  # Mutation checks (~4 min): break each rule of the Terraform tests and ops self-tests on purpose and require a
+  # red run that carries the rule's own message. Offline like `static`: mock providers, no credentials, no plan.
+  # NOT part of the required `static` check, so a slow or red mutation run never blocks a merge by itself. It is a
+  # separate job with its own guard step (not `needs: static`) so it runs in parallel and is skipped, reporting
+  # green, on a pull request that touches none of MUTATION_PATHS (docs only). The paths are the inputs the
+  # mutation scripts read: the Terraform tree (which holds the scripts themselves), the compose file the ECS
+  # parity mutations edit, and the Makefile and scripts/ the tunnel mutations copy.
+  # A stale mutation anchor (SETUP, exit 2) fails the job with an ::error:: annotation that says what to do.
+  mutation:
+    name: terraform mutation checks (offline)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GUARD_PATHS: |
+        deploy/terraform/**
+        deploy/compose/**
+        Makefile
+        scripts/**
+        .github/workflows/terraform.yml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Did anything the mutation checks read change?
+        id: changes
+        run: deploy/terraform/aws/ops/guard-paths-changed.sh
+      - name: Set up Terraform
+        if: steps.changes.outputs.terraform == 'true'
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+      - name: Mutation checks (all four, credentials scrubbed)
+        if: steps.changes.outputs.terraform == 'true'
+        run: deploy/terraform/aws/ops/run-mutation-checks.sh
+
   # Read-only `terraform plan` of demo-lite with PLACEHOLDER inputs (ops/tf-dummy-env.sh: non-secret dummy
   # image tag, payTo, digests, expiry). It shows what the module would create, not a real session. Runs only
   # when the repository variable PLAN_ROLE_ARN is set, for same-repository pull requests and pushes to main:

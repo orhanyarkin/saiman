@@ -333,10 +333,7 @@ REGION ?= eu-central-1
 STATE_BUCKET ?=
 
 tf-mutation-check: ## Break each rule of the ECS, IAM, teardown-check, readiness and tunnel tests on purpose and require the tests to notice (offline, ~4 min, repo untouched).
-	python3 $(TF_AWS)/demo-lite/tests/mutation-check.py
-	python3 $(TF_AWS)/bootstrap/tests/mutation-check.py
-	python3 -B $(TF_AWS)/ops/mutation-check-demo-down.py
-	python3 -B $(TF_AWS)/ops/mutation-check-tunnel-readiness.py
+	$(TF_AWS)/ops/run-mutation-checks.sh
 
 tf-check: test-aws-assets ## Offline Terraform checks (fmt, validate, test) for bootstrap + demo-lite and every ops/check script; no credentials.
 	terraform fmt -check -recursive $(TF_AWS)
