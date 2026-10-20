@@ -19,7 +19,7 @@ import {
   reconStatusText,
 } from "@/lib/ledger-model";
 import { formatDateTime } from "@/lib/day";
-import { formatMoney, moneyTitle } from "@/lib/money";
+import { formatMoney, moneyTitle, UNAVAILABLE } from "@/lib/money";
 import { basescanTxUrl } from "@/lib/run-view-model";
 import { isReplayMode } from "@/lib/mode";
 import { useCapabilities } from "@/lib/use-capabilities";
@@ -247,7 +247,7 @@ export function ReportView({ report }: { report: ReconciliationReport }) {
                       ) : item.status === "PENDING" ? (
                         "Waiting for Base Sepolia's safe block"
                       ) : (
-                        "—"
+                        UNAVAILABLE
                       )}
                       {url ? (
                         <a

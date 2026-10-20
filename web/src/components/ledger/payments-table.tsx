@@ -9,7 +9,7 @@ import {
   shortState,
 } from "@/lib/ledger-model";
 import { formatDateTime } from "@/lib/day";
-import { formatMoney, moneyTitle } from "@/lib/money";
+import { formatMoney, moneyTitle, UNAVAILABLE } from "@/lib/money";
 
 /** Ledger payments: one row per authorization with the three states side by side. */
 export function PaymentsTable({
@@ -69,7 +69,7 @@ export function PaymentsTable({
                     <span className="sr-only"> run</span>
                   </Link>
                 ) : (
-                  "—"
+                  UNAVAILABLE
                 )}
               </td>
               <td className="py-2 pr-4 whitespace-nowrap">
