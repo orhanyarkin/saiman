@@ -651,6 +651,8 @@ export function createFixtureServer(options: FixtureOptions = {}): Server {
       json(res, 200, {
         service: "orchestrator (fixture)",
         dbTime: new Date().toISOString(),
+        // The fixture stands in for a local stack, so the banner shows its known-environment form.
+        environment: "local",
         traceId: null,
       });
       return;
