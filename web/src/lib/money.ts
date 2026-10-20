@@ -11,8 +11,16 @@ export interface MoneyLike {
   readonly decimals: number;
 }
 
-/** Shown instead of an amount that cannot be rendered faithfully. */
-export const UNAVAILABLE = "—";
+/**
+ * The one placeholder for a cell with no value: an amount that cannot be rendered faithfully, a
+ * field the API left out, a row with nothing to report.
+ *
+ * `n/a` and not an em dash, which the ui-taste skill bans from UI copy and which a screen reader
+ * either skips or reads as punctuation. Not `none` or `0`: in a column of money "none" reads as
+ * zero, and "no value" and "zero" are different facts. Amount cells keep `moneyTitle` as their
+ * `title`, which says why the value is missing.
+ */
+export const UNAVAILABLE = "n/a";
 
 const MIN_FRACTION_DIGITS = 2;
 /** LLM spend is tiny; four decimals show a typical $0.0069 step cost. */

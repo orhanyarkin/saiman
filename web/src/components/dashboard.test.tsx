@@ -7,6 +7,7 @@ import { RunsTable } from "@/components/run/runs-table";
 import { SpendOverviewView } from "@/components/spend/spend-overview";
 import type { ApprovalView, RunListItem, RunPaymentItem, SpendOverview } from "@/lib/api/types";
 import { formatDocumentTitle } from "@/lib/hooks";
+import { UNAVAILABLE } from "@/lib/money";
 import { renderWithProviders } from "@/test/render";
 
 const money = (atomicUnits: number, asset = "USDC") => ({ atomicUnits, asset, decimals: 6 });
@@ -71,7 +72,7 @@ describe("PaymentIntentsPanel", () => {
     expect(table).toHaveTextContent("Settled");
     expect(table).toHaveTextContent("Held");
     expect(table).toHaveTextContent("resolves to settled or released by itself");
-    expect(table).toHaveTextContent("—");
+    expect(table).toHaveTextContent(UNAVAILABLE);
     const link = within(table).getByRole("link", { name: /Basescan/ });
     expect(link).toHaveAttribute("href", `https://sepolia.basescan.org/tx/${hash}`);
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
