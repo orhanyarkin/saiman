@@ -8,6 +8,16 @@ All milestones through M6b are done and merged: M6b, M6 (hardening, evals, repla
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-10-20 — Container images get their own Dependabot pull request; the otel collector cannot come back
+
+**What changed**
+- `docker-compose` left the `weekly` multi-ecosystem group and is now its own entry with a single `images` group (same Monday 06:00 cadence, same 3-day cooldown and major-version ignore). A compose image bump always needs a manual follow-up commit — `local.images` in `demo-lite/containers.tf` must carry the same tag (audit L4, `ops/check-mirror-versions.sh`) and Dependabot cannot edit those HCL strings — and in PR #52 that, plus one bad image tag, held up the Gradle, npm, Actions and Terraform updates batched with it.
+- Looked into bringing `otel/opentelemetry-collector` back into scope with an ignore rule: not sustainably possible, and `dependabot.yml` now records why. The collector publishes per-architecture tags beside the multi-arch index; the alphabetic ones (`-arm64`, `-s390x`, `-windows-2022-amd64`, …) read as prereleases and rank **below** the plain tag, so Dependabot never proposes them, but `-386` is numeric and is normalised into a fourth version segment (`0.162.0.386`) that **outranks** `0.162.0` — hence the 32-bit x86 proposal, which it makes in many other repositories too. Docker ignores take Bundler version syntax, which cannot express "any four-segment version", so an ignore would need one exact entry per release. The image stays on the by-hand list: the tag in compose and the index digest in `containers.tf`, bumped together (0.163.1 is current).
+
+**How verified**: the file parses and the entries resolve as intended (`yaml.safe_load`: docker-compose carries its own `schedule` and the `images` group, the other five ecosystems still point at `weekly`); GitHub's own `.github/dependabot.yml` check on the pull request is the authoritative validation. No code path changed.
+
+**Next**: Monday's run should open two pull requests (the weekly code group and the images group); the first image bump still needs its mirror commit in `containers.tf`.
+
 ### 2026-10-18 — Fix: the required Terraform check never reported on a docs-only pull request
 
 **What changed**
