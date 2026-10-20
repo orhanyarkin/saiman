@@ -54,7 +54,7 @@ function RootComponent() {
               // items of the scrolling row would be focused half off-screen. "nearest" does
               // nothing when the item is already fully visible and never scrolls the page itself.
               onFocus={(event) => {
-                event.target.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+                event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
               }}
             >
               <li>
