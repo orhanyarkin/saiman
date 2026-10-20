@@ -44,7 +44,8 @@
 /*
  * Dark mode is STORED, NOT SHIPPED (docs/design/ui-refresh.md): no toggle, no UI, nothing
  * references it. The skill gives no dark --primary-fg for the ink row, so --primary-fg here is
- * the dark-theme default's lightness and chroma on the neutral hue.
+ * the dark-theme default's lightness and chroma on the neutral hue; measured against --primary it
+ * is 15.30:1, well past the 4.5:1 the skill requires for a button label.
  */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
