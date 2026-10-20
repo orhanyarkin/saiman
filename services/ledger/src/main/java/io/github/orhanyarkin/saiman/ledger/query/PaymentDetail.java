@@ -56,6 +56,11 @@ public record PaymentDetail(PaymentSummary payment, List<Entry> entries, List<Fi
      * @param reconciliationRunId the run that found it; null for findings of the event consumer (CONFLICTING_FACT)
      * @param ledgerValue what the books said, if the finding is about an amount
      * @param chainValue what the chain said, if the finding is about an amount
+     * @param adjustmentReversedByEntryId the REVERSAL that undid {@code adjustmentEntryId}, if there is one. The
+     *     finding keeps naming the entry its run posted — the historical truth about that run — so a reader sees the
+     *     correction instead of a stale pointer (ADR-0029).
+     * @param replacementEntryId the ADJUSTMENT posted for this payment after that REVERSAL, if there is one: the entry
+     *     that replaced the reversed one. Reached through the payment, not through a new column (ADR-0029).
      */
     @Schema(name = "PaymentFinding")
     public record Finding(
@@ -65,5 +70,7 @@ public record PaymentDetail(PaymentSummary payment, List<Entry> entries, List<Fi
             Instant detectedAt,
             @Nullable UUID adjustmentEntryId,
             @Nullable Money ledgerValue,
-            @Nullable Money chainValue) {}
+            @Nullable Money chainValue,
+            @Nullable UUID adjustmentReversedByEntryId,
+            @Nullable UUID replacementEntryId) {}
 }

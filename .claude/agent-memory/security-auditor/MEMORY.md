@@ -23,3 +23,4 @@
 - [M6b compose migrate audit](m6b-compose-migrate-audit.md) — no Crit/High; policy rules profile-gated, volumes_from copies owner secret (live), relaxed env spellings (2026-10-06)
 - [M6b ECS task audit](m6b-ecs-task-audit.md) — no Crit/High; tftest passes master pw on kafka, injection variants, pid_mode; shared netns makes Redis/ingest gaps live (2026-10-06)
 - [M6b demo lifecycle audit](m6b-demo-lifecycle-audit.md) — no Crit/High; pnpm build in OIDC apply job (Med), tag-pinned images, no TTL ceiling, reaper disarmed
+- [ADR-0029 per-book ledger audit](adr0029-ledger-per-book-audit.md) — V9 aborts on an unlinked ADJUSTMENT (Med), entry id is forensic not load-bearing, ensureAccount type gap (2026-10-20)

@@ -16,6 +16,7 @@ import io.github.orhanyarkin.saiman.evmrpc.UsdcAuthorizationUse;
 import io.github.orhanyarkin.saiman.evmrpc.UsdcReceipt;
 import io.github.orhanyarkin.saiman.evmrpc.UsdcTransfer;
 import io.github.orhanyarkin.saiman.ledger.journal.EntryKind;
+import io.github.orhanyarkin.saiman.ledger.journal.LedgerBook;
 import io.github.orhanyarkin.saiman.ledger.journal.Posting;
 import io.github.orhanyarkin.saiman.ledger.payment.ChainState;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentFact;
@@ -64,7 +65,7 @@ class ChainReconcilerTests {
 
         assertThat(outcome.status()).isEqualTo(ItemStatus.MATCHED);
         assertThat(outcome.findings()).isEmpty();
-        assertThat(outcome.adjustment()).isNull();
+        assertThat(outcome.adjustments()).isEmpty();
         assertThat(outcome.next().chainState()).isEqualTo(ChainState.USED);
         assertThat(outcome.next().chainTxHash()).isEqualTo(tx);
         assertThat(outcome.next().lastCheckedAt()).isEqualTo(NOW);
@@ -111,7 +112,7 @@ class ChainReconcilerTests {
         assertThat(outcome.findings())
                 .extracting(ChainReconciler.Finding::kind)
                 .containsExactly(MismatchKind.TX_NOT_FOR_AUTHORIZATION);
-        assertThat(outcome.adjustment()).isNull();
+        assertThat(outcome.adjustments()).isEmpty();
         assertThat(outcome.next().chainState()).isEqualTo(real.chainState());
     }
 
@@ -162,7 +163,7 @@ class ChainReconcilerTests {
                 assertThat(outcome.status())
                         .as("indexed=%s amount=%s", indexed, t.amount())
                         .isEqualTo(ItemStatus.MATCHED);
-                assertThat(outcome.adjustment()).isNull();
+                assertThat(outcome.adjustments()).isEmpty();
             }
         }
     }
@@ -200,7 +201,7 @@ class ChainReconcilerTests {
                 reconcile(books, evidence(SAFE_LATE, Map.of(tx, Optional.of(matching(books.projection(), tx))), null));
 
         assertThat(outcome.status()).isEqualTo(ItemStatus.MATCHED);
-        assertThat(outcome.adjustment()).isNull();
+        assertThat(outcome.adjustments()).isEmpty();
     }
 
     @Test
@@ -213,7 +214,7 @@ class ChainReconcilerTests {
 
         assertThat(outcome.status()).isEqualTo(ItemStatus.PENDING);
         assertThat(outcome.next().chainState()).isEqualTo(ChainState.UNKNOWN);
-        assertThat(outcome.adjustment()).isNull();
+        assertThat(outcome.adjustments()).isEmpty();
     }
 
     @Test
@@ -235,8 +236,8 @@ class ChainReconcilerTests {
         assertThat(legs(outcome))
                 .containsExactlyInAnyOrder(
                         "DEBIT buyer:" + p.payer() + ":wallet:available 20000",
-                        "CREDIT platform:suspense:usdc 20000",
-                        "DEBIT platform:suspense:usdc 20000",
+                        "CREDIT buyer:" + p.payer() + ":suspense:usdc 20000",
+                        "DEBIT seller:" + p.payTo() + ":suspense:usdc 20000",
                         "CREDIT seller:" + p.payTo() + ":wallet 20000");
     }
 
@@ -259,7 +260,8 @@ class ChainReconcilerTests {
                 .contains(tuple(MismatchKind.SETTLED_BUT_UNUSED, true));
         assertThat(legs(outcome))
                 .containsExactlyInAnyOrder(
-                        "DEBIT platform:suspense:usdc 20000", "CREDIT seller:" + p.payTo() + ":wallet 20000");
+                        "DEBIT seller:" + p.payTo() + ":suspense:usdc 20000",
+                        "CREDIT seller:" + p.payTo() + ":wallet 20000");
     }
 
     @Test
@@ -277,7 +279,7 @@ class ChainReconcilerTests {
                 .extracting(ChainReconciler.Finding::kind)
                 .containsExactly(MismatchKind.TX_NOT_FOUND);
         assertThat(late.next().chainState()).isEqualTo(ChainState.USED);
-        assertThat(late.adjustment()).isNull();
+        assertThat(late.adjustments()).isEmpty();
     }
 
     @Test
@@ -298,8 +300,8 @@ class ChainReconcilerTests {
         assertThat(legs(outcome))
                 .containsExactlyInAnyOrder(
                         "DEBIT buyer:" + p.payer() + ":wallet:available 5000",
-                        "CREDIT platform:suspense:usdc 5000",
-                        "DEBIT platform:suspense:usdc 5000",
+                        "CREDIT buyer:" + p.payer() + ":suspense:usdc 5000",
+                        "DEBIT seller:" + p.payTo() + ":suspense:usdc 5000",
                         "CREDIT seller:" + p.payTo() + ":wallet 5000");
     }
 
@@ -318,7 +320,8 @@ class ChainReconcilerTests {
         // The buyer's money left as booked; only the seller's wallet never received it.
         assertThat(legs(outcome))
                 .containsExactlyInAnyOrder(
-                        "DEBIT platform:suspense:usdc 20000", "CREDIT seller:" + p.payTo() + ":wallet 20000");
+                        "DEBIT seller:" + p.payTo() + ":suspense:usdc 20000",
+                        "CREDIT seller:" + p.payTo() + ":wallet 20000");
     }
 
     @Test
@@ -336,7 +339,7 @@ class ChainReconcilerTests {
                 .extracting(ChainReconciler.Finding::kind)
                 .containsExactly(MismatchKind.TX_NOT_FOR_AUTHORIZATION);
         assertThat(outcome.next().chainTxHash()).isEqualTo(realTx);
-        assertThat(outcome.adjustment()).isNull();
+        assertThat(outcome.adjustments()).isEmpty();
     }
 
     /** The projection with these reported hashes (buyer, seller) and no chain facts. */
@@ -380,7 +383,7 @@ class ChainReconcilerTests {
                 .containsExactly(tuple(MismatchKind.TX_NOT_FOUND, txHash('c')));
         assertThat(outcome.next().chainState()).isEqualTo(ChainState.USED);
         assertThat(outcome.next().chainTxHash()).isEqualTo(real);
-        assertThat(outcome.adjustment()).isNull();
+        assertThat(outcome.adjustments()).isEmpty();
     }
 
     @Test
@@ -401,7 +404,7 @@ class ChainReconcilerTests {
                 .extracting(ChainReconciler.Finding::kind)
                 .containsExactly(MismatchKind.TX_NOT_FOR_AUTHORIZATION);
         assertThat(outcome.next().chainTxHash()).isEqualTo(real);
-        assertThat(outcome.adjustment()).isNull();
+        assertThat(outcome.adjustments()).isEmpty();
     }
 
     @Test
@@ -419,7 +422,7 @@ class ChainReconcilerTests {
         assertThat(outcome.findings())
                 .extracting(ChainReconciler.Finding::kind)
                 .containsExactly(MismatchKind.CONFLICTING_TX);
-        assertThat(outcome.adjustment()).isNull();
+        assertThat(outcome.adjustments()).isEmpty();
         assertThat(outcome.next().chainState()).isEqualTo(p.chainState());
     }
 
@@ -464,7 +467,7 @@ class ChainReconcilerTests {
             assertThat(outcome.findings())
                     .extracting(ChainReconciler.Finding::kind)
                     .containsExactly(MismatchKind.BOOKS_OPEN);
-            assertThat(outcome.adjustment()).isNull();
+            assertThat(outcome.adjustments()).isEmpty();
         }
         assertThat(unused.next().chainState()).isEqualTo(ChainState.UNUSED);
         assertThat(usedWithTx.next().chainTxHash()).isEqualTo(tx);
@@ -526,7 +529,8 @@ class ChainReconcilerTests {
         assertThat(outcome.next().chainState()).isEqualTo(ChainState.UNUSED);
         assertThat(legs(outcome))
                 .containsExactlyInAnyOrder(
-                        "DEBIT buyer:" + p.payer() + ":wallet:available 20000", "CREDIT platform:suspense:usdc 20000");
+                        "DEBIT buyer:" + p.payer() + ":wallet:available 20000",
+                        "CREDIT buyer:" + p.payer() + ":suspense:usdc 20000");
     }
 
     @Test
@@ -542,7 +546,8 @@ class ChainReconcilerTests {
                 .containsExactly(MismatchKind.UNUSED_BUT_SETTLED);
         assertThat(legs(outcome))
                 .containsExactlyInAnyOrder(
-                        "DEBIT platform:suspense:usdc 20000", "CREDIT buyer:" + p.payer() + ":wallet:available 20000");
+                        "DEBIT buyer:" + p.payer() + ":suspense:usdc 20000",
+                        "CREDIT buyer:" + p.payer() + ":wallet:available 20000");
     }
 
     @Test
@@ -565,7 +570,7 @@ class ChainReconcilerTests {
             assertThat(f.ledgerValue()).isEqualTo(Money.usdc(3_000));
             assertThat(f.adjusted()).isFalse();
         });
-        assertThat(outcome.adjustment()).isNull();
+        assertThat(outcome.adjustments()).isEmpty();
     }
 
     @Test
@@ -584,18 +589,21 @@ class ChainReconcilerTests {
             assertThat(f.ledgerValue()).isEqualTo(Money.usdc(25_000));
             assertThat(f.chainValue()).isEqualTo(Money.usdc(20_000));
         });
-        assertThat(first.adjustment()).isNotNull();
-        assertThat(first.adjustment().kind()).isEqualTo(EntryKind.ADJUSTMENT);
+        assertThat(first.adjustments()).singleElement().satisfies(a -> {
+            assertThat(a.kind()).isEqualTo(EntryKind.ADJUSTMENT);
+            assertThat(a.book()).isEqualTo(LedgerBook.SELLER);
+        });
         assertThat(legs(first))
                 .containsExactlyInAnyOrder(
-                        "DEBIT platform:suspense:usdc 5000", "CREDIT seller:" + p.payTo() + ":wallet 5000");
+                        "DEBIT seller:" + p.payTo() + ":suspense:usdc 5000",
+                        "CREDIT seller:" + p.payTo() + ":wallet 5000");
 
         var afterAdjustment =
                 new ChainReconciler.LedgerNets(tampered.buyerWallet(), 0, tampered.sellerWallet() - 5_000);
         var rerun =
                 ChainReconciler.reconcile(first.next(), afterAdjustment, evidence, SETTINGS, UUID.randomUUID(), NOW);
         assertThat(rerun.status()).isEqualTo(ItemStatus.MATCHED);
-        assertThat(rerun.adjustment()).isNull();
+        assertThat(rerun.adjustments()).isEmpty();
     }
 
     /** A buyer that reported SETTLED without a tx hash: only the authorization state can decide it. */
@@ -615,7 +623,7 @@ class ChainReconcilerTests {
         var atBoundary = reconcile(books, evidence(atValidBefore, Map.of(), false));
         assertThat(atBoundary.status()).isEqualTo(ItemStatus.PENDING);
         assertThat(atBoundary.findings()).isEmpty();
-        assertThat(atBoundary.adjustment()).isNull();
+        assertThat(atBoundary.adjustments()).isEmpty();
 
         assertThat(reconcile(books, evidence(oneSecondLater, Map.of(), false)).findings())
                 .as("one second later the authorization is final")
@@ -674,16 +682,22 @@ class ChainReconcilerTests {
         assertThat(outcome.findings())
                 .extracting(ChainReconciler.Finding::kind)
                 .doesNotContain(MismatchKind.SETTLED_BUT_UNUSED);
-        assertThat(outcome.adjustment()).isNull();
+        assertThat(outcome.adjustments()).isEmpty();
 
         assertThat(ReconciliationService.effective(reported, VALID_BEFORE + 31))
                 .as("a safe block behind the local clock is used as is")
                 .isEqualTo(reported);
     }
 
+    /** Every leg of every ADJUSTMENT the outcome posts; each entry is in one book (ADR-0029). */
     private static List<String> legs(ChainReconciler.Outcome outcome) {
-        assertThat(outcome.adjustment()).isNotNull();
-        return outcome.adjustment().postings().stream()
+        assertThat(outcome.adjustments()).isNotEmpty();
+        outcome.adjustments()
+                .forEach(a -> assertThat(a.postings())
+                        .allSatisfy(
+                                posting -> assertThat(posting.account().book()).isEqualTo(a.book())));
+        return outcome.adjustments().stream()
+                .flatMap(a -> a.postings().stream())
                 .map(ChainReconcilerTests::leg)
                 .toList();
     }

@@ -44,7 +44,36 @@ public final class ChartOfAccounts {
         return seller(payTo, "liability:customer-credits", AccountType.LIABILITY);
     }
 
-    /** {@code platform:suspense:usdc}: where reconciliation parks differences until a human clears them. */
+    /** {@code buyer:<payer>:suspense:usdc}: where reconciliation parks a buyer-wallet difference (ADR-0029). */
+    public static Account buyerSuspense(String payer) {
+        return buyer(payer, "suspense:" + USDC.toLowerCase(Locale.ROOT), AccountType.SUSPENSE);
+    }
+
+    /** {@code seller:<payTo>:suspense:usdc}: where reconciliation parks a seller-wallet difference (ADR-0029). */
+    public static Account sellerSuspense(String payTo) {
+        return seller(payTo, "suspense:" + USDC.toLowerCase(Locale.ROOT), AccountType.SUSPENSE);
+    }
+
+    /**
+     * The suspense account of {@code book} for this amount: {@code buyer:<wallet>:suspense:usdc} or
+     * {@code seller:<wallet>:suspense:usdc}. An entry belongs to one book (ADR-0029), so a difference is parked in
+     * the book whose wallet moved.
+     *
+     * @throws IllegalArgumentException for {@link LedgerBook#PLATFORM}, which takes no new postings
+     */
+    public static Account suspenseOf(LedgerBook book, String wallet) {
+        return switch (book) {
+            case BUYER -> buyerSuspense(wallet);
+            case SELLER -> sellerSuspense(wallet);
+            case PLATFORM -> throw new IllegalArgumentException("platform:suspense:usdc is retired (ADR-0029)");
+        };
+    }
+
+    /**
+     * {@code platform:suspense:usdc}: where reconciliation parked differences until ADR-0029 moved suspense into the
+     * book whose wallet moved. Retired — it keeps its history (V9 reverses the cross-book entries, so it nets to
+     * zero) and takes no new postings; kept for reads and for tests about that history.
+     */
     public static Account suspense(Money of) {
         return new Account(
                 "platform:suspense:" + of.asset().toLowerCase(Locale.ROOT),

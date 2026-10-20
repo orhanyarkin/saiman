@@ -61,7 +61,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * <p><b>Steps.</b> Read the {@code safe} block (unavailable: the run is FAILED, nothing checked); internal checks
  * (unbalanced entries, from SQL); select due payments; for each, read the chain <em>outside</em> any transaction
  * (no row lock is held across RPC latency), then in its own transaction lock the projection row, compute the
- * payment's net movements, apply the pure {@link ChainReconciler}, and write the projection, the ADJUSTMENT entry,
+ * payment's net movements, apply the pure {@link ChainReconciler}, and write the projection, the ADJUSTMENT entries (one per affected book, ADR-0029),
  * the mismatches, the item and the {@code EntryPosted} / {@code ReconciliationMismatch} publications (Spring
  * Modulith registry, same transaction). If a producer changed the row between the read and the lock, the evidence
  * no longer covers it and the pure step says PENDING. {@link ChainUnavailableException} on an item makes it
@@ -129,6 +129,7 @@ public class ReconciliationService {
     private final AtomicReference<@Nullable Instant> lastManualStart = new AtomicReference<>();
     private final AtomicReference<@Nullable UUID> lastUnauthorizedRun = new AtomicReference<>();
     private final AtomicLong unbalancedEntries = new AtomicLong();
+    private final AtomicLong crossBookEntries = new AtomicLong();
     private final AtomicLong dueBacklog = new AtomicLong();
     private final AtomicLong oldestUncheckedSeconds = new AtomicLong();
 
@@ -160,6 +161,8 @@ public class ReconciliationService {
         this.observations = observations.getIfAvailable(() -> ObservationRegistry.NOOP);
         this.sellers = sellers;
         meters.gauge("saiman.ledger.reconciliation.unbalanced.entries", unbalancedEntries);
+        // ADR-0029: a cross-book entry still balances per asset, so the unbalanced gauge cannot see one.
+        meters.gauge("saiman.ledger.reconciliation.cross_book.entries", crossBookEntries);
         // Set at the start of each run (after the safe block is read): the backlog the run starts from.
         meters.gauge("saiman.ledger.reconciliation.due", dueBacklog);
         meters.gauge("saiman.ledger.reconciliation.oldest_unchecked_seconds", oldestUncheckedSeconds);
@@ -277,6 +280,14 @@ public class ReconciliationService {
                 log.error("Reconciliation run {}: {} journal entries do not balance per asset", runId, unbalanced);
             }
             unbalancedEntries.set(unbalanced);
+            long crossBook = repository.crossBookEntries();
+            if (crossBook > 0) {
+                log.error(
+                        "Reconciliation run {}: {} journal entries post to another book's account (ADR-0029)",
+                        runId,
+                        crossBook);
+            }
+            crossBookEntries.set(crossBook);
             long now = clock.instant().getEpochSecond();
             if (reported.timestamp() > Math.addExact(now, MAX_SAFE_AHEAD_SECONDS)) {
                 // Trusting it would expire live authorizations and post SETTLED_BUT_UNUSED for payments that may
@@ -450,15 +461,16 @@ public class ReconciliationService {
         ChainReconciler.Outcome outcome =
                 ChainReconciler.reconcile(p, repository.nets(p), evidence, properties.settings(), runId, now);
         repository.updateChain(outcome.next(), outcome.chainBlock());
-        JournalEntry adjustment = outcome.adjustment();
-        UUID adjustmentId = null;
-        if (adjustment != null) {
+        // One ADJUSTMENT per affected book (ADR-0029); each is posted and published on its own.
+        for (JournalEntry adjustment : outcome.adjustments()) {
             journal.post(adjustment);
             events.publishEvent(PaymentLedgerService.entryPosted(adjustment, runId.toString(), now));
-            adjustmentId = adjustment.id();
             meters.counter("saiman.ledger.entries", "kind", adjustment.kind().name())
                     .increment();
         }
+        // The finding names the first one (the book whose values it shows): the table has one such column.
+        JournalEntry primaryAdjustment = outcome.primaryAdjustment();
+        UUID adjustmentId = primaryAdjustment == null ? null : primaryAdjustment.id();
         for (ChainReconciler.Finding finding : outcome.findings()) {
             UUID mismatchId = mismatchId(p.id(), finding);
             UUID linked = finding.adjusted() ? adjustmentId : null;

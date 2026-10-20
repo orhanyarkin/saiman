@@ -18,4 +18,5 @@
 - [DB roles + /internal chain gotchas](db-roles-and-security-chain-gotchas.md) — Modulith CREATE SCHEMA as app role, StartupDatabase roles, auth-disabled default chain.
 - [M4b audit Lows findings](m4b-audit-lows-findings.md) — PaymentBook not redelivery-idempotent for F/C conflicts; 1 s epoch cushion in window tests; settleMargin() single source.
 - [Spring Security 7 resource server notes](spring-security7-resource-server-notes.md) — env vars cannot bind a Map under a dashed segment, two 401 paths, DEBUG logs query strings.
+- [Postgres UUIDv3 + flyway.target tests](postgres-uuid-v3-and-flyway-target-tests.md) — nameUUIDFromBytes in SQL, seeding at an old migration version, why a tightening trigger needs its own migration.
 - [x402 facilitator telemetry notes](x402-facilitator-telemetry-notes.md) — M6-T7: error-code source, TestObservationRegistry access, Prometheus tag-key rule, FacilitatorException.Failure.

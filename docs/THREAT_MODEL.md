@@ -326,6 +326,36 @@ These are checked mechanically, not just by review:
 - **Capture files.** `make capture-demo` scrubs nonce, signature, key and token patterns and refuses to write on a hit, but published captures still contain free-text questions, model answers (which may quote KAP text), wallet addresses and role labels: review before publishing.
 - **Not done in M6 (revisit):** Kafka and Redis authentication/ACLs, ingest `/internal` auth (cheap now with `libs/api-security`), per-run ownership between READERs (any READER can read any run's stream), per-service LLM keys/sub-caps, `cap_drop` on app containers.
 
+## Ledger per-book invariant and suspense (ADR-0029)
+
+- **The per-book invariant is enforced in two halves.** `JournalEntry.requireSingleBook` refuses a posting on
+  another book's account in the domain, and V10 adds the same condition to `check_entry_balanced`, the
+  `DEFERRABLE INITIALLY DEFERRED` constraint trigger that already checks balance at commit. `SET CONSTRAINTS`
+  only moves *when* the check runs, so it cannot weaken either half; the bypasses are
+  `ALTER TABLE ... DISABLE TRIGGER` (owner) and `session_replication_role` (superuser), the documented
+  tamper-demo gap (`scripts/ledger-tamper-demo.sh`), which is why the domain check exists next to it. The
+  invariant is also **forward-only**: constraint triggers fire per row on INSERT, so rows committed before V10
+  are never re-checked, and V9 deliberately leaves one cross-book ADJUSTMENT and its mirror REVERSAL in every
+  corrected database. A re-pointed posting still balances per asset, so `unbalancedEntries()` cannot see it —
+  `ReconciliationRepository.crossBookEntries()` is the detective control (logged per run, gauge
+  `saiman.ledger.reconciliation.cross_book.entries`). It exempts V9's pair only when both halves cross books,
+  so a writer who can insert a journal entry cannot hide one behind a plain single-book REVERSAL.
+- **Suspense is only visible under two conditions.** A difference shows up in the report only if its account
+  carries `type = 'SUSPENSE'` — `JournalRepository.ensureAccount` is `ON CONFLICT DO NOTHING` and never verifies
+  an existing row's type, so a row planted under the same code with another type hides the difference while every
+  balance invariant still holds — and only if the reader looks at `suspenseByBook`: the headline `suspense` is a
+  net across books, so a forged difference in one book can cancel a real one in another.
+- **Reconciliation entry ids are forensic, not idempotency.** `runId` is generated per run
+  (`UUID.randomUUID()` in `ReconciliationService`), so an ADJUSTMENT id derived from it is never re-derived by a
+  later run. Replay safety comes from adjustments carrying `payment_id`, which makes them count towards `nets`
+  so a rerun computes a zero difference. Any future code or migration that treats the derived id as the
+  idempotency key relies on a property that does not hold.
+- **`reconciliation_mismatch` holds one row per (payment, kind)**, inserted `ON CONFLICT DO NOTHING`, so the
+  *second* adjustment for the same payment and kind (the tamper demo run twice, a split settlement whose seller
+  event arrives after the first run) is never linked to a run. Anything walking from an adjustment back to its
+  run must fall back to `reconciliation_item` and then to the entry itself; V9 does, and never aborts over an
+  unknown run id, because a failed migration would leave Flyway's history broken and the service unable to start.
+
 ## AWS demo-lite IAM (ADR-0028)
 
 Three CI roles use GitHub OIDC. `plan` (PRs and `main`) is read-only: it has no S3 write (plans run with `-lock=false`) and explicit Denies on SSM secret values and on `artifacts/*` and `demo/*` objects, because PR code executes during `terraform plan`. `apply` and `destroy` are assumable only from the `demo-apply` and `demo-destroy` GitHub environments, both restricted to `main` with admin bypass off; `demo-apply` needs a reviewer. The three workload roles (task, task execution, scheduler) are fixed in the human-applied bootstrap stack under `/saiman/demo/`, trust service principals only (plus `aws:SourceAccount`) and carry `saiman-demo-boundary`. The apply role therefore cannot create, edit or re-trust any role; its only IAM write is `iam:PassRole` of those roles. The destroy role has no create/register/run/put action and no IAM write, and cannot delete the state object (only the lock object).

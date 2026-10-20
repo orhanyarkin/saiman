@@ -153,6 +153,8 @@ export interface components {
         PaymentFinding: {
             /** Format: uuid */
             adjustmentEntryId?: string | null;
+            /** Format: uuid */
+            adjustmentReversedByEntryId?: string | null;
             chainValue?: components["schemas"]["Money"] | null;
             /** Format: date-time */
             detectedAt: string;
@@ -160,6 +162,8 @@ export interface components {
             ledgerValue?: components["schemas"]["Money"] | null;
             /** Format: uuid */
             reconciliationRunId?: string | null;
+            /** Format: uuid */
+            replacementEntryId?: string | null;
             status: string;
         };
         PaymentPage: {
@@ -201,6 +205,11 @@ export interface components {
             title?: string;
             /** Format: uri */
             type?: string;
+        };
+        ReconciliationBookSuspense: {
+            balance: components["schemas"]["Money"];
+            book: string;
+            side?: string | null;
         };
         ReconciliationCounters: {
             /** Format: int32 */
@@ -254,6 +263,7 @@ export interface components {
             status: string;
             summary: components["schemas"]["ReconciliationCounters"];
             suspense: components["schemas"]["Money"];
+            suspenseByBook: components["schemas"]["ReconciliationBookSuspense"][];
             suspenseSide?: string | null;
         };
         ReconciliationRunList: {

@@ -38,6 +38,24 @@ public record JournalEntry(
             throw new IllegalArgumentException("description must be 1-256 characters");
         }
         requireBalanced(postings);
+        requireSingleBook(book, postings);
+    }
+
+    /**
+     * Checks that the entry belongs to exactly one book (ADR-0029): every posting's account is in {@code book}, so
+     * summing a balanced entry into its book keeps that book balanced. The database's condition in
+     * {@code check_entry_balanced} (V10__per_book_balance.sql) is the other half.
+     *
+     * @throws CrossBookEntryException if some posting's account belongs to another book
+     */
+    public static void requireSingleBook(LedgerBook book, List<Posting> postings) {
+        for (Posting posting : postings) {
+            LedgerBook of = posting.account().book();
+            if (of != book) {
+                throw new CrossBookEntryException("posting on "
+                        + posting.account().code() + " is in book " + of + ", but the entry is in book " + book);
+            }
+        }
     }
 
     /**

@@ -159,9 +159,20 @@ public class LedgerQueries {
         return jdbc.sql("""
                         SELECT m.kind, m.run_id, m.detected_at, m.adjustment_entry_id, m.ledger_amount_atomic,
                                m.chain_amount_atomic, coalesce(m.asset, p.asset) AS asset,
-                               coalesce(m.decimals, p.decimals) AS decimals
+                               coalesce(m.decimals, p.decimals) AS decimals,
+                               r.id AS reversed_by, replacement.id AS replacement_id
                           FROM reconciliation_mismatch m
                           JOIN payment p ON p.id = m.payment_id
+                          -- ADR-0029: the finding keeps naming the entry its run posted, so a correction is shown as
+                          -- the chain adjustment -> REVERSAL -> replacement, read from existing columns.
+                          LEFT JOIN journal_entry r
+                                 ON r.reverses_entry_id = m.adjustment_entry_id AND r.kind = 'REVERSAL'
+                          LEFT JOIN LATERAL (
+                              SELECT a.id FROM journal_entry a
+                               WHERE a.payment_id = m.payment_id AND a.kind = 'ADJUSTMENT'
+                                 AND a.id <> m.adjustment_entry_id AND a.recorded_at >= r.recorded_at
+                               ORDER BY a.recorded_at, a.id
+                               LIMIT 1) AS replacement ON r.id IS NOT NULL
                          WHERE m.payment_id = :id
                          ORDER BY m.detected_at, m.id
                         """)
@@ -175,7 +186,9 @@ public class LedgerQueries {
                             instant(rs, "detected_at"),
                             adjustment,
                             money(rs, "ledger_amount_atomic"),
-                            money(rs, "chain_amount_atomic"));
+                            money(rs, "chain_amount_atomic"),
+                            rs.getObject("reversed_by", UUID.class),
+                            rs.getObject("replacement_id", UUID.class));
                 })
                 .list();
     }

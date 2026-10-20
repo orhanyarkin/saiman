@@ -94,6 +94,10 @@
             "format" : "uuid",
             "type" : [ "string", "null" ]
           },
+          "adjustmentReversedByEntryId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
           "chainValue" : {
             "oneOf" : [ {
               "$ref" : "#/components/schemas/Money"
@@ -116,6 +120,10 @@
             } ]
           },
           "reconciliationRunId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "replacementEntryId" : {
             "format" : "uuid",
             "type" : [ "string", "null" ]
           },
@@ -227,6 +235,21 @@
             "type" : "string"
           }
         },
+        "type" : "object"
+      },
+      "ReconciliationBookSuspense" : {
+        "properties" : {
+          "balance" : {
+            "$ref" : "#/components/schemas/Money"
+          },
+          "book" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "balance", "book" ],
         "type" : "object"
       },
       "ReconciliationCounters" : {
@@ -371,11 +394,17 @@
           "suspense" : {
             "$ref" : "#/components/schemas/Money"
           },
+          "suspenseByBook" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ReconciliationBookSuspense"
+            },
+            "type" : "array"
+          },
           "suspenseSide" : {
             "type" : [ "string", "null" ]
           }
         },
-        "required" : [ "items", "network", "runId", "startedAt", "status", "summary", "suspense" ],
+        "required" : [ "items", "network", "runId", "startedAt", "status", "summary", "suspense", "suspenseByBook" ],
         "type" : "object"
       },
       "ReconciliationRunList" : {

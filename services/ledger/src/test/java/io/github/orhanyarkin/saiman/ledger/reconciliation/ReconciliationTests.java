@@ -285,9 +285,11 @@ class ReconciliationTests {
         assertThat(adjustmentLegs(payment))
                 .containsExactlyInAnyOrder(
                         "DEBIT " + wallet("buyer", payment) + ":wallet:available 20000",
-                        "CREDIT platform:suspense:usdc 20000",
-                        "DEBIT platform:suspense:usdc 20000",
+                        "CREDIT " + wallet("buyer", payment) + ":suspense:usdc 20000",
+                        "DEBIT " + wallet("seller", payment) + ":suspense:usdc 20000",
                         "CREDIT " + wallet("seller", payment) + ":wallet 20000");
+        // One entry per affected book (ADR-0029), each balanced on its own.
+        assertThat(adjustmentBooks(payment)).containsExactly("BUYER", "SELLER");
     }
 
     @Test
@@ -298,7 +300,8 @@ class ReconciliationTests {
                 .param("key", payment.key())
                 .query(UUID.class)
                 .single();
-        long suspenseBefore = signedSuspense(reports.latest().orElse(null));
+        ReconciliationReport reportBefore = reports.latest().orElse(null);
+        long suspenseBefore = signedSuspense(reportBefore);
 
         List<UUID> tampered = tamper();
         assertThat(tampered).containsOnly(sale).hasSize(2);
@@ -313,9 +316,21 @@ class ReconciliationTests {
         assertThat(item.mismatch().adjustmentEntryId()).isNotNull();
         assertThat(adjustmentLegs(payment))
                 .containsExactlyInAnyOrder(
-                        "DEBIT platform:suspense:usdc 5000", "CREDIT " + wallet("seller", payment) + ":wallet 5000");
+                        "DEBIT " + wallet("seller", payment) + ":suspense:usdc 5000",
+                        "CREDIT " + wallet("seller", payment) + ":wallet 5000");
+        assertThat(adjustmentBooks(payment)).containsExactly("SELLER");
         assertThat(signedSuspense(report) - suspenseBefore).isEqualTo(5_000);
         assertThat(report.suspenseSide()).isEqualTo("DEBIT");
+        // ADR-0029: the difference is parked in the seller's own book, and the retired platform pot stays empty.
+        assertThat(signedSuspense(report, "SELLER") - signedSuspense(reportBefore, "SELLER"))
+                .isEqualTo(5_000);
+        assertThat(report.suspenseByBook())
+                .filteredOn(book -> "SELLER".equals(book.book()))
+                .singleElement()
+                .satisfies(book -> assertThat(book.side()).isEqualTo("DEBIT"));
+        assertThat(report.suspenseByBook())
+                .filteredOn(book -> "PLATFORM".equals(book.book()))
+                .allSatisfy(book -> assertThat(book.balance()).isEqualTo(Money.usdc(0)));
 
         PaymentProjection projection = payments.findByKey(payment.key()).orElseThrow();
         List<String> published =
@@ -610,6 +625,28 @@ class ReconciliationTests {
     private static String wallet(String book, TestPayment payment) {
         String address = book.equals("buyer") ? payment.authorization().payer() : payment.payTo();
         return book + ":" + address.toLowerCase(Locale.ROOT);
+    }
+
+    /** One book's signed suspense balance in the report (ADR-0029). */
+    private static long signedSuspense(@Nullable ReconciliationReport report, String book) {
+        if (report == null) {
+            return 0;
+        }
+        return report.suspenseByBook().stream()
+                .filter(row -> row.book().equals(book))
+                .mapToLong(row -> "CREDIT".equals(row.side())
+                        ? -row.balance().atomicUnits()
+                        : row.balance().atomicUnits())
+                .sum();
+    }
+
+    /** The books of this payment's ADJUSTMENT entries, sorted. */
+    private List<String> adjustmentBooks(TestPayment payment) {
+        return jdbc.sql("SELECT DISTINCT e.book FROM journal_entry e"
+                        + " WHERE e.payment_key = :key AND e.kind = 'ADJUSTMENT' ORDER BY e.book")
+                .param("key", payment.key())
+                .query(String.class)
+                .list();
     }
 
     private static long signedSuspense(ReconciliationReport report) {
