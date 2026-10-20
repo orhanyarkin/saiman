@@ -44,7 +44,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * exactly what {@code make ledger-tamper-demo} plus a reconciliation run produced under the old rule (a SALE raised
  * by 5000 and a cross-book ADJUSTMENT against {@code platform:suspense:usdc}), and then migrates to head.
  *
- * <p>Verification 1, 2, 4 and 5 of the ADR. Verification 3 (a clean database) is in {@code MigrateOneShotTests}.
+ * <p>Verification 1, 2, 5 and 6 of the ADR. Verification 3 (an unlinked adjustment) is in
+ * {@link UnlinkedAdjustmentMigrationTests}, verification 4 (a clean database) in {@code MigrateOneShotTests}.
  */
 @LedgerIntegrationTest
 @TestPropertySource(properties = {"saiman.test.context=per-book-suspense", "spring.flyway.target=8"})
@@ -126,7 +127,7 @@ class PerBookSuspenseMigrationTests {
         migrated = true;
     }
 
-    /** Verification 1 and 4. */
+    /** Verification 1 and 5. */
     @Test
     void migrationMovesTheDifferenceIntoTheSellerBookWithoutEditingHistory() {
         assertThat(unbalancedBooks()).as("every book balances per asset").isEmpty();
@@ -212,7 +213,7 @@ class PerBookSuspenseMigrationTests {
     }
 
     /**
-     * Verification 5: a reconciliation pass over the migrated database writes nothing. The run recomputes the
+     * Verification 6: a reconciliation pass over the migrated database writes nothing. The run recomputes the
      * payment's nets, which the reversal and the replacement leave at the chain's movement, and the replacement
      * already carries the id {@link PaymentBook#entryId} derives for {@code (payment, SELLER, run)} — verification 1
      * asserts that id directly, because a drifted id would only show up as a duplicate if the nets still differed.

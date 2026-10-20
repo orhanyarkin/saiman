@@ -6,9 +6,19 @@
 -- rule permits -- hence a migration of its own, before V10 tightens the trigger) and then one replacement ADJUSTMENT
 -- per affected book, against that book's own suspense account.
 --
--- The replacement's id is the one the new code derives, so a later reconciliation run recognises it as already
--- posted: UUID.nameUUIDFromBytes("saiman-ledger:entry:<paymentKey>:<BOOK>:ADJUSTMENT:<runId>"), a version-3 (MD5)
--- UUID, with runId taken from the reconciliation_mismatch row that points at the original entry.
+-- The replacement's id is the one the new code derives, so a human comparing the two can see they agree:
+-- UUID.nameUUIDFromBytes("saiman-ledger:entry:<paymentKey>:<BOOK>:ADJUSTMENT:<runId>"), a version-3 (MD5) UUID,
+-- with runId taken from the reconciliation_mismatch row that points at the original entry, or failing that from the
+-- reconciliation_item row of the run that posted it. The id is *not* what keeps a rerun from duplicating: runId is
+-- generated per run, so no later run re-derives it; idempotency comes from payment_id being set on both the REVERSAL
+-- and the replacement, so the recomputed difference is zero (ADR-0029, decision 7b).
+--
+-- An adjustment that no reconciliation_mismatch row points at is normal, not an error: insertMismatch is
+-- `ON CONFLICT (payment_id, kind) DO NOTHING`, so a second adjustment for the same payment and kind is never linked
+-- (the tamper demo run twice, or a split settlement whose seller event arrives after the first run). Where neither
+-- table knows the run, the replacement id is derived from the original entry instead and the correction is posted
+-- anyway: this migration must never abort over an unknown run id, because a failed migration leaves Flyway's schema
+-- history broken and the ledger service unable to start, to protect an idempotency property that does not exist.
 --
 -- A database without a cross-book ADJUSTMENT (any fresh one) finds no targets and does nothing.
 
@@ -31,6 +41,7 @@ DECLARE
     v_book        record;
     v_asset       record;
     v_run         uuid;
+    v_suffix      text;
     v_reversal    uuid;
     v_replacement uuid;
     v_suspense    text;
@@ -48,16 +59,24 @@ BEGIN
         IF v_original.payment_id IS NULL OR v_original.payment_key IS NULL THEN
             RAISE EXCEPTION 'cross-book ADJUSTMENT % is not about a payment, so it cannot be replaced', v_original.id;
         END IF;
-        -- The run that posted it; the replacement's id is derived from it (see the header).
+        -- The run that posted it; the replacement's id is derived from it (see the header). The finding is the usual
+        -- source, but only the first adjustment per (payment, kind) is linked there, so the run's own item row is
+        -- the second place to look: ReconciliationService passes the adjustment id into insertItem as well.
+        v_run := NULL;
         SELECT m.run_id INTO v_run
           FROM reconciliation_mismatch m
          WHERE m.adjustment_entry_id = v_original.id
          ORDER BY m.detected_at, m.id
          LIMIT 1;
         IF v_run IS NULL THEN
-            RAISE EXCEPTION 'no reconciliation_mismatch points at ADJUSTMENT %, so its run id is unknown',
-                v_original.id;
+            SELECT i.run_id INTO v_run
+              FROM reconciliation_item i
+             WHERE i.adjustment_entry_id = v_original.id
+             ORDER BY i.checked_at, i.run_id
+             LIMIT 1;
         END IF;
+        -- Neither table knows the run: name the replacement after the entry it replaces and post anyway. Never RAISE.
+        v_suffix := CASE WHEN v_run IS NULL THEN 'replaces:' || v_original.id ELSE v_run::text END;
 
         -- (a) Reverse it: the opposite postings, same accounts, naming the entry it reverses. Deterministic id, so
         -- re-running this migration on a copy of the same database produces the same books.
@@ -85,7 +104,13 @@ BEGIN
              ORDER BY a.book
         LOOP
             v_replacement := name_uuid_v3('saiman-ledger:entry:' || v_original.payment_key || ':' || v_book.book
-                                          || ':ADJUSTMENT:' || v_run);
+                                          || ':ADJUSTMENT:' || v_suffix);
+            -- Two adjustments of one payment and book credited to the same run would derive one id; take the
+            -- entry-derived form for the later one rather than failing on the primary key.
+            IF EXISTS (SELECT 1 FROM journal_entry e WHERE e.id = v_replacement) THEN
+                v_replacement := name_uuid_v3('saiman-ledger:entry:' || v_original.payment_key || ':' || v_book.book
+                                              || ':ADJUSTMENT:replaces:' || v_original.id);
+            END IF;
             INSERT INTO journal_entry (id, payment_id, payment_key, book, kind, description, effective_at)
             VALUES (v_replacement, v_original.payment_id, v_original.payment_key, v_book.book, 'ADJUSTMENT',
                     'Reconciliation: difference moved to this book''s suspense account (ADR-0029)',

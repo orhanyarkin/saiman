@@ -67,7 +67,7 @@ class MigrateOneShotTests {
     }
 
     /**
-     * ADR-0029 verification 3 and 4 on a clean database: V9 finds no cross-book ADJUSTMENT, so it appends nothing,
+     * ADR-0029 verification 4 and 5 on a clean database: V9 finds no cross-book ADJUSTMENT, so it appends nothing,
      * the whole-ledger sum is still zero, and a normal single-book ENCUMBER/SETTLE pair still commits under V10's
      * tightened trigger.
      */
@@ -109,7 +109,7 @@ class MigrateOneShotTests {
             connection.commit();
 
             assertThat(count(statement, "SELECT count(*) FROM ledger.posting")).isEqualTo(4);
-            // Verification 4: the whole-ledger sum stays zero.
+            // Verification 5: the whole-ledger sum stays zero.
             assertThat(count(statement, """
                             SELECT coalesce(sum(CASE side WHEN 'DEBIT' THEN amount_atomic ELSE -amount_atomic END), 0)
                               FROM ledger.posting""")).isZero();
