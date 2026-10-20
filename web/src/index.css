@@ -1,31 +1,130 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/*
+ * Design tokens from the ui-taste skill, INK accent (docs/design/ui-refresh.md). Colour means status
+ * and nothing else: the primary is near-black, and the focus ring is the info hue so focus still
+ * reads as focus. --fg-decorative is for dividers, disabled controls and icon strokes, never
+ * readable text.
+ */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.48 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.5 0 0);
+  --page: oklch(0.979 0.004 255);
+  --surface: oklch(0.995 0.002 255);
+  --surface-2: oklch(0.962 0.005 255);
+  --border: oklch(0.906 0.007 255); /* hairline, decorative */
+  --border-strong: oklch(0.63 0.012 255); /* inputs, checkboxes: 3.45:1 on surface */
+  --text: oklch(0.215 0.016 255);
+  --text-muted: oklch(0.498 0.014 255);
+  --fg-decorative: oklch(0.615 0.012 255);
+  --primary: oklch(0.265 0.02 255);
+  --primary-fg: oklch(0.985 0.002 255);
+  --success: oklch(0.495 0.11 155);
+  --warning: oklch(0.52 0.1 70);
+  --danger: oklch(0.51 0.17 27);
+  --info: oklch(0.515 0.095 230);
+  --ring: var(--info); /* ink primary: the ring must stay a distinct hue */
+  --tint: 10%; /* status tint strength */
+
+  /* shadcn-style names used across web/src, defined in terms of the tokens above. */
+  --background: var(--page);
+  --foreground: var(--text);
+  --card: var(--surface);
+  --card-foreground: var(--text);
+  --primary-foreground: var(--primary-fg);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--text);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--surface-2);
+  --accent-foreground: var(--text);
+  --destructive: var(--danger);
+  --input: var(--border-strong);
 }
 
+/*
+ * Dark mode is STORED, NOT SHIPPED (docs/design/ui-refresh.md): no toggle, no UI, nothing
+ * references it. The skill gives no dark --primary-fg for the ink row, so --primary-fg here is
+ * the dark-theme default's lightness and chroma on the neutral hue.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: oklch(0.168 0.012 255);
+    --surface: oklch(0.212 0.013 255);
+    --surface-2: oklch(0.252 0.013 255);
+    --border: oklch(0.3 0.012 255);
+    --border-strong: oklch(0.56 0.013 255);
+    --text: oklch(0.962 0.004 255);
+    --text-muted: oklch(0.74 0.012 255);
+    --fg-decorative: oklch(0.63 0.012 255);
+    --primary: oklch(0.93 0.004 255);
+    --primary-fg: oklch(0.18 0.02 255);
+    --success: oklch(0.76 0.125 155);
+    --warning: oklch(0.81 0.12 80);
+    --danger: oklch(0.73 0.15 25);
+    --info: oklch(0.77 0.09 230);
+    --tint: 16%;
+  }
+}
+
+:root {
+  /* 4px scale, nothing off it */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 9999px;
+  --shadow-xs: 0 1px 2px oklch(0.2 0.02 255 / 0.05);
+  --shadow-sm: 0 1px 3px oklch(0.2 0.02 255 / 0.07), 0 1px 2px -1px oklch(0.2 0.02 255 / 0.06);
+  --shadow-md:
+    0 4px 12px -2px oklch(0.2 0.02 255 / 0.08), 0 2px 4px -2px oklch(0.2 0.02 255 / 0.05);
+}
+
+:root {
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-moderate: 300ms;
+  --dur-slow: 500ms; /* hero only */
+  --ease-out: cubic-bezier(0, 0, 0.2, 1); /* entrances */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1); /* exits */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* in-place state change */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* rare, celebratory only */
+}
+
+/*
+ * "inline" makes each utility emit the token reference itself (var(--primary)) instead of a copy of
+ * the value, so utilities follow the :root tokens, including the dark block.
+ *
+ * Radius and shadow are deliberately NOT mapped here. Tailwind already has --radius-* and
+ * --shadow-* theme keys with the same names, so `rounded-lg` and `shadow-sm` compile to
+ * var(--radius-lg) and var(--shadow-sm). Tailwind emits its own default for those inside
+ * `@layer theme`, and the unlayered :root block above beats any layered rule, so the skill's values
+ * win. A `--radius-lg: var(--radius-lg)` entry here would be a self-reference and, if it ever won
+ * the cascade, would be invalid.
+ */
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans:
+    "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: "Instrument Serif", ui-serif, Georgia, "Times New Roman", serif;
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border-strong: var(--border-strong);
+  --color-fg-decorative: var(--fg-decorative);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -42,6 +141,11 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+}
+
+/* Tabular figures for amounts, counts, ids and timestamps. Tailwind's own `tabular-nums` also works. */
+@utility t-num {
+  font-variant-numeric: tabular-nums;
 }
 
 @layer base {
