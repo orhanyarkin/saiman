@@ -33,7 +33,7 @@ locals {
     kafka    = "apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837"
     redis    = "public.ecr.aws/docker/library/redis:8.10.2-alpine"
     otel     = "otel/opentelemetry-collector:0.162.0@sha256:310a800ad69ee430e7c541796852a242c9c7db97aaad4daa5ccf843c525fbdb2"
-    nginx    = "public.ecr.aws/docker/library/nginx:1.31.0-alpine"
+    nginx    = "public.ecr.aws/docker/library/nginx:1.31.7-alpine"
     busybox  = "public.ecr.aws/docker/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
   }
 
