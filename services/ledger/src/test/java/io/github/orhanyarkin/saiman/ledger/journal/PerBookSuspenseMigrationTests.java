@@ -15,6 +15,7 @@ import io.github.orhanyarkin.saiman.ledger.payment.PaymentProjection;
 import io.github.orhanyarkin.saiman.ledger.payment.TestPayment;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.ReconciliationReport;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.ReconciliationReports;
+import io.github.orhanyarkin.saiman.ledger.reconciliation.ReconciliationRepository;
 import io.github.orhanyarkin.saiman.ledger.reconciliation.ReconciliationService;
 import io.github.orhanyarkin.saiman.shared.money.Money;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
@@ -80,6 +81,9 @@ class PerBookSuspenseMigrationTests {
     private ReconciliationReports reports;
 
     @Autowired
+    private ReconciliationRepository reconciliationRepository;
+
+    @Autowired
     private FakeChain chain;
 
     @Autowired
@@ -132,6 +136,9 @@ class PerBookSuspenseMigrationTests {
     void migrationMovesTheDifferenceIntoTheSellerBookWithoutEditingHistory() {
         assertThat(unbalancedBooks()).as("every book balances per asset").isEmpty();
         assertThat(wholeLedgerSum()).as("the whole-ledger sum stays zero").isZero();
+        assertThat(reconciliationRepository.crossBookEntries())
+                .as("the cross-book pair V9 leaves behind is exempt from the detective check")
+                .isZero();
         assertThat(balanceOf(sellerWallet()))
                 .as("the seller's wallet is untouched by the correction")
                 .isEqualTo(sellerWalletBefore);

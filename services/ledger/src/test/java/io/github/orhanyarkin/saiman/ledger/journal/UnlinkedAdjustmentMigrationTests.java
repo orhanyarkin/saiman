@@ -10,6 +10,7 @@ import io.github.orhanyarkin.saiman.ledger.payment.PaymentFact;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentLedgerService;
 import io.github.orhanyarkin.saiman.ledger.payment.PaymentProjection;
 import io.github.orhanyarkin.saiman.ledger.payment.TestPayment;
+import io.github.orhanyarkin.saiman.ledger.reconciliation.ReconciliationRepository;
 import io.github.orhanyarkin.saiman.shared.payments.PaymentTopics;
 import io.github.orhanyarkin.saiman.testsupport.PostgresContainerConfiguration.SuperuserDatabase;
 import java.sql.Connection;
@@ -71,6 +72,9 @@ class UnlinkedAdjustmentMigrationTests {
 
     @Autowired
     private PaymentLedgerService ledger;
+
+    @Autowired
+    private ReconciliationRepository reconciliationRepository;
 
     @Autowired
     private SuperuserDatabase superuserDatabase;
@@ -185,6 +189,9 @@ class UnlinkedAdjustmentMigrationTests {
         assertThat(wholeLedgerSum()).as("the whole-ledger sum stays zero").isZero();
         assertThat(balanceOf("platform:suspense:usdc"))
                 .as("the retired platform pot nets to zero")
+                .isZero();
+        assertThat(reconciliationRepository.crossBookEntries())
+                .as("all three cross-book pairs V9 leaves behind are exempt from the detective check")
                 .isZero();
     }
 

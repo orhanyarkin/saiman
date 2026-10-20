@@ -221,6 +221,44 @@ public class ReconciliationRepository {
                         """.formatted(SIGNED)).query(Long.class).single();
     }
 
+    /**
+     * Entries with a posting on another book's account (ADR-0029: an entry belongs to exactly one book). The
+     * database refuses such an entry since V10, but only for rows written after it: V10's condition lives in the
+     * deferred {@code check_entry_balanced} trigger, which fires per row on INSERT, and the two documented bypasses
+     * ({@code ALTER TABLE ... DISABLE TRIGGER} as the owner, {@code session_replication_role} as a superuser — the
+     * tamper-demo gap) skip it entirely. Re-pointing a posting at another book's account keeps the entry balanced
+     * per asset, so {@link #unbalancedEntries} stays zero; this is the detective control for that.
+     *
+     * <p><strong>Exemption.</strong> V9 deliberately leaves one cross-book ADJUSTMENT and its cross-book REVERSAL in
+     * every corrected database, so the pair is exempted — but only when <em>both</em> halves cross books: a REVERSAL
+     * whose target is itself cross-book, and the entry such a REVERSAL undoes. Exempting every REVERSAL (or
+     * expecting a fixed count of V9 pairs) was the alternative; both are weaker. Any writer who can INSERT a journal
+     * entry could otherwise hide a cross-book entry by appending a plain single-book REVERSAL naming it, and a
+     * fixed count would need a per-database baseline and would drift. A mirror of a cross-book entry is itself
+     * cross-book, which V10 refuses, so this exemption matches exactly what V9 wrote and nothing that can be
+     * appended afterwards: any non-zero count means the trigger was bypassed.
+     */
+    @Transactional(readOnly = true)
+    public long crossBookEntries() {
+        return jdbc.sql("""
+                        WITH crossed AS (
+                            SELECT DISTINCT p.entry_id
+                              FROM posting p
+                              JOIN account a ON a.code = p.account_code AND a.asset = p.asset
+                               AND a.decimals = p.decimals
+                              JOIN journal_entry e ON e.id = p.entry_id
+                             WHERE a.book <> e.book)
+                        SELECT count(*)
+                          FROM crossed c
+                          JOIN journal_entry e ON e.id = c.entry_id
+                         WHERE NOT EXISTS (SELECT 1 FROM crossed x
+                                            WHERE e.kind = 'REVERSAL' AND x.entry_id = e.reverses_entry_id)
+                           AND NOT EXISTS (SELECT 1 FROM journal_entry r
+                                             JOIN crossed x ON x.entry_id = r.id
+                                            WHERE r.kind = 'REVERSAL' AND r.reverses_entry_id = e.id)
+                        """).query(Long.class).single();
+    }
+
     /** The ledger's net movements on this payment's wallets, over all of its entries (adjustments included). */
     @Transactional(propagation = Propagation.MANDATORY)
     public ChainReconciler.LedgerNets nets(PaymentProjection payment) {

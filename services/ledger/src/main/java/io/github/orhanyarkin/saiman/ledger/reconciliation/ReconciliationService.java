@@ -129,6 +129,7 @@ public class ReconciliationService {
     private final AtomicReference<@Nullable Instant> lastManualStart = new AtomicReference<>();
     private final AtomicReference<@Nullable UUID> lastUnauthorizedRun = new AtomicReference<>();
     private final AtomicLong unbalancedEntries = new AtomicLong();
+    private final AtomicLong crossBookEntries = new AtomicLong();
     private final AtomicLong dueBacklog = new AtomicLong();
     private final AtomicLong oldestUncheckedSeconds = new AtomicLong();
 
@@ -160,6 +161,8 @@ public class ReconciliationService {
         this.observations = observations.getIfAvailable(() -> ObservationRegistry.NOOP);
         this.sellers = sellers;
         meters.gauge("saiman.ledger.reconciliation.unbalanced.entries", unbalancedEntries);
+        // ADR-0029: a cross-book entry still balances per asset, so the unbalanced gauge cannot see one.
+        meters.gauge("saiman.ledger.reconciliation.cross_book.entries", crossBookEntries);
         // Set at the start of each run (after the safe block is read): the backlog the run starts from.
         meters.gauge("saiman.ledger.reconciliation.due", dueBacklog);
         meters.gauge("saiman.ledger.reconciliation.oldest_unchecked_seconds", oldestUncheckedSeconds);
@@ -277,6 +280,14 @@ public class ReconciliationService {
                 log.error("Reconciliation run {}: {} journal entries do not balance per asset", runId, unbalanced);
             }
             unbalancedEntries.set(unbalanced);
+            long crossBook = repository.crossBookEntries();
+            if (crossBook > 0) {
+                log.error(
+                        "Reconciliation run {}: {} journal entries post to another book's account (ADR-0029)",
+                        runId,
+                        crossBook);
+            }
+            crossBookEntries.set(crossBook);
             long now = clock.instant().getEpochSecond();
             if (reported.timestamp() > Math.addExact(now, MAX_SAFE_AHEAD_SECONDS)) {
                 // Trusting it would expire live authorizations and post SETTLED_BUT_UNUSED for payments that may
