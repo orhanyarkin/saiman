@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import { PaymentsPanel } from "@/components/run/payments-panel";
 import { ReportPanel } from "@/components/run/report-panel";
+import { StatusBadge } from "@/components/run/status-badge";
 import { Stepper } from "@/components/run/stepper";
+import { STATUS_GLYPH, STATUS_TEXT } from "@/lib/run-status";
 import type { PaymentRow } from "@/lib/run-view-model";
 
 describe("Stepper", () => {
@@ -81,5 +83,32 @@ describe("PaymentsPanel", () => {
     expect(screen.getAllByRole("link")).toHaveLength(1);
     expect(screen.getByText("run budget would be exceeded")).toBeInTheDocument();
     expect(screen.getAllByText("0.02 USDC")).toHaveLength(2);
+  });
+});
+
+describe("StatusBadge", () => {
+  it("gives every status its own tone while keeping the glyph and the word", () => {
+    const tones: Record<string, string> = {};
+    for (const status of [
+      "QUEUED",
+      "RUNNING",
+      "AWAITING_APPROVAL",
+      "SUCCEEDED",
+      "FAILED",
+    ] as const) {
+      const { container, unmount } = render(<StatusBadge status={status} />);
+      const badge = container.firstElementChild;
+      expect(badge).toHaveTextContent(STATUS_TEXT[status]);
+      expect(badge).toHaveTextContent(STATUS_GLYPH[status]);
+      tones[status] = badge?.getAttribute("data-tone") ?? "";
+      unmount();
+    }
+    expect(tones).toEqual({
+      QUEUED: "neutral",
+      RUNNING: "info",
+      AWAITING_APPROVAL: "warning",
+      SUCCEEDED: "success",
+      FAILED: "danger",
+    });
   });
 });

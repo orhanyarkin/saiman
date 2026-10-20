@@ -48,7 +48,15 @@ function RootComponent() {
             aria-label="Main"
             className="order-3 w-full overflow-x-auto sm:order-2 sm:w-auto sm:overflow-x-visible"
           >
-            <ul className="flex items-center gap-1 py-1">
+            <ul
+              className="flex items-center gap-1 py-1"
+              // Chromium leaves a partly visible item where it is when it takes focus, so the last
+              // items of the scrolling row would be focused half off-screen. "nearest" does
+              // nothing when the item is already fully visible and never scrolls the page itself.
+              onFocus={(event) => {
+                event.target.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+              }}
+            >
               <li>
                 <Link
                   to="/runs"
