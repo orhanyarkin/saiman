@@ -25,6 +25,8 @@ export default defineConfig({
   timeout: 120_000,
   use: {
     baseURL: BASE_URL,
+    locale: "en-GB",
+    timezoneId: "UTC",
     trace: "off",
     video: "off",
     screenshot: "off", // the spec writes its own files; no automatic failure screenshots
