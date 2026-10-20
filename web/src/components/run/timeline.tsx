@@ -1,4 +1,5 @@
 import type { RunEvent } from "@/lib/api/run-events";
+import { formatTime } from "@/lib/day";
 import { describeEvent } from "@/lib/run-view-model";
 
 export function Timeline({ events }: { events: readonly RunEvent[] }) {
@@ -12,8 +13,8 @@ export function Timeline({ events }: { events: readonly RunEvent[] }) {
         return (
           <li key={event.seq} className="border-l-2 pl-3 text-sm">
             <span className="font-medium">{item.label}</span>{" "}
-            <time dateTime={item.at} className="text-muted-foreground text-xs">
-              {new Date(item.at).toLocaleTimeString()}
+            <time dateTime={item.at} title={item.at} className="text-muted-foreground text-xs">
+              {formatTime(item.at)}
             </time>
             {item.detail ? (
               <span className="text-muted-foreground block">{item.detail}</span>

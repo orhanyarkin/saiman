@@ -8,6 +8,7 @@ import {
   mismatchText,
   sellerStateText,
 } from "@/lib/ledger-model";
+import { formatDateTime } from "@/lib/day";
 import { formatMoney, moneyTitle } from "@/lib/money";
 import { basescanTxUrl } from "@/lib/run-view-model";
 
@@ -111,8 +112,8 @@ export function PaymentDetailView({ detail }: { detail: PaymentDetail }) {
                 <caption className="pb-1 text-left font-medium">
                   {entry.kind} in the {entry.book.toLowerCase()} book: {entry.description}
                   <span className="text-muted-foreground block text-xs font-normal">
-                    <time dateTime={entry.effectiveAt}>
-                      {new Date(entry.effectiveAt).toLocaleString()}
+                    <time dateTime={entry.effectiveAt} title={entry.effectiveAt}>
+                      {formatDateTime(entry.effectiveAt)}
                     </time>
                     {entry.reversesEntryId ? ` · reverses entry ${entry.reversesEntryId}` : ""}
                   </span>

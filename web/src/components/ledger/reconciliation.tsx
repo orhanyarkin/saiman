@@ -18,12 +18,13 @@ import {
   PENDING_EXPLANATION,
   reconStatusText,
 } from "@/lib/ledger-model";
+import { formatDateTime } from "@/lib/day";
 import { formatMoney, moneyTitle } from "@/lib/money";
 import { basescanTxUrl } from "@/lib/run-view-model";
 import { isReplayMode } from "@/lib/mode";
 import { useCapabilities } from "@/lib/use-capabilities";
 
-const when = (iso: string) => new Date(iso).toLocaleString();
+const when = formatDateTime;
 
 // ---- Run now ------------------------------------------------------------------------------
 
@@ -162,10 +163,16 @@ export function ReportView({ report }: { report: ReconciliationReport }) {
     <div className="space-y-6">
       <p className="text-sm">
         <span className="font-medium">{reconStatusText(report.status)}</span>
-        {" · "}started <time dateTime={report.startedAt}>{when(report.startedAt)}</time>
+        {" · "}started{" "}
+        <time dateTime={report.startedAt} title={report.startedAt}>
+          {when(report.startedAt)}
+        </time>
         {report.finishedAt ? (
           <>
-            {" · "}finished <time dateTime={report.finishedAt}>{when(report.finishedAt)}</time>
+            {" · "}finished{" "}
+            <time dateTime={report.finishedAt} title={report.finishedAt}>
+              {when(report.finishedAt)}
+            </time>
           </>
         ) : null}
         {" · "}
@@ -287,7 +294,9 @@ export function RunHistory({ runs }: { runs: readonly ReconciliationRunSummary[]
                   params={{ reconRunId: run.runId }}
                   className="underline underline-offset-4"
                 >
-                  <time dateTime={run.startedAt}>{when(run.startedAt)}</time>
+                  <time dateTime={run.startedAt} title={run.startedAt}>
+                    {when(run.startedAt)}
+                  </time>
                 </Link>
               </th>
               <td className="py-2 pr-4">{run.status}</td>
