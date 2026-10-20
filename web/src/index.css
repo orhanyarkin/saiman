@@ -149,6 +149,40 @@
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * The skill's status tint, as one recipe used by every status surface (run badges, the environment
+ * banners, the pending-approval count). `--tone` carries the status token; `data-tone` below sets
+ * it, and the default is --text, which reads as the neutral state.
+ *
+ * The mix is `in oklab`, never `in oklch`: polar interpolation against a near-achromatic surface
+ * drags the hue toward the neutral's, which turns the amber warning tint into a lavender and the
+ * red danger tint into a blue-violet. oklab keeps the hue.
+ */
+@utility tone-tint {
+  color: var(--tone, var(--text));
+  background-color: color-mix(in oklab, var(--tone, var(--text)) var(--tint), var(--surface));
+  border-color: color-mix(in oklab, var(--tone, var(--text)) 30%, transparent);
+}
+
+/* The fixed status set. A new status needs a tone here and a word plus a glyph at the call site. */
+@layer components {
+  [data-tone="success"] {
+    --tone: var(--success);
+  }
+  [data-tone="warning"] {
+    --tone: var(--warning);
+  }
+  [data-tone="danger"] {
+    --tone: var(--danger);
+  }
+  [data-tone="info"] {
+    --tone: var(--info);
+  }
+  [data-tone="neutral"] {
+    --tone: var(--text);
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
