@@ -214,6 +214,18 @@ payment status transition (`signed` to `settled`), approval card resolving, repo
 only on state change, never on arrival. Every animation needs a reduced-motion branch that lands in
 the correct end state.
 
+**The fixture's completed run shows all four steps as "waiting".** Two separate problems, both in
+scope here. The fixture has no step events for that run, so the screenshots mislead: give it step
+events so a completed run looks completed. Then look at the status logic itself, because a run that
+is terminal and has no step events should not render "waiting" either. Terminal plus no evidence is
+not the same as in progress; pick a defensible fallback for a terminal run and test it.
+
+**One shared `Address` component**, built here and reused by PR 5. The payee address in the run
+detail Payments table currently breaks across nine lines. It should render `0x1111…1111` in mono,
+unbreakable, with the full value in `title` and a copy button. Ledger and reconciliation use the
+same component in PR 5 rather than a second truncation rule. Size the table columns to their
+content while you are there.
+
 The budget bars are ink from PR 1, which is right for ordinary consumption. Past 80 percent of the
 budget they switch to `--warning`, and colour must not be the only signal: the bar gets a word or an
 icon beside it saying the budget is nearly spent. The threshold is presentation only and never
@@ -243,8 +255,9 @@ status badges from the fixed set, designed empty states.
   from a client that paid seller-api directly, almost certainly the console buyer. Label them
   "Direct client, not from a run", not "Nothing booked yet", which implies something is pending.
 - **Long ids break mid-word.** The ledger account code wraps as `wallet:av/ailable` and the
-  reconciliation payer breaks arbitrarily. Shorten addresses to `0xdd54...4795` with the full value
-  in a `title` and a copy affordance, and stop mid-word breaking on identifier columns.
+  reconciliation payer breaks arbitrarily. Use the shared `Address` component PR 4 builds rather
+  than a second truncation rule, and stop mid-word breaking on identifier columns. An account code
+  is not an address, so it needs its own treatment: break on the `:` separators, not mid-word.
 
 ### PR 6: consistency pass
 
