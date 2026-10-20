@@ -43,8 +43,11 @@ example:
 
 ```make
 e2e-live: web/node_modules
-	SAIMAN_E2E_TOKEN_FILE=secrets/api_operator_token SAIMAN_E2E_BASE_URL=http://localhost:8088 pnpm --dir web e2e:live
+	SAIMAN_E2E_TOKEN_FILE=$(CURDIR)/secrets/api_operator_token SAIMAN_E2E_BASE_URL=http://localhost:8088 pnpm --dir web e2e:live
 ```
+
+The path must be absolute: `pnpm --dir web` runs Playwright in `web/`, so a relative
+`secrets/api_operator_token` would resolve to `web/secrets/api_operator_token` and fail with ENOENT.
 
 Make echoes the recipe text with `$$(...)` unexpanded, so the token itself never reaches the log.
 
