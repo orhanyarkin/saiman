@@ -5,6 +5,20 @@ M6b — migrate one-shot (ADR-0027) and AWS demo-lite automation (ADR-0028): **m
 Remaining work is human-only: the capture for the replay has not been taken, so another `demo-up`, `make demo-tunnel` (with the local `web` container stopped, or the same `TUNNEL_PORT=18088` on it and on `make demo-capture`), a run or two started on the dashboard, `make demo-capture` and `demo-down` again; after that the Cloudflare Pages replay, Infracost and `terraform plan` output in the README, the video and the blog post.
 All milestones through M6b are done and merged: M6b, M6 (hardening, evals, replay), M5 (dashboard), M4b, the Redis/Kafka swap and M4.
 
+## Backlog
+
+- **Compiler warnings the IDE reports but the build does not fail on.** At least 29 across 9 files,
+  seen while working on the UI refresh: unused locals in `PaymentBook.java` (4),
+  `PaymentLedgerServiceTests.java` (4) and `ResearchToolCallbacksTests.java` (3); raw `Schema` types
+  and unchecked `containsExactly` in `NullabilityOpenApiCustomizerTests.java` (10); an unused import
+  in `FakeSellerCreditNotes.java`; unnecessary `@SuppressWarnings("unchecked")` in
+  `NullabilityModelConverter.java` (2); and deprecations, `HttpStatus.UNPROCESSABLE_ENTITY` in
+  `DisclosureProblemAdvice.java` (deprecated since Spring 7.0) and
+  `TestObservationRegistry.assertThat` in `X402ObservationRedactionTests.java` and
+  `UpfrontPaymentFlowIntegrationTests.java`. The list was truncated when collected, so treat the
+  count as a floor. None of this comes from the UI refresh; it is pre-existing. Worth one cleanup
+  pass after the UI phase, with the two deprecations decided deliberately rather than silenced.
+
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
