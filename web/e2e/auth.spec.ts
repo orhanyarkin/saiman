@@ -156,8 +156,9 @@ cold.describe("role-aware actions", () => {
 
     await page.goto("/runs");
     await coldExpect(page.getByRole("table", { name: /Research runs/ })).toBeVisible();
+    // The role is session state, not navigation, so it sits in the banner beside the nav landmark.
+    await coldExpect(page.getByRole("banner").getByText("Connected (reader)")).toBeVisible();
     const nav = page.getByRole("navigation", { name: "Main" });
-    await coldExpect(nav.getByText("Connected (reader)")).toBeVisible();
     await coldExpect(nav.getByRole("link", { name: "New run" })).toHaveCount(0);
 
     await page.goto("/runs/new");
@@ -189,8 +190,8 @@ cold.describe("role-aware actions", () => {
 
   test("an operator gets the actions", async ({ page }) => {
     await page.goto("/runs");
+    await expect(page.getByRole("banner").getByText("Connected (operator)")).toBeVisible();
     const nav = page.getByRole("navigation", { name: "Main" });
-    await expect(nav.getByText("Connected (operator)")).toBeVisible();
     await expect(nav.getByRole("link", { name: "New run" })).toBeVisible();
     await page.goto("/reconciliation");
     await expect(page.getByRole("button", { name: "Run now" })).toBeVisible();
