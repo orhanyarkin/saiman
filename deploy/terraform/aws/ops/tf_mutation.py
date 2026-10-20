@@ -54,6 +54,14 @@ def run(module_dir, test_filter, mutations, argv, repo_root=None, extra_dirs=())
             os.symlink(os.path.join(module_dir, ".terraform"), os.path.join(mod, ".terraform"))
         else:
             subprocess.run(["terraform", "init", "-backend=false", "-input=false"], cwd=mod, check=True, capture_output=True)
+        # Check every anchor before the first (slow) terraform run and report ALL stale ones together: a mutation whose anchor
+        # no longer matches would otherwise silently shorten the run (or stop it at the first problem).
+        stale = [(rule, fname) for rule, edits, _ in entries if not wanted or rule in wanted for fname, old, _ in edits if old not in open(os.path.join(mod, fname), encoding="utf-8").read()]
+        if stale:
+            for rule, fname in stale:
+                print(f"SETUP {rule}: the mutation anchor is not in {fname} (update the mutation table)", file=sys.stderr)
+            print(f"mutation-check: {len(stale)} stale anchor(s), nothing was run. A dependency bump (image tag, version) probably changed the anchored text: keep anchors free of versions.", file=sys.stderr)
+            return 2
         code, _ = _run_tests(mod, test_filter)
         if code != 0:
             print("baseline is red: fix the tests before mutating", file=sys.stderr)

@@ -64,6 +64,13 @@ def main(argv):
     survived = 0
     try:
         tree(root)
+        # Report every stale anchor together, before the first test run; a stale anchor must fail the run, never shorten it.
+        stale = [(m[0], m[1]) for m in MUTATIONS if (not wanted or m[0] in wanted) and m[2] not in open(os.path.join(root, m[1]), encoding="utf-8").read()]
+        if stale:
+            for rule, rel in stale:
+                print(f"SETUP {rule}: the mutation anchor is not in {rel} (update the mutation table)", file=sys.stderr)
+            print(f"mutation-check: {len(stale)} stale anchor(s), nothing was run. Update the anchors to the current text of the file.", file=sys.stderr)
+            return 2
         baseline = {}
         for script in (READINESS, OPS):
             baseline[script] = run(root, script)
