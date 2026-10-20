@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { ErrorNotice } from "@/components/error-notice";
 import { Button } from "@/components/ui/button";
 import type { ApprovalView } from "@/lib/api/types";
+import { formatTime } from "@/lib/day";
 import { useNow } from "@/lib/hooks";
 import { formatMoney, moneyTitle, usdc } from "@/lib/money";
 import { useApprovalDecision } from "@/lib/use-approval-decision";
@@ -33,7 +34,9 @@ export function ApprovalRow({ approval }: { approval: ApprovalView }) {
         <dd className="break-all">{approval.resource}</dd>
         <dt className="text-muted-foreground font-medium">Expires</dt>
         <dd>
-          <time dateTime={approval.expiresAt}>{expires.toLocaleTimeString()}</time>
+          <time dateTime={approval.expiresAt} title={approval.expiresAt}>
+            {formatTime(approval.expiresAt)}
+          </time>
           {expired ? <strong> (expired)</strong> : null}
         </dd>
         {approval.decidedBy ? (

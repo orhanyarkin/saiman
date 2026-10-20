@@ -2,8 +2,8 @@
 name: frontend
 description: Builds the React 19 + Vite + TypeScript dashboard in web/ — live agent run timeline, spend by tool, approval queue, ledger and reconciliation views, seller revenue, eval reports. Use for any UI task.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch
-model: sonnet
-effort: medium
+model: opus
+effort: high
 maxTurns: 80
 isolation: worktree
 memory: project

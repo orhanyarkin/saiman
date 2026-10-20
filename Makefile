@@ -7,9 +7,11 @@ COMPOSE := docker compose -f deploy/compose/docker-compose.yml
 # web/, so a relative `secrets/...` would resolve to web/secrets/... and fail with ENOENT.
 OPERATOR_TOKEN_FILE := $(CURDIR)/secrets/api_operator_token
 
-# Fails early, naming the target, when the token file is missing. Tests existence only, never reads it.
+# Fails early, naming the target, when the token file is missing or empty. Tests existence and size only,
+# never reads it. `-s` rather than `-f`: an empty file would pass `-f` and then fail inside Playwright with a
+# message about the variable being unset, which it is not. Same predicate as scripts/auth-tokens.sh.
 define require-operator-token
-@test -f "$(OPERATOR_TOKEN_FILE)" || { echo "$(1): $(OPERATOR_TOKEN_FILE) not found. Run 'make auth-tokens' to see which token files exist ('make up' creates them)." >&2; exit 1; }
+@test -s "$(OPERATOR_TOKEN_FILE)" || { echo "$(1): $(OPERATOR_TOKEN_FILE) is missing or empty. Run 'make auth-tokens' to see which token files exist ('make up' creates them)." >&2; exit 1; }
 endef
 
 # Default target for the x402 console buyer's `buy`/`replay`/`testnet-check` commands:

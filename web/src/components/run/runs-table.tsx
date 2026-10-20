@@ -4,6 +4,7 @@ import { AnnotationCallout } from "@/components/replay/run-annotation";
 import { runAnnotation } from "@/lib/run-annotation";
 import { StatusBadge } from "@/components/run/status-badge";
 import type { RunListItem } from "@/lib/api/types";
+import { formatDateTime } from "@/lib/day";
 import { formatMoney, moneyTitle } from "@/lib/money";
 
 function Cost({ run }: { run: RunListItem }) {
@@ -104,7 +105,9 @@ function RunRow({ run }: { run: RunListItem }) {
         <BudgetUsed run={run} />
       </td>
       <td className="py-2 whitespace-nowrap">
-        <time dateTime={run.createdAt}>{new Date(run.createdAt).toLocaleString()}</time>
+        <time dateTime={run.createdAt} title={run.createdAt}>
+          {formatDateTime(run.createdAt)}
+        </time>
       </td>
     </tr>
   );
