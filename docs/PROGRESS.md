@@ -22,6 +22,16 @@ All milestones through M6b are done and merged: M6b, M6 (hardening, evals, repla
 ## Log
 <!-- Newest first. One entry per merged task: date, what changed, how it was verified, what's next, open questions. -->
 
+### 2026-10-20 — Fix: `RetrievalTests.identicalTextRanksFirstInBothLegs` no longer asserts a bare literal; Known flaky: `ReconciliationLeaseTests.runExportsTheDueBacklogGauges`
+- **Ingest fix:** the test now checks the exact (index scans off) vector leg and the lexical leg put the chunk first, computes the fusion of the legs as production runs them (one transaction, `SET LOCAL hnsw.iterative_scan = relaxed_order`), asserts the endpoint returns exactly that, and then the original field assertions. Failure messages print both legs. The other tests in the file were audited: the other expectation-from-repository tests already use the production-style helper (`ebc801c`); the rest assert non-emptiness, sizes or membership, not an exact ordering of a filtered HNSW result.
+- **Not reproduced:** the CI failure (line 131, the top chunk was not the chunk itself) could not be reproduced. 600 forced-index-plan probes (seq scan off, relaxed iterative scan) found the chunk first every time; both legs have it first with margin, so only a recall miss of the approximate scan or a row-set change during the query can flip it. Six full `:services:ingest:test` runs passed. If it recurs, the new failure message shows both legs and says which one lost the chunk.
+
+### Known flaky: `ReconciliationLeaseTests.runExportsTheDueBacklogGauges` (ledger)
+- **Seen once** (cause not proven). The test calls `service.runNow()`, then reads the `due` gauge and compares it with a count of payments with a tx hash taken afterwards.
+- **Candidate causes (read from the code, not reproduced):** (1) `runNow()` returns empty when another session holds the advisory lease, e.g. the scheduled run (`ReconciliationScheduling`, first run after 5 minutes) on a slow or long-lived shared `reconciliation` test context; (2) the gauge is set from the database at the start of the run while the expected count is read later, so a payment inserted in between by an earlier test's asynchronous Kafka/outbox work in the shared context raises the count above the gauge.
+- **Ruled out:** a test-versus-production expectation mismatch (the due condition `buyer_tx_hash IS NOT NULL OR seller_tx_hash IS NOT NULL` is the same SQL the gauge uses); gauge registration (the second `ReconciliationService` built in the sibling test registers the same meter id, but the registry keeps the first, which belongs to the context's bean).
+- **Not fixed here:** `services/ledger` was being changed by another agent. **Evidence that would settle it:** the failing assertion's line (115 = refused lease, 127 = count raced the gauge) and the run's log lines "Reconciliation run ..." around it; a fix would read the count before `runNow()` in the same transaction as the run's snapshot, or assert `>=` against a count taken before the run.
+
 ### 2026-10-20 — Container images get their own Dependabot pull request; the otel collector cannot come back
 
 **What changed**
