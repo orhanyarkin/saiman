@@ -214,6 +214,11 @@ payment status transition (`signed` to `settled`), approval card resolving, repo
 only on state change, never on arrival. Every animation needs a reduced-motion branch that lands in
 the correct end state.
 
+The budget bars are ink from PR 1, which is right for ordinary consumption. Past 80 percent of the
+budget they switch to `--warning`, and colour must not be the only signal: the bar gets a word or an
+icon beside it saying the budget is nearly spent. The threshold is presentation only and never
+money maths, the same rule the `<meter>` already follows.
+
 ### PR 5: ledger and reconciliation
 
 **Blocked** until the ledger finding under "Baseline findings" is resolved. Nothing in this phase may
