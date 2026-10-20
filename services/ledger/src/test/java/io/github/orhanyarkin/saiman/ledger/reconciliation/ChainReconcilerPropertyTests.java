@@ -39,8 +39,8 @@ import org.junit.jupiter.api.Test;
  * known tx).
  *
  * <ul>
- *   <li><b>P4 balance:</b> books plus adjustment still balance per asset (every entry does), and suspense absorbs
- *       exactly the corrections.
+ *   <li><b>P4 balance:</b> books plus adjustments still balance per asset and <em>per book</em> (every entry does and
+ *       every entry is single-book, ADR-0029), and suspense absorbs exactly the corrections.
  *   <li><b>P5 convergence:</b> after the adjustment, every compared wallet's net equals the chain's movement.
  *   <li><b>P6 idempotence:</b> a rerun on the adjusted books posts nothing and reports the same chain state.
  * </ul>
@@ -91,27 +91,36 @@ class ChainReconcilerPropertyTests {
                     var evidence = scenario.evidence();
 
                     var first = ChainReconciler.reconcile(p, books.nets(), evidence, SETTINGS, UUID.randomUUID(), NOW);
-                    Books adjusted = books.plus(first.adjustment(), first.next());
+                    Books adjusted = books.plusAll(first.adjustments(), first.next());
 
-                    // P4: every entry balances, so the whole book does; suspense holds exactly the corrections.
+                    // P4: every entry balances and belongs to one book (ADR-0029), so every book balances per asset;
+                    // suspense holds exactly the corrections, each in the book that owns it.
                     Map<String, Long> perAsset = new HashMap<>();
+                    Map<String, Long> perBookAndAsset = new HashMap<>();
                     long suspense = 0;
                     for (JournalEntry entry : adjusted.entries()) {
                         for (Posting posting : entry.postings()) {
+                            assertThat(posting.account().book()).isEqualTo(entry.book());
                             perAsset.merge(posting.amount().asset(), posting.signedAtomic(), Math::addExact);
+                            perBookAndAsset.merge(
+                                    entry.book() + "/" + posting.amount().asset(),
+                                    posting.signedAtomic(),
+                                    Math::addExact);
                             if (posting.account().type() == AccountType.SUSPENSE) {
                                 assertThat(entry.kind()).isEqualTo(EntryKind.ADJUSTMENT);
+                                assertThat(posting.account().book()).isEqualTo(entry.book());
                                 suspense += posting.signedAtomic();
                             }
                         }
                     }
                     assertThat(perAsset.values()).allMatch(v -> v == 0);
+                    assertThat(perBookAndAsset.values()).allMatch(v -> v == 0);
                     var before = books.nets();
                     var after = adjusted.nets();
                     assertThat(suspense)
                             .isEqualTo((before.buyerWallet() - after.buyerWallet())
                                     + (before.sellerWallet() - after.sellerWallet()));
-                    if (first.adjustment() != null) {
+                    if (!first.adjustments().isEmpty()) {
                         assertThat(first.findings()).isNotEmpty();
                         assertThat(first.findings().getFirst().adjusted()).isTrue();
                         assertThat(first.status()).isEqualTo(ItemStatus.MISMATCH);
@@ -132,7 +141,7 @@ class ChainReconcilerPropertyTests {
                     // P6: rerun posts nothing and agrees on the chain state.
                     var rerun = ChainReconciler.reconcile(
                             adjusted.projection(), after, evidence, SETTINGS, UUID.randomUUID(), NOW);
-                    assertThat(rerun.adjustment()).isNull();
+                    assertThat(rerun.adjustments()).isEmpty();
                     assertThat(rerun.next().chainState()).isEqualTo(first.next().chainState());
                     assertThat(rerun.findings()).noneMatch(ChainReconciler.Finding::adjusted);
                 });
@@ -176,17 +185,15 @@ class ChainReconcilerPropertyTests {
     /** The tamper demo in miniature: both postings of the seller's sale (or a buyer leg) raised by {@code delta}. */
     private static JournalEntry tamperEntry(PaymentProjection p, long delta) {
         Money amount = Money.usdc(delta);
-        Account wallet = p.sellerState() == SellerState.SETTLED
-                ? ChartOfAccounts.sellerWallet(p.payTo())
-                : ChartOfAccounts.buyerAvailable(p.payer());
-        Account other = p.sellerState() == SellerState.SETTLED
-                ? ChartOfAccounts.sellerRevenue(p.payTo())
-                : ChartOfAccounts.buyerExpense(p.payer());
+        boolean seller = p.sellerState() == SellerState.SETTLED;
+        Account wallet = seller ? ChartOfAccounts.sellerWallet(p.payTo()) : ChartOfAccounts.buyerAvailable(p.payer());
+        Account other = seller ? ChartOfAccounts.sellerRevenue(p.payTo()) : ChartOfAccounts.buyerExpense(p.payer());
         return new JournalEntry(
                 UUID.randomUUID(),
                 p.id(),
                 p.paymentKey(),
-                LedgerBook.SELLER,
+                // An entry belongs to one book (ADR-0029), so the tamper stays inside the book it touches.
+                seller ? LedgerBook.SELLER : LedgerBook.BUYER,
                 EntryKind.ADJUSTMENT,
                 null,
                 null,

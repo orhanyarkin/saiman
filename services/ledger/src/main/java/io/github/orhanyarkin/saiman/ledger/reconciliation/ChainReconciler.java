@@ -1,8 +1,9 @@
 package io.github.orhanyarkin.saiman.ledger.reconciliation;
 
 import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.buyerAvailable;
+import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.buyerSuspense;
+import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.sellerSuspense;
 import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.sellerWallet;
-import static io.github.orhanyarkin.saiman.ledger.journal.ChartOfAccounts.suspense;
 
 import io.github.orhanyarkin.saiman.evmrpc.ChainBlock;
 import io.github.orhanyarkin.saiman.evmrpc.UsdcAuthorizationUse;
@@ -25,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -36,8 +38,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * The chain step of the per-payment state machine (ADR-0017, ADR-0018): pure, no Spring, no database, no RPC.
  * Given the payment projection, the ledger's net movements for that payment and what Base Sepolia says at the
- * {@code safe} block, it returns the next projection, the item status, the mismatches and at most one ADJUSTMENT
- * entry that moves every difference to {@code platform:suspense:usdc}.
+ * {@code safe} block, it returns the next projection, the item status, the mismatches and one ADJUSTMENT entry per
+ * affected book, each moving that book's difference to that book's suspense account (ADR-0029).
  *
  * <h2>Chain truth</h2>
  *
@@ -67,7 +69,9 @@ import org.jspecify.annotations.Nullable;
  * The chain is right. For every <em>known</em> wallet — the buyer's once the buyer's book is terminal (SETTLED or
  * RELEASED), the seller's once the seller's book has reported (SETTLED, SETTLE_FAILED or CREDITED) — the ledger's net
  * movement over <em>all</em> entries of this payment (adjustments included) is compared with the chain's movement.
- * A difference is posted between that wallet and suspense, in one ADJUSTMENT entry per run. Because adjustments
+ * A difference is posted between that wallet and <em>its own book's</em> suspense account
+ * ({@code buyer:<payer>:suspense:usdc} or {@code seller:<payTo>:suspense:usdc}), in one ADJUSTMENT entry per run and
+ * book (ADR-0029): an entry belongs to exactly one book, so the entry and the book both balance. Because adjustments
  * count towards the net, a rerun finds no difference and posts nothing. A book that has not reported is not
  * compared (M3 history has buyer events only). The difference is named by the receipt finding when there is one
  * (PARTY/AMOUNT), else: chain UNUSED → {@code SETTLED_BUT_UNUSED}; chain USED while the book says released or
@@ -131,22 +135,31 @@ public final class ChainReconciler {
      * @param next the projection with chain state, chain tx hash and {@code lastCheckedAt}
      * @param chainBlock block of the canonical receipt, if any
      * @param findings mismatches, the one carrying the adjustment (if any) first
-     * @param adjustment the ADJUSTMENT entry to post, or null
+     * @param adjustments one ADJUSTMENT entry per affected book (ADR-0029), buyer's first, or empty
      */
     public record Outcome(
             ItemStatus status,
             PaymentProjection next,
             @Nullable Long chainBlock,
             List<Finding> findings,
-            @Nullable JournalEntry adjustment) {
+            List<JournalEntry> adjustments) {
 
         public Outcome {
             findings = List.copyOf(findings);
+            adjustments = List.copyOf(adjustments);
         }
 
         /** The finding the report shows for the item: the adjusted one, else the first. */
         public @Nullable Finding primary() {
             return findings.isEmpty() ? null : findings.getFirst();
+        }
+
+        /**
+         * The adjustment a finding points at: the first one, whose book is the one whose values the finding shows
+         * ({@code reconciliation_mismatch} has a single {@code adjustment_entry_id}; ADR-0029 adds no column).
+         */
+        public @Nullable JournalEntry primaryAdjustment() {
+            return adjustments.isEmpty() ? null : adjustments.getFirst();
         }
     }
 
@@ -202,7 +215,7 @@ public final class ChainReconciler {
                     null,
                     false));
             return new Outcome(
-                    ItemStatus.MISMATCH, p.withChain(p.chainState(), p.chainTxHash(), now), null, findings, null);
+                    ItemStatus.MISMATCH, p.withChain(p.chainState(), p.chainTxHash(), now), null, findings, List.of());
         }
         // Every reported hash is checked on its own: a bogus hash from one producer must not freeze the payment.
         String reportedTx = reported.isEmpty() ? null : reported.getFirst();
@@ -244,7 +257,7 @@ public final class ChainReconciler {
             findings.add(
                     new Finding(MismatchKind.CONFLICTING_TX, null, null, p.buyerTxHash(), p.sellerTxHash(), false));
             return new Outcome(
-                    ItemStatus.MISMATCH, p.withChain(p.chainState(), p.chainTxHash(), now), null, findings, null);
+                    ItemStatus.MISMATCH, p.withChain(p.chainState(), p.chainTxHash(), now), null, findings, List.of());
         }
         if (canonical == null && undecided) {
             return pending(p, findings, now);
@@ -268,7 +281,7 @@ public final class ChainReconciler {
                             next,
                             null,
                             findings,
-                            null);
+                            List.of());
                 }
             }
         }
@@ -309,14 +322,14 @@ public final class ChainReconciler {
 
         booksOpen(p, safe, settings).ifPresent(findings::add);
 
-        // Suspense rule: compare each known wallet's net with the chain; post the differences.
-        List<Posting> legs = new ArrayList<>();
+        // Suspense rule: compare each known wallet's net with the chain; post the differences, each in its own book.
+        Map<LedgerBook, List<Posting>> legs = new EnumMap<>(LedgerBook.class);
         Money ledgerShown = null;
         Money chainShown = null;
         if (buyerTerminal) {
             long diff = Math.subtractExact(nets.buyerWallet(), chainBuyer);
             if (diff != 0) {
-                addLegs(legs, buyerAvailable(p.payer()), diff, p);
+                addLegs(legs, LedgerBook.BUYER, buyerAvailable(p.payer()), buyerSuspense(p.payer()), diff, p);
                 ledgerShown = money(p, nets.buyerWallet());
                 chainShown = money(p, chainBuyer);
             }
@@ -324,7 +337,7 @@ public final class ChainReconciler {
         if (p.sellerState() != SellerState.NONE) {
             long diff = Math.subtractExact(nets.sellerWallet(), chainSeller);
             if (diff != 0) {
-                addLegs(legs, sellerWallet(p.payTo()), diff, p);
+                addLegs(legs, LedgerBook.SELLER, sellerWallet(p.payTo()), sellerSuspense(p.payTo()), diff, p);
                 if (ledgerShown == null) {
                     ledgerShown = money(p, nets.sellerWallet());
                     chainShown = money(p, chainSeller);
@@ -332,7 +345,7 @@ public final class ChainReconciler {
             }
         }
 
-        JournalEntry adjustment = null;
+        List<JournalEntry> adjustments = new ArrayList<>();
         if (!legs.isEmpty()) {
             MismatchKind kind;
             if (receiptFinding != null) {
@@ -347,17 +360,18 @@ public final class ChainReconciler {
             } else {
                 kind = MismatchKind.AMOUNT_MISMATCH;
             }
-            adjustment = new JournalEntry(
-                    PaymentBook.entryId(p.paymentKey(), LedgerBook.PLATFORM, "ADJUSTMENT:" + runId),
+            // One entry per affected book (ADR-0029); EnumMap order puts the buyer's first, like ledgerShown.
+            legs.forEach((book, postings) -> adjustments.add(new JournalEntry(
+                    PaymentBook.entryId(p.paymentKey(), book, "ADJUSTMENT:" + runId),
                     p.id(),
                     p.paymentKey(),
-                    LedgerBook.PLATFORM,
+                    book,
                     EntryKind.ADJUSTMENT,
                     null,
                     null,
                     "Reconciliation: " + kind + " moved to suspense",
                     now,
-                    legs);
+                    postings)));
             Finding adjusted = receiptFinding != null
                     ? new Finding(
                             kind, receiptFinding.ledgerValue(), receiptFinding.chainValue(), reportedTx, chainTx, true)
@@ -369,7 +383,7 @@ public final class ChainReconciler {
 
         PaymentProjection next = p.withChain(chainState, chainTx != null ? chainTx : p.chainTxHash(), now);
         return new Outcome(
-                findings.isEmpty() ? ItemStatus.MATCHED : ItemStatus.MISMATCH, next, chainBlock, findings, adjustment);
+                findings.isEmpty() ? ItemStatus.MATCHED : ItemStatus.MISMATCH, next, chainBlock, findings, adjustments);
     }
 
     /**
@@ -394,22 +408,29 @@ public final class ChainReconciler {
                 p.withChain(p.chainState(), p.chainTxHash(), now),
                 null,
                 findings,
-                null);
+                List.of());
     }
 
     /**
      * {@code diff = ledger - chain}. Positive: the ledger debited the wallet more than the chain moved, so credit
-     * the wallet and debit suspense; negative: the other way round.
+     * the wallet and debit suspense; negative: the other way round. Both legs are in {@code book}, the book of the
+     * wallet that moved (ADR-0029), so the entry and that book stay balanced on their own.
      */
-    private static void addLegs(List<Posting> legs, Account wallet, long diff, PaymentProjection p) {
+    private static void addLegs(
+            Map<LedgerBook, List<Posting>> legs,
+            LedgerBook book,
+            Account wallet,
+            Account suspense,
+            long diff,
+            PaymentProjection p) {
         Money amount = money(p, diff);
-        Account suspense = suspense(amount);
+        List<Posting> postings = legs.computeIfAbsent(book, b -> new ArrayList<>());
         if (diff > 0) {
-            legs.add(Posting.debit(suspense, amount));
-            legs.add(Posting.credit(wallet, amount));
+            postings.add(Posting.debit(suspense, amount));
+            postings.add(Posting.credit(wallet, amount));
         } else {
-            legs.add(Posting.debit(wallet, amount));
-            legs.add(Posting.credit(suspense, amount));
+            postings.add(Posting.debit(wallet, amount));
+            postings.add(Posting.credit(suspense, amount));
         }
     }
 

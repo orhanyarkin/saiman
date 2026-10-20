@@ -12,9 +12,11 @@ import org.jspecify.annotations.Nullable;
  * {@code make recon-report} saves it. Never carries a nonce (the payment id stands for the authorization).
  *
  * @param status RUNNING, COMPLETED, PARTIAL (some items skipped: RPC unavailable) or FAILED (no safe block)
- * @param suspense the absolute balance of {@code platform:suspense:usdc} when the report is read
+ * @param suspense the absolute balance of every suspense account summed (ADR-0029), when the report is read
  * @param suspenseSide DEBIT when the ledger booked more than the chain moved (the usual tamper case), CREDIT for the
  *     opposite, null when the balance is zero (Money is never negative, so the sign travels separately)
+ * @param suspenseByBook the same figure per book, ordered by book: an unresolved difference belongs to the book that
+ *     owns it (ADR-0029). The retired {@code platform:suspense:usdc} appears as PLATFORM, netting to zero.
  */
 public record ReconciliationReport(
         UUID runId,
@@ -26,11 +28,24 @@ public record ReconciliationReport(
         Summary summary,
         Money suspense,
         @Nullable String suspenseSide,
+        List<BookSuspense> suspenseByBook,
         List<Item> items) {
 
     public ReconciliationReport {
         items = List.copyOf(items);
+        suspenseByBook = List.copyOf(suspenseByBook);
     }
+
+    /**
+     * One book's suspense balance (ADR-0029).
+     *
+     * @param book BUYER, SELLER or PLATFORM
+     * @param balance the absolute balance of that book's suspense accounts
+     * @param side DEBIT, CREDIT, or null when the balance is zero, like {@link #suspenseSide()}
+     */
+    @Schema(name = "ReconciliationBookSuspense")
+    public record BookSuspense(
+            String book, Money balance, @Nullable String side) {}
 
     /** Counters of the run. */
     @Schema(name = "ReconciliationCounters")

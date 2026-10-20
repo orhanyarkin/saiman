@@ -1,6 +1,7 @@
 package io.github.orhanyarkin.saiman.ledger.reconciliation;
 
 import io.github.orhanyarkin.saiman.shared.money.Money;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
@@ -41,7 +42,14 @@ public class ReconciliationReports {
     }
 
     private ReconciliationReport toReport(ReconciliationRepository.Run run) {
-        long suspense = repository.suspenseBalance(USDC_ZERO);
+        List<ReconciliationRepository.BookSuspense> balances = repository.suspenseBalances(USDC_ZERO);
+        long suspense = balances.stream()
+                .mapToLong(ReconciliationRepository.BookSuspense::signedAtomic)
+                .reduce(0, Math::addExact);
+        List<ReconciliationReport.BookSuspense> byBook = balances.stream()
+                .map(b -> new ReconciliationReport.BookSuspense(
+                        b.book(), Money.usdc(Math.absExact(b.signedAtomic())), side(b.signedAtomic())))
+                .toList();
         var items = repository.items(run.id()).stream()
                 .map(row -> new ReconciliationReport.Item(
                         row.paymentId(),
@@ -72,8 +80,14 @@ public class ReconciliationReports {
                 run.safeBlock(),
                 summary(run),
                 Money.usdc(Math.absExact(suspense)),
-                suspense > 0 ? "DEBIT" : suspense < 0 ? "CREDIT" : null,
+                side(suspense),
+                byBook,
                 items);
+    }
+
+    /** DEBIT, CREDIT or null for a zero balance; Money is never negative, so the sign travels separately. */
+    private static @Nullable String side(long signedAtomic) {
+        return signedAtomic > 0 ? "DEBIT" : signedAtomic < 0 ? "CREDIT" : null;
     }
 
     private static @Nullable Money money(@Nullable Long atomic, Money like) {

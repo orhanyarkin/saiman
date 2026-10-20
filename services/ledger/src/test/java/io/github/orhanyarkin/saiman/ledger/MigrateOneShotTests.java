@@ -14,6 +14,7 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.SpringApplication;
@@ -50,7 +51,7 @@ class MigrateOneShotTests {
                     versions.add(history.getString("version"));
                 }
             }
-            assertThat(versions).startsWith("1", "2").last().isEqualTo("8");
+            assertThat(versions).startsWith("1", "2").last().isEqualTo("10");
             // Tables are owned by the owner role, and the app_role placeholder of the service's yaml was resolved.
             try (ResultSet owner = statement.executeQuery(
                     "SELECT tableowner FROM pg_tables WHERE schemaname = 'ledger' AND tablename = 'account'")) {
@@ -62,6 +63,63 @@ class MigrateOneShotTests {
                 Statement statement = connection.createStatement();
                 ResultSet rows = statement.executeQuery("SELECT count(*) FROM ledger.account")) {
             assertThat(rows.next()).isTrue();
+        }
+    }
+
+    /**
+     * ADR-0029 verification 3 and 4 on a clean database: V9 finds no cross-book ADJUSTMENT, so it appends nothing,
+     * the whole-ledger sum is still zero, and a normal single-book ENCUMBER/SETTLE pair still commits under V10's
+     * tightened trigger.
+     */
+    @Test
+    void migrationOfACleanDatabaseAppendsNothingAndStillAcceptsNormalEntries() throws SQLException {
+        Database db = SharedContainers.newPostgresDatabase();
+
+        assertThat(DbMigrate.run(ownerArgs(db))).isZero();
+
+        try (Connection connection = DriverManager.getConnection(db.jdbcUrl(), OWNER, PASSWORD);
+                Statement statement = connection.createStatement()) {
+            assertThat(count(statement, "SELECT count(*) FROM ledger.journal_entry WHERE kind = 'REVERSAL'"))
+                    .isZero();
+            assertThat(count(statement, "SELECT count(*) FROM ledger.journal_entry WHERE kind = 'ADJUSTMENT'"))
+                    .isZero();
+
+            connection.setAutoCommit(false);
+            String payer = "0x" + "a".repeat(40);
+            statement.execute("""
+                    INSERT INTO ledger.account (code, book, type, asset, decimals, wallet) VALUES
+                        ('buyer:%1$s:wallet:available', 'BUYER', 'ASSET', 'USDC', 6, '%1$s'),
+                        ('buyer:%1$s:wallet:encumbered', 'BUYER', 'ASSET', 'USDC', 6, '%1$s'),
+                        ('buyer:%1$s:expense:data', 'BUYER', 'EXPENSE', 'USDC', 6, '%1$s')
+                    """.formatted(payer));
+            UUID encumber = UUID.randomUUID();
+            UUID settle = UUID.randomUUID();
+            statement.execute("""
+                    INSERT INTO ledger.journal_entry (id, book, kind, description, effective_at) VALUES
+                        ('%s', 'BUYER', 'ENCUMBER', 'migration test', now()),
+                        ('%s', 'BUYER', 'SETTLE', 'migration test', now())
+                    """.formatted(encumber, settle));
+            statement.execute("""
+                    INSERT INTO ledger.posting (entry_id, account_code, side, amount_atomic, asset, decimals) VALUES
+                        ('%2$s', 'buyer:%1$s:wallet:encumbered', 'DEBIT',  20000, 'USDC', 6),
+                        ('%2$s', 'buyer:%1$s:wallet:available',  'CREDIT', 20000, 'USDC', 6),
+                        ('%3$s', 'buyer:%1$s:expense:data',      'DEBIT',  20000, 'USDC', 6),
+                        ('%3$s', 'buyer:%1$s:wallet:encumbered', 'CREDIT', 20000, 'USDC', 6)
+                    """.formatted(payer, encumber, settle));
+            connection.commit();
+
+            assertThat(count(statement, "SELECT count(*) FROM ledger.posting")).isEqualTo(4);
+            // Verification 4: the whole-ledger sum stays zero.
+            assertThat(count(statement, """
+                            SELECT coalesce(sum(CASE side WHEN 'DEBIT' THEN amount_atomic ELSE -amount_atomic END), 0)
+                              FROM ledger.posting""")).isZero();
+        }
+    }
+
+    private static long count(Statement statement, String sql) throws SQLException {
+        try (ResultSet rs = statement.executeQuery(sql)) {
+            assertThat(rs.next()).isTrue();
+            return rs.getLong(1);
         }
     }
 

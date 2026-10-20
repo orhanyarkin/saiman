@@ -412,18 +412,28 @@ public class ReconciliationRepository {
                 .update();
     }
 
+    /** {@code debit - credit} of one book's suspense accounts, in atomic units of the asset asked for. */
+    public record BookSuspense(String book, long signedAtomic) {}
+
     /**
-     * {@code debit - credit} of {@code platform:suspense:usdc}, summed as {@code numeric} and clamped to
-     * {@code ±Long.MAX_VALUE}: a flood of forged mismatches must not turn the report into a 500.
+     * {@code debit - credit} of <em>every</em> suspense account of this asset, one row per book and ordered by book
+     * (ADR-0029: suspense lives in the book whose wallet moved; the retired {@code platform:suspense:usdc} still
+     * shows up, netting to zero). Summed as {@code numeric} and clamped to {@code ±Long.MAX_VALUE}: a flood of
+     * forged mismatches must not turn the report into a 500.
      */
     @Transactional(readOnly = true)
-    public long suspenseBalance(Money of) {
-        return jdbc.sql("SELECT coalesce(sum(%s), 0) FROM posting p WHERE p.account_code = :code AND p.asset = :asset"
-                        .formatted(SIGNED))
-                .param("code", ChartOfAccounts.suspense(of).code())
+    public List<BookSuspense> suspenseBalances(Money of) {
+        return jdbc.sql("""
+                        SELECT a.book, coalesce(sum(%s), 0) AS balance
+                          FROM account a
+                          LEFT JOIN posting p ON p.account_code = a.code AND p.asset = a.asset
+                         WHERE a.type = 'SUSPENSE' AND a.asset = :asset
+                         GROUP BY a.book
+                         ORDER BY a.book
+                        """.formatted(SIGNED))
                 .param("asset", of.asset())
-                .query((rs, row) -> saturated(rs.getBigDecimal(1)))
-                .single();
+                .query((rs, row) -> new BookSuspense(rs.getString("book"), saturated(rs.getBigDecimal("balance"))))
+                .list();
     }
 
     @Transactional(readOnly = true)

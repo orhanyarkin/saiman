@@ -49,10 +49,13 @@ final class ChainFixtures {
         }
 
         Books plus(@Nullable JournalEntry entry, PaymentProjection next) {
+            return plusAll(entry == null ? List.of() : List.of(entry), next);
+        }
+
+        /** The books plus every entry of a reconciliation outcome (one ADJUSTMENT per book, ADR-0029). */
+        Books plusAll(List<JournalEntry> added, PaymentProjection next) {
             List<JournalEntry> all = new ArrayList<>(entries);
-            if (entry != null) {
-                all.add(entry);
-            }
+            all.addAll(added);
             return new Books(next, all);
         }
 
