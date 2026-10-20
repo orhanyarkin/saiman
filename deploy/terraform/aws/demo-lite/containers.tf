@@ -62,6 +62,7 @@ locals {
   # 127.0.0.1 here (listed in the A3a report).
   app_env = {
     orchestrator = {
+      SAIMAN_ENVIRONMENT                                  = "aws-demo"
       SAIMAN_AUTH_READER_TOKEN_SHA256                     = var.auth_digests["reader"]
       SAIMAN_AUTH_OPERATOR_TOKEN_SHA256                   = var.auth_digests["operator"]
       X402_CLIENT_ALLOWED_PAY_TO                          = var.x402_seller_payto_address

@@ -6,6 +6,7 @@ import { SellerRevenueCard } from "@/components/ledger/revenue-view";
 import { TrialBalanceView } from "@/components/ledger/trial-balance";
 import { RunLedgerPanel } from "@/components/run/run-ledger-panel";
 import type { PaymentSummary, SellerRevenue, TrialBalanceRow } from "@/lib/api/types";
+import { UNAVAILABLE } from "@/lib/money";
 import { renderWithProviders } from "@/test/render";
 
 const usdc = (atomicUnits: number) => ({ atomicUnits, asset: "USDC", decimals: 6 });
@@ -61,7 +62,7 @@ describe("TrialBalanceView", () => {
     );
     expect(screen.getByText(/cannot verify/)).toBeInTheDocument();
     expect(screen.queryByText(/books balance/)).not.toBeInTheDocument();
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(UNAVAILABLE).length).toBeGreaterThan(0);
   });
 });
 

@@ -67,6 +67,17 @@ status always glyph + text, never colour only; `--ring`/`--muted-foreground` dar
 unit-tested in `pnpm test` (`e2e/fixture-server.test.ts`; vitest excludes only `e2e/**/*.spec.ts`).
 Proxy table is `web/proxy.ts` (ledger regex key BEFORE catch-all `/api`, pinned by `proxy.test.ts`).
 
+**UI refresh PR 2 conventions (app shell)**: status colour comes from one recipe, `@utility tone-tint`
+in `index.css` plus `[data-tone="success|warning|danger|info|neutral"]` rules that set `--tone`;
+components only write `data-tone` (`STATUS_TONE` in `lib/run-status.ts`). `color-mix(in oklab, ...)`,
+never `in oklch` (polar interpolation turns the amber tint lavender). `UNAVAILABLE` in `lib/money.ts`
+is the single no-value placeholder for every table cell, now `n/a` (not an em dash, not `none`, which
+reads as zero in a money column). The nav is a `<ul>` in a `overflow-x-auto` row at <640px: Chromium
+does NOT scroll a partly visible item into view on focus, so the list has an `onFocus` handler calling
+`scrollIntoView({ block: "nearest", inline: "nearest" })`. Active nav item styling rides TanStack
+Router's `data-status="active"` attribute (`data-[status=active]:`), which beats base utilities on
+specificity; `activeProps` stays for `aria-current` only.
+
 **Testing**: `src/test/setup.ts` imports `@testing-library/jest-dom/vitest` (not the bare
 `"@testing-library/jest-dom"` import — that resolves to the default export path whose bundled
 `jest.d.ts` reference breaks typecheck when `@types/jest` isn't installed). Query client in tests

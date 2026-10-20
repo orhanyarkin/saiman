@@ -33,6 +33,7 @@ describe("SystemCheckCard", () => {
     const body: PingResponse = {
       service: "orchestrator",
       dbTime: "2026-09-27T10:15:30.123456Z",
+      environment: "local",
       traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
     };
     vi.mocked(fetch).mockResolvedValue(
@@ -62,6 +63,8 @@ describe("SystemCheckCard", () => {
     const body: PingResponse = {
       service: "orchestrator",
       dbTime: "2026-09-27T10:15:30.123456Z",
+      // The orchestrator's deliberate default: unknown, never "local" (docs/design/ui-refresh.md).
+      environment: "",
       traceId: null,
     };
     vi.mocked(fetch).mockResolvedValue(

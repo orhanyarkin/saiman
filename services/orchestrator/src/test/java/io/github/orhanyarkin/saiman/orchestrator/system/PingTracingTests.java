@@ -72,6 +72,8 @@ class PingTracingTests {
         assertThat(body).isNotNull();
         assertThat(body.service()).isEqualTo("orchestrator");
         assertThat(body.traceId()).isEqualTo(traceId);
+        // No saiman.environment in this context: empty means "unknown", never a guessed "local".
+        assertThat(body.environment()).isEmpty();
 
         // The server span ends after the response is written, so poll briefly.
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
