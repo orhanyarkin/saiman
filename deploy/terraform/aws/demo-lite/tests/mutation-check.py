@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.path.dirname(HERE)
 LONG = "x" * 300
 
+# Anchors (old) must not contain a version, digest or date: a Dependabot image bump would break them (see image-reference-too-long).
 # (id, file, old, new, expected text from the rule's error_message; whitespace-insensitive)
 MUTATIONS = [
     ("retries-above-10", "containers.tf", "        retries     = 10\n        startPeriod = 120", "        retries     = 11\n        startPeriod = 120", "healthCheck.retries must be 1-10"),
@@ -47,7 +48,7 @@ MUTATIONS = [
     ("last-init-container-skips-a-migrator", "containers.tf", 'concat(["assets", "db-init"], [for a in keys(local.apps) : "${a}-migrate"])', 'concat(["assets", "db-init"], [for a in ["orchestrator"] : "${a}-migrate"])', "must wait for every other init container"),
     ("more-than-ten-containers", "containers.tf", "  stack_specs = merge(local.stack_fixed, local.app_specs)", "  stack_specs = merge(local.stack_fixed, local.app_specs, { extra1 = local.stack_fixed.web, extra2 = local.stack_fixed.web })", "at most 10 containers"),
     ("task-definition-over-64-kib", "containers.tf", '        KAFKA_HEAP_OPTS                                = "-Xms256m -Xmx512m"\n', '        KAFKA_HEAP_OPTS                                = "-Xms256m -Xmx512m"\n        PAD                                            = "' + "y" * 60000 + '"\n', "its container definitions must stay under 56000 bytes"),
-    ("image-reference-too-long", "containers.tf", 'nginx    = "public.ecr.aws/docker/library/nginx:1.31.0-alpine"', 'nginx    = "public.ecr.aws/docker/library/nginx:1.31.0-alpine-' + LONG + '"', "at most 255 characters"),
+    ("image-reference-too-long", "containers.tf", 'nginx    = "public.ecr.aws/docker/library/nginx:', 'nginx    = "public.ecr.aws/docker/library/nginx:' + LONG + '-', "at most 255 characters"),
     # The provider reads a task definition back without its empty lists (dependsOn, environment, ...); a mock echoes the input.
     # The tests carry every container once more as `*_as_returned` (empty values dropped) to catch rules that assume a key.
     ("dep-graph-assumes-depends-on", "ecs.tf", "[for d in try(c.dependsOn, []) : d.containerName]", "[for d in c.dependsOn : d.containerName]", 'does not have an attribute named "dependsOn"'),
