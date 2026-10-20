@@ -254,10 +254,31 @@ status badges from the fixed set, designed empty states.
   while the control query matched 28 of 28 buyer-booked payments, so the join is sound. They came
   from a client that paid seller-api directly, almost certainly the console buyer. Label them
   "Direct client, not from a run", not "Nothing booked yet", which implies something is pending.
-- **Long ids break mid-word.** The ledger account code wraps as `wallet:av/ailable` and the
-  reconciliation payer breaks arbitrarily. Use the shared `Address` component PR 4 builds rather
-  than a second truncation rule, and stop mid-word breaking on identifier columns. An account code
-  is not an address, so it needs its own treatment: break on the `:` separators, not mid-word.
+- **Long ids break mid-word.** The reconciliation payer breaks arbitrarily; use the shared
+  `Address` component PR 4 builds rather than a second truncation rule.
+- **A ledger account code is not an address**, so it does not get truncated whole. Two options were
+  mocked with the real codes and the ink tokens, in `build/ui-shots/pr5-account-options/`
+  (`desktop/option-a.png`, `desktop/option-b.png` and the same two under `mobile/`):
+
+  **(a) Keep the structure, shorten the address segment:** `buyer:0xdd54…4795:wallet:available`,
+  breaking only on the colons, full code in `title` and a copy button.
+
+  **(b) Group by counterparty inside the book:** the header names it once, `Buyer 0xdd54…4795`
+  through the `Address` component with its copy button, and each row carries only the leaf
+  (`wallet:available`, `wallet:encumbered`, `expense:data`).
+
+  Desktop shows the trade clearly: (a) repeats the same twenty characters on every row and the
+  Account column stays wide; (b) collapses it, and the eye compares leaves directly. **Mobile
+  decides it.** At 390px (a) needs four to five lines per account, and the longest leaf
+  (`liability:customer-credits`) does not fit a line at all. One honest caveat about the mock: it
+  used `overflow-wrap: anywhere`, so it broke mid-word rather than only at the colons as (a)
+  specifies. Implemented faithfully (a) would still need about three lines per row at that width,
+  because the prefix plus the longest segment exceeds it; the mock overstates how ugly it is, not
+  whether it fits.
+
+  Open question for (b): a book with more than one counterparty needs one group per counterparty,
+  which is fine and arguably clearer, and a group with no counterparty (the retired `platform` book)
+  needs a header without an address.
 
 ### PR 6: consistency pass
 
