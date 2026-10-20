@@ -124,6 +124,9 @@
             "format" : "date-time",
             "type" : "string"
           },
+          "environment" : {
+            "type" : "string"
+          },
           "service" : {
             "type" : "string"
           },
@@ -131,7 +134,7 @@
             "type" : [ "string", "null" ]
           }
         },
-        "required" : [ "dbTime", "service" ],
+        "required" : [ "dbTime", "environment", "service" ],
         "type" : "object"
       },
       "ProblemDetail" : {

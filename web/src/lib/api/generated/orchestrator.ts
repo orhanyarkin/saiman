@@ -214,6 +214,7 @@ export interface components {
         PingResponse: {
             /** Format: date-time */
             dbTime: string;
+            environment: string;
             service: string;
             traceId?: string | null;
         };
