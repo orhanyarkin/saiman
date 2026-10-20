@@ -61,6 +61,14 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # The collector publishes per-architecture tags next to the multi-arch index: 0.162.0-386,
+      # -amd64, -arm64, -armv7, -ppc64le, -riscv64, -s390x, -windows-2022-amd64, -nightly.<sha>.
+      # Dependabot reads such a suffix as a higher version than the plain tag and proposed
+      # 0.162.0-386 - a 32-bit x86 image, which cannot run on the Fargate ARM64 task. Ignoring one
+      # tag only promotes the next suffix, and Docker ignores take Bundler version syntax with no
+      # wildcard for tag suffixes, so this image is reviewed by hand (with the majors, see above):
+      # bump it in docker-compose.yml and in demo-lite/containers.tf (index digest) together.
+      - dependency-name: "otel/opentelemetry-collector"
 
   # Terraform provider versions of the AWS stacks (ADR-0028). Provider majors by hand.
   - package-ecosystem: terraform
