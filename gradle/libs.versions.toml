@@ -1,18 +1,18 @@
 [versions]
-spring-boot = "4.1.1"
-spring-ai = "2.0.1"                # BOM applied per module (ingest, model-router, seller-api); no Boot starters: the router builds the OpenAI models by hand (ADR-0011)
+spring-boot = "4.1.2"
+spring-ai = "2.0.2"                # BOM applied per module (ingest, model-router, seller-api); no Boot starters: the router builds the OpenAI models by hand (ADR-0011)
 spotless = "8.10.4"
 palantir-java-format = "2.99.0"    # >= 2.71 required on JDK 25
-errorprone = "2.50.0"
+errorprone = "2.51.0"
 errorprone-plugin = "5.1.1"
-nullaway = "0.14.2"
+nullaway = "0.14.3"
 datasource-micrometer = "2.3.0"    # 2.x line targets Spring Boot 4
 web3j = "6.0.0"                    # crypto module only (secp256k1, EIP-712); Jackson 3 (ADR-0008)
 bouncycastle = "1.86"               # pinned above web3j's 1.80 (CVE fixes in >= 1.85); published in the starter POM
 jsoup = "1.23.2"                   # HTML -> text for KAP disclosure bodies (ADR-0010)
 resilience4j = "2.4.0"             # core modules only; wired programmatically, no Spring integration module
 springdoc = "3.1.1"                # OpenAPI document for the dashboard contract (ADR-0022): api-docs only, no UI, disabled at runtime
-spring-modulith = "2.1.1"          # built against Boot 4.1.1 / Spring Kafka 4.1.1; event publication registry + Kafka externalization (ADR-0016)
+spring-modulith = "2.1.2"          # built against Boot 4.1.1 / Spring Kafka 4.1.1; event publication registry + Kafka externalization (ADR-0016)
 
 [libraries]
 spring-boot-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
