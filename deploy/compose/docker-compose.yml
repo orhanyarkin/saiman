@@ -144,7 +144,7 @@ services:
       start_period: 20s
 
   redis:
-    image: redis:8.10.2-alpine
+    image: redis:8.10.3-alpine
     restart: unless-stopped
     ports:
       # Defaults to 16380 because 6379 and 16379 clash with a native Redis on Windows;
@@ -455,7 +455,7 @@ services:
   # backends on one origin. No environment, secrets or env_file; scripts/check-compose-policy.sh
   # and scripts/check-nginx-conf.sh pin that. `make up` builds web/dist first (make web-build).
   web:
-    image: nginx:1.31.7-alpine
+    image: nginx:1.31.8-alpine
     profiles: ["apps"]
     restart: unless-stopped
     ports:
