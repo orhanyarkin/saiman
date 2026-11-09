@@ -144,7 +144,7 @@ services:
       start_period: 20s
 
   redis:
-    image: redis:8.10.2-alpine
+    image: redis:8.10.3-alpine
     restart: unless-stopped
     ports:
       # Defaults to 16380 because 6379 and 16379 clash with a native Redis on Windows;
@@ -175,7 +175,7 @@ services:
     # (ADR-0007 R8 applies to the collector too). `make infra-up` waits for it as "running".
 
   jaeger:
-    image: jaegertracing/jaeger:2.22.0
+    image: jaegertracing/jaeger:2.23.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:16686:16686"
